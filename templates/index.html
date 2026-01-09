@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlightLog</title>
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+
+<body>
+
+    <!-- Header / Toolbar -->
+    <header class="navbar">
+        <div class="navbar-left">
+            <div class="nav-item active" onclick="navigateTo('profile')">Profile</div>
+            <div class="nav-item" onclick="navigateTo('flights')">Flights</div>
+            <div class="nav-item" onclick="navigateTo('datasets')">Other Datasets</div>
+        </div>
+        <div class="navbar-right">
+            <button class="btn btn-primary" onclick="openAddFlightModal()">
+                <i class="fa-solid fa-plus"></i> Add flight
+            </button>
+            <button class="btn btn-icon">
+                <i class="fa-solid fa-wrench"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main id="app-container">
+        <!-- Views will be injected here -->
+
+        <!-- Profile View -->
+        <section id="view-profile" class="view active">
+            <div class="map-container">
+                <div id="flight-map"></div>
+                <div class="map-controls">
+                    <button onclick="setMapLayer('map')">Map</button>
+                    <button onclick="setMapLayer('satellite')">Satellite</button>
+                </div>
+            </div>
+            <div class="stats-container">
+                <div class="stat-card">
+                    <h2>...</h2>
+                    <p>Fetching Stats...</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Flights View -->
+        <section id="view-flights" class="view" style="display: none;">
+            <div class="container">
+                <h2>Flight History</h2>
+                <div class="table-responsive">
+                    <table class="flight-table" id="flights-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Flight</th>
+                                <th>Reg</th>
+                                <th>From</th>
+                                <th>To</th>
+                                <th>Dep</th>
+                                <th>Arr</th>
+                                <th>Airline</th>
+                                <th>Aircraft</th>
+                                <th>Seat</th>
+                                <th>Note</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Flights rows -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Datasets View -->
+        <section id="view-datasets" class="view" style="display: none;">
+            <div class="container">
+                <div class="tabs">
+                    <button class="tab-btn active" onclick="switchDatasetTab('cities')">Cities</button>
+                    <button class="tab-btn" onclick="switchDatasetTab('airports')">Airports</button>
+                    <button class="tab-btn" onclick="switchDatasetTab('airlines')">Airlines</button>
+                    <button class="tab-btn" onclick="switchDatasetTab('aircraft')">Aircraft</button>
+                </div>
+
+                <div class="dataset-content">
+                    <div class="toolbar"
+                        style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center; justify-content: space-between;">
+                        <div style="display:flex; gap:10px;">
+                            <button class="btn btn-sm btn-secondary" onclick="openAddDatasetModal()">Add New</button>
+                            <button class="btn btn-sm btn-secondary" onclick="openImportModal()">
+                                <i class="fa-solid fa-file-upload"></i> Import CSV
+                            </button>
+                        </div>
+                        <div class="search-box">
+                            <input type="text" id="dataset-search" placeholder="Filter..." onkeyup="filterDataset()"
+                                style="padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
+                        </div>
+                    </div>
+                    <table class="data-table" id="dataset-table">
+                        <!-- Dynamic columns and rows -->
+                    </table>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Modals -->
+    <div id="modal-container" class="modal-overlay" style="display: none;">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="modal-title">Title</h3>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body">
+                <!-- Dynamic Form -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-text" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-primary" id="modal-save-btn">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+
+</html>
