@@ -9,11 +9,13 @@ const DATASETS = {
         columns: [
             { key: 'name', label: 'Name' },
             { key: 'country', label: 'Country' },
+            { key: 'country_code', label: 'Code' },
             { key: 'timezone', label: 'Timezone' }
         ],
         fields: [
             { key: 'name', label: 'Name', type: 'text' },
             { key: 'country', label: 'Country', type: 'text' },
+            { key: 'country_code', label: 'Country Code', type: 'text', placeholder: 'e.g. US' },
             { key: 'timezone', label: 'Timezone', type: 'text' }
         ]
     },
@@ -24,7 +26,10 @@ const DATASETS = {
             { key: 'name', label: 'Name' },
             { key: 'iata_code', label: 'IATA' },
             { key: 'icao_code', label: 'ICAO' },
-            { key: 'city_id', label: 'City', type: 'lookup', lookup: 'cities', display: 'name' }
+            { key: 'city_id', label: 'City', type: 'lookup', lookup: 'cities', display: 'name' },
+            { key: 'lat', label: 'Lat' },
+            { key: 'lon', label: 'Lon' },
+            { key: 'terminals', label: 'Terminals' }
         ],
         fields: [
             { key: 'name', label: 'Name', type: 'text' },
@@ -217,6 +222,36 @@ async function loadDataset(datasetKey) {
     State.sort = { key: null, dir: 'asc' };
     document.getElementById('dataset-search').value = '';
 
+    // --- Dynamic Toolbar Buttons ---
+    const dynamicContainer = document.getElementById('dataset-dynamic-actions');
+    if (dynamicContainer) {
+        dynamicContainer.innerHTML = '';
+        if (datasetKey === 'airports') {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-sm btn-info';
+            btn.innerHTML = '<i class="fas fa-magic"></i> Auto-Fill';
+            btn.onclick = async () => {
+                if (!confirm('Auto-fill missing ICAO/City data for airports?')) return;
+                const res = await API.post('airports/batch_update', {});
+                alert(res.message || res.error);
+                loadDataset('airports');
+            };
+            dynamicContainer.appendChild(btn);
+        }
+        if (datasetKey === 'cities') {
+            const btn = document.createElement('button');
+            btn.className = 'btn btn-sm btn-info';
+            btn.innerHTML = '<i class="fas fa-magic"></i> Auto-Fill Codes';
+            btn.onclick = async () => {
+                if (!confirm('Auto-fill missing Country Codes?')) return;
+                const res = await API.post('cities/batch_update', {});
+                alert(res.message || res.error);
+                loadDataset('cities');
+            };
+            dynamicContainer.appendChild(btn);
+        }
+    }
+
     renderDatasetTable(config, data);
 }
 
@@ -342,6 +377,36 @@ function renderDatasetTable(config, data) {
 
         // Actions
         const tdAction = document.createElement('td');
+
+        // Single Update Buttons
+        if (State.currentDataset === 'airports') {
+            const upBtn = document.createElement('button');
+            upBtn.className = 'btn-icon';
+            upBtn.innerHTML = '<i class="fas fa-sync"></i>';
+            upBtn.title = 'Update Data';
+            upBtn.onclick = async (e) => {
+                e.stopPropagation();
+                if (!confirm('Update this airport?')) return;
+                const res = await API.post(`airports/${item.id}/update`, {});
+                if (res.error) alert(res.error);
+                else { alert(res.message); loadDataset('airports'); }
+            };
+            tdAction.appendChild(upBtn);
+        }
+        if (State.currentDataset === 'cities') {
+            const upBtn = document.createElement('button');
+            upBtn.className = 'btn-icon';
+            upBtn.innerHTML = '<i class="fas fa-sync"></i>';
+            upBtn.title = 'Update Data';
+            upBtn.onclick = async (e) => {
+                e.stopPropagation();
+                const res = await API.post(`cities/${item.id}/update`, {});
+                if (res.error) alert(res.error);
+                else { loadDataset('cities'); }
+            };
+            tdAction.appendChild(upBtn);
+        }
+
         const btnEdit = document.createElement('button');
         btnEdit.className = 'btn btn-sm btn-icon';
         btnEdit.innerHTML = '<i class="fa-solid fa-pen"></i>';

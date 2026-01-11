@@ -100,7 +100,7 @@ def create_crud_routes(endpoint, table_name, columns):
 # --- Define Entities ---
 # Schema columns for validation (excluding id)
 # Schema columns for validation (excluding id)
-cities_cols = ['name', 'country', 'timezone']
+cities_cols = ['name', 'country', 'country_code', 'timezone']
 airports_cols = ['name', 'iata_code', 'icao_code', 'city_id', 'lat', 'lon', 'terminals']
 airlines_cols = ['name', 'iata_code', 'icao_code', 'frequent_flyer_program', 'frequent_flyer_id']
 aircraft_cols = ['name', 'manufacturer', 'model', 'series', 'subtype', 'generation', 'engine_type', 'winglets',
@@ -117,6 +117,12 @@ def migrate_schema():
     try:
         conn = database.get_db()
         
+        # Cities
+        cur = conn.execute("PRAGMA table_info(cities)")
+        cities_cols_db = [row[1] for row in cur.fetchall()]
+        if 'country_code' not in cities_cols_db:
+             conn.execute("ALTER TABLE cities ADD COLUMN country_code TEXT")
+
         # Airlines
         cur = conn.execute("PRAGMA table_info(airlines)")
         airlines_cols_db = [row[1] for row in cur.fetchall()]
@@ -260,6 +266,7 @@ def import_csv(table_name):
             'cities': {
                 'name': ['name', 'city', 'city_name'],
                 'country': ['country', 'nation'],
+                'country_code': ['code', 'country_code', 'iso_code'],
                 'timezone': ['timezone', 'tz']
             },
             'airports': {
@@ -465,6 +472,153 @@ def get_flights_detailed():
         
     conn.close()
     return jsonify(flights)
+
+# --- Automation Logic ---
+import airportsdata
+import pycountry
+
+def _update_airport_logic(id, conn):
+    """Helper to update single airport."""
+    updated_fields = []
+    # Use row_factory or index carefully. Schema: id=0, name=1, iata=2, icao=3, city_id=4, lat=5, lon=6
+    cur = conn.execute("SELECT * FROM airports WHERE id = ?", (id,))
+    row = cur.fetchone()
+    if not row: return False, "Not found"
+    
+    iata = row[2] 
+    if not iata or len(iata) != 3: return False, "Invalid IATA"
+
+    airports = airportsdata.load('IATA')
+    data = airports.get(iata)
+    if not data: return False, "No data found for IATA"
+
+    # 1. Update ICAO, Lat, Lon
+    new_icao = data.get('icao', '')
+    new_lat = data.get('lat')
+    new_lon = data.get('lon')
+    
+    conn.execute("UPDATE airports SET icao_code = ?, lat = ?, lon = ? WHERE id = ?", 
+                    (new_icao, new_lat, new_lon, id))
+    updated_fields.extend(['icao_code', 'lat', 'lon'])
+
+    # 2. Match City
+    current_city_id = row[4]
+    
+    # We update city if missing
+    if not current_city_id:
+        city_name = data.get('city')
+        country_code = data.get('country') 
+        tz = data.get('tz')
+
+        # Find City Logic: Strict Match (Name + Code)
+        cur = conn.execute("SELECT id FROM cities WHERE name = ? AND country_code = ?", (city_name, country_code))
+        res = cur.fetchone()
+        
+        city_id = None
+        if res:
+            city_id = res[0]
+        else:
+            # Fallback: Check Legacy (Name match, Code Null) -> Update it
+            cur = conn.execute("SELECT id, country_code FROM cities WHERE name = ?", (city_name,))
+            matches = cur.fetchall()
+            if len(matches) == 1 and not matches[0][1]:
+                # Legacy Update
+                city_id = matches[0][0]
+                conn.execute("UPDATE cities SET country_code = ?, timezone = ? WHERE id = ?", (country_code, tz, city_id))
+            else:
+                # Create New
+                conn.execute("INSERT INTO cities (name, country, country_code, timezone) VALUES (?, ?, ?, ?)",
+                            (city_name, country_code, country_code, tz))
+                city_id = cur.lastrowid
+        
+        conn.execute("UPDATE airports SET city_id = ? WHERE id = ?", (city_id, id))
+        updated_fields.append('city_id')
+    
+    return True, updated_fields
+
+# --- API Routes for Automation ---
+@app.route('/api/airports/<int:id>/update', methods=['POST'])
+def update_airport(id):
+    try:
+        conn = database.get_db()
+        success, res = _update_airport_logic(id, conn)
+        conn.commit()
+        conn.close()
+        if success: return jsonify({'message': 'Updated', 'fields': res})
+        else: return jsonify({'error': res}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/airports/batch_update', methods=['POST'])
+def batch_update_airports():
+    try:
+        conn = database.get_db()
+        cur = conn.execute("SELECT id FROM airports WHERE (icao_code IS NULL OR icao_code = '') OR city_id IS NULL")
+        ids = [row[0] for row in cur.fetchall()]
+        
+        count = 0
+        for aid in ids:
+            success, _ = _update_airport_logic(aid, conn)
+            if success: count += 1
+            
+        conn.commit()
+        conn.close()
+        return jsonify({'message': f'Processed {len(ids)} airports, Updated {count}.'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/cities/<int:id>/update', methods=['POST'])
+def update_city(id):
+    try:
+        conn = database.get_db()
+        cur = conn.execute("SELECT name, country FROM cities WHERE id = ?", (id,))
+        row = cur.fetchone()
+        if not row: return jsonify({'error': 'City not found'}), 404
+        
+        city_name, country_name = row
+        if not country_name: return jsonify({'error': 'Country name missing'}), 400
+
+        try:
+            countries = pycountry.countries.search_fuzzy(country_name)
+            if countries:
+                code = countries[0].alpha_2
+                conn.execute("UPDATE cities SET country_code = ? WHERE id = ?", (code, id))
+                conn.commit()
+                conn.close()
+                return jsonify({'message': 'Updated', 'code': code})
+            else:
+                 conn.close()
+                 return jsonify({'error': 'Country not found'}), 404
+        except LookupError:
+             conn.close()
+             return jsonify({'error': 'Lookup failed'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/cities/batch_update', methods=['POST'])
+def batch_update_cities():
+    try:
+        conn = database.get_db()
+        cur = conn.execute("SELECT id, country FROM cities WHERE country_code IS NULL OR country_code = ''")
+        rows = cur.fetchall()
+        
+        count = 0
+        for id, country_name in rows:
+            if not country_name: continue
+            try:
+                countries = pycountry.countries.search_fuzzy(country_name)
+                if countries:
+                    code = countries[0].alpha_2
+                    conn.execute("UPDATE cities SET country_code = ? WHERE id = ?", (code, id))
+                    count += 1
+            except:
+                continue
+                
+        conn.commit()
+        conn.close()
+        return jsonify({'message': f'Updated {count} cities.'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     # Initialize DB (safe to run multiple times)
