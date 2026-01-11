@@ -32,7 +32,8 @@ const DATASETS = {
             { key: 'icao_code', label: 'ICAO Code', type: 'text' },
             { key: 'city_id', label: 'City', type: 'select', lookup: 'cities', display: 'name' },
             { key: 'lat', label: 'Latitude', type: 'number', step: 'any' },
-            { key: 'lon', label: 'Longitude', type: 'number', step: 'any' }
+            { key: 'lon', label: 'Longitude', type: 'number', step: 'any' },
+            { key: 'terminals', label: 'Terminals (comma separated)', type: 'text', placeholder: 'e.g. T1, T2, T3' }
         ]
     },
     airlines: {
@@ -40,12 +41,17 @@ const DATASETS = {
         endpoint: 'airlines',
         columns: [
             { key: 'name', label: 'Name' },
-            { key: 'iata_code', label: 'IATA' }
+            { key: 'iata_code', label: 'IATA' },
+            { key: 'icao_code', label: 'ICAO' },
+            { key: 'frequent_flyer_program', label: 'FF Program' },
+            { key: 'frequent_flyer_id', label: 'FF ID' }
         ],
         fields: [
-            { key: 'name', label: 'Name', type: 'text' },
-            { key: 'iata_code', label: 'IATA Code', type: 'text' },
-            { key: 'frequent_flyer_program', label: 'FF Program', type: 'text' }
+            { key: 'name', label: 'Name', type: 'text', required: true },
+            { key: 'iata_code', label: 'IATA Code', type: 'text', required: false },
+            { key: 'icao_code', label: 'ICAO Code', type: 'text', required: false },
+            { key: 'frequent_flyer_program', label: 'FF Program', type: 'text', required: false },
+            { key: 'frequent_flyer_id', label: 'FF ID (Member No.)', type: 'text', required: false }
         ]
     },
     aircraft_models: {
@@ -53,17 +59,24 @@ const DATASETS = {
         endpoint: 'aircraft_models',
         columns: [
             { key: 'manufacturer', label: 'Manufacturer' },
+            { key: 'name', label: 'ID (Name)' },
             { key: 'model', label: 'Model' },
-            { key: 'series', label: 'Series' }
+            { key: 'series', label: 'Series' },
+            { key: 'subtype', label: 'Subtype' },
+            // Variant Defs
+            { key: 'tags_generation', label: 'Gen Options' },
+            { key: 'tags_winglets', label: 'Winglet Options' },
+            { key: 'tags_config', label: 'Config Options' }
         ],
         fields: [
             { key: 'manufacturer', label: 'Manufacturer', type: 'text' },
             { key: 'model', label: 'Model', type: 'text' },
             { key: 'series', label: 'Series', type: 'text' },
             { key: 'subtype', label: 'Subtype', type: 'text' },
-            { key: 'generation', label: 'Generation', type: 'text' },
-            { key: 'engine_type', label: 'Engine Type', type: 'text' },
-            { key: 'winglets', label: 'Winglets', type: 'text' }
+            // Variant Options: Comma separated list of allowable values
+            { key: 'tags_generation', label: 'Generation Options', type: 'text', placeholder: 'e.g. ceo, neo, NG, MAX' },
+            { key: 'tags_winglets', label: 'Winglet Options', type: 'text', placeholder: 'e.g. Sharklets, Scimitar, None' },
+            { key: 'tags_config', label: 'Config Options', type: 'text', placeholder: 'e.g. C28Y150, High Density' }
         ]
     }
 };
@@ -171,6 +184,9 @@ function setMapLayer(type) {
 // --- Data Loading & Rendering ---
 
 async function loadDataset(datasetKey) {
+    // Normalize keys
+    if (datasetKey === 'aircraft') datasetKey = 'aircraft_models';
+
     State.currentDataset = datasetKey;
 
     // Update Tabs
@@ -180,7 +196,6 @@ async function loadDataset(datasetKey) {
     if (datasetKey === 'cities') tabs[0].classList.add('active');
     if (datasetKey === 'airports') tabs[1].classList.add('active');
     if (datasetKey === 'airlines') tabs[2].classList.add('active');
-    if (datasetKey === 'aircraft') datasetKey = 'aircraft_models'; // handle mismatch
     if (datasetKey === 'aircraft_models') tabs[3].classList.add('active');
 
     const config = DATASETS[datasetKey];
@@ -213,6 +228,28 @@ function filterDataset() {
     State.filter = document.getElementById('dataset-search').value.toLowerCase();
     const config = DATASETS[State.currentDataset];
     renderDatasetTable(config, State.cache[State.currentDataset]);
+}
+
+async function clearCurrentDataset() {
+    const config = DATASETS[State.currentDataset];
+    if (!confirm(`WARNING: Are you sure you want to DELETE ALL records from ${config.label}?\nThis action cannot be undone.`)) return;
+
+    // Double confirmation
+    if (!confirm(`Really clear all ${config.label}?`)) return;
+
+    try {
+        const res = await fetch(`${API_BASE}/clear/${config.endpoint}`, { method: 'DELETE' });
+        const json = await res.json();
+
+        if (json.error) {
+            alert('Error: ' + json.error);
+        } else {
+            alert(json.message);
+            loadDataset(State.currentDataset); // Refresh
+        }
+    } catch (e) {
+        alert('Failed: ' + e);
+    }
 }
 
 function sortDataset(key) {
@@ -362,6 +399,11 @@ async function openAddDatasetModal() {
     if (State.currentDataset === 'airports' && !State.cache.cities) State.cache.cities = await API.get('cities');
 
     openModal(`Add ${config.label}`, () => createForm(config.fields), async (data) => {
+        // Auto-Generate Name for Aircraft
+        if (State.currentDataset === 'aircraft_models') {
+            const suffix = (data.subtype && data.subtype.trim()) ? data.subtype : data.series;
+            data.name = `${data.model}-${suffix}`;
+        }
         await API.post(config.endpoint, data);
         loadDataset(State.currentDataset); // Refresh
     });
@@ -373,6 +415,11 @@ async function openEditDatasetModal(item) {
     if (State.currentDataset === 'airports' && !State.cache.cities) State.cache.cities = await API.get('cities');
 
     openModal(`Edit ${config.label}`, () => createForm(config.fields, item), async (data) => {
+        // Auto-Generate Name for Aircraft
+        if (State.currentDataset === 'aircraft_models') {
+            const suffix = (data.subtype && data.subtype.trim()) ? data.subtype : data.series;
+            data.name = `${data.model}-${suffix}`;
+        }
         await API.put(config.endpoint, item.id, data);
         loadDataset(State.currentDataset); // Refresh
     });
@@ -382,9 +429,15 @@ function openImportModal() {
     const config = DATASETS[State.currentDataset];
     const contentFn = () => {
         const div = document.createElement('div');
+        // Smart linking messages
+        let extraHint = '';
+        if (config.endpoint === 'airports') extraHint = '<br><strong>Tip:</strong> You can use "city" or "city_name" instead of city_id.';
+        if (config.endpoint === 'flights') extraHint = '<br><strong>Tip:</strong> Use codes (origin_code, dest_code, airline_iata) instead of IDs.';
+
         div.innerHTML = `
             <p>Select a CSV file to import into <strong>${config.label}</strong>.</p>
-            <p><small>Ensure headers match: ${config.fields.map(f => f.key).join(', ')}</small></p>
+            <p><small>Base headers: ${config.fields.map(f => f.key).join(', ')}</small>
+            <span style="color:#666; font-size:0.9em;">${extraHint}</span></p>
             <div class="form-group">
                 <input type="file" name="file" accept=".csv" required>
             </div>
@@ -440,18 +493,34 @@ function createForm(fields, values = {}) {
         grp.appendChild(label);
 
         let input;
-        if (field.type === 'select' && field.lookup) {
+        if (field.type === 'select') {
             input = document.createElement('select');
             input.name = field.key;
-            // Add options
-            const lookupData = State.cache[field.lookup] || [];
-            lookupData.forEach(opt => {
-                const option = document.createElement('option');
-                option.value = opt.id;
-                option.textContent = opt[field.display];
-                if (values[field.key] == opt.id) option.selected = true; // weak equal for string/int match
-                input.appendChild(option);
-            });
+
+            // Add Default Option
+            const defOpt = document.createElement('option');
+            defOpt.value = "";
+            defOpt.textContent = "-- Select --";
+            input.appendChild(defOpt);
+
+            if (field.lookup) {
+                const lookupData = State.cache[field.lookup] || [];
+                lookupData.forEach(opt => {
+                    const option = document.createElement('option');
+                    option.value = opt.id;
+                    option.textContent = opt[field.display];
+                    if (values[field.key] == opt.id) option.selected = true;
+                    input.appendChild(option);
+                });
+            } else if (field.options) {
+                field.options.forEach(opt => {
+                    const option = document.createElement('option');
+                    option.value = opt.value || opt;
+                    option.textContent = opt.label || opt;
+                    if (values[field.key] == option.value) option.selected = true;
+                    input.appendChild(option);
+                });
+            }
         } else {
             input = document.createElement('input');
             input.type = field.type;
@@ -485,8 +554,8 @@ async function loadFlights() {
             <td>${f.date}</td>
             <td>${f.flight_number}</td>
             <td>Unknown Reg</td> <!-- TODO: Add Reg to schema/lookup if exists -->
-            <td>${f.origin_code}</td>
-            <td>${f.dest_code}</td>
+            <td>${f.origin_code} <small class="text-muted">${f.origin_terminal ? `(${f.origin_terminal})` : ''}</small></td>
+            <td>${f.dest_code} <small class="text-muted">${f.dest_terminal ? `(${f.dest_terminal})` : ''}</small></td>
             <td>${f.dep_time_scheduled || '-'}</td>
             <td>${f.arr_time_scheduled || '-'}</td>
             <td>${f.airline_name}</td>
@@ -521,21 +590,137 @@ async function openAddFlightModal() {
     State.cache.models = aircraft; // mismatched key, let's just make custom form or align keys
 
     const flightFields = [
-        { key: 'date', label: 'Date', type: 'date' },
         { key: 'flight_number', label: 'Flight Number', type: 'text' },
-        { key: 'origin_airport_id', label: 'Origin', type: 'select', lookup: 'airports', display: 'iata_code' }, // Displaying IATA for now
-        { key: 'dest_airport_id', label: 'Destination', type: 'select', lookup: 'airports', display: 'iata_code' },
+        { key: 'registration', label: 'Aircraft Reg', type: 'text', placeholder: 'e.g. B-1234' },
+
+        { key: 'origin_airport_id', label: 'Origin', type: 'select', lookup: 'airports', display: 'name' },
+        { key: 'origin_terminal', label: 'Origin Terminal', type: 'select', options: [] }, // Dynamic
+        { key: 'dest_airport_id', label: 'Destination', type: 'select', lookup: 'airports', display: 'name' },
+        { key: 'dest_terminal', label: 'Dest Terminal', type: 'select', options: [] }, // Dynamic
+
+        // Date & Times (ISO Datetime)
+        { key: 'std', label: 'Sched Departure', type: 'datetime-local' }, // Timezone hint via label?
+        { key: 'atd', label: 'Actual Departure', type: 'datetime-local' },
+        { key: 'sta', label: 'Sched Arrival', type: 'datetime-local' },
+        { key: 'ata', label: 'Actual Arrival', type: 'datetime-local' },
+
+        { key: 'distance', label: 'Distance', type: 'number', placeholder: 'km/mi' },
+        { key: 'duration_scheduled', label: 'Sched Duration (min)', type: 'number' },
+        { key: 'duration_actual', label: 'Actual Duration (min)', type: 'number' },
+
         { key: 'airline_id', label: 'Airline', type: 'select', lookup: 'airlines', display: 'name' },
-        { key: 'aircraft_model_id', label: 'Aircraft', type: 'select', lookup: 'models', display: 'model' },
+        { key: 'aircraft_model_id', label: 'Aircraft', type: 'select', lookup: 'models', display: 'name' }, // Using Name ID
+
+        // Dynamic Variant Selects
+        { key: 'tag_generation', label: 'Generation', type: 'select', options: [] },
+        { key: 'tag_winglets', label: 'Winglets', type: 'select', options: [] },
+        { key: 'tag_config', label: 'Config', type: 'select', options: [] },
+
         { key: 'seat_number', label: 'Seat', type: 'text' },
-        { key: 'flight_class', label: 'Class', type: 'text' }
+        { key: 'flight_class', label: 'Class', type: 'text' },
+        { key: 'note', label: 'Note', type: 'textarea' }
     ];
 
     // Hack: manually fix the lookup in createForm to look at the right cache key
-    // or just copy keys to match lookup
     State.cache.models = aircraft;
 
-    openModal('Add Flight', () => createForm(flightFields), async (data) => {
+    openModal('Add Flight', () => {
+        const form = createForm(flightFields);
+
+        // --- Airport Terminal & Timezone Logic ---
+        const originSelect = form.querySelector('[name="origin_airport_id"]');
+        const destSelect = form.querySelector('[name="dest_airport_id"]');
+        const originTermSelect = form.querySelector('[name="origin_terminal"]');
+        const destTermSelect = form.querySelector('[name="dest_terminal"]');
+
+        // Helper to find timezone
+        const getTz = (airportId) => {
+            const airport = airports.find(a => a.id == airportId);
+            if (airport && airport.city_id && State.cache.cities) {
+                const city = State.cache.cities.find(c => c.id == airport.city_id);
+                return city ? city.timezone : '';
+            }
+            return '';
+        };
+
+        const updateAirportInfo = (airportId, terminalSelect, labelPrefix) => {
+            // Update Terminals
+            terminalSelect.innerHTML = '<option value="">-- Select --</option>';
+            const airport = airports.find(a => a.id == airportId);
+            if (airport && airport.terminals) {
+                const terms = airport.terminals.split(',').map(t => t.trim());
+                if (terms.length > 0) {
+                    terms.forEach(t => {
+                        const opt = document.createElement('option');
+                        opt.value = t;
+                        opt.textContent = t;
+                        terminalSelect.appendChild(opt);
+                    });
+                }
+            }
+
+            // update timezone label hint
+            const tz = getTz(airportId);
+            if (tz) {
+                // Find label for this SELECT and append TZ
+                // Simplified: just log or alert for now, or updating label text?
+                // Better: Update the label of the "Sched Departure" / "Sched Arrival" inputs to include TZ
+                if (labelPrefix === 'Origin') {
+                    const l1 = form.querySelector('label[for="std"]'); // form generator might not set ids match keys exactly without looping
+                    // Our createForm helper creates labels? 
+                    // Let's just assume we can find fields. 
+                    // Actually, let's just use a floating info span if possible, or update the label directly if we can find it.
+                    // For now, let's just store it or use a simple alert/console. 
+                    // A proper way is to modify the label text: "Sched Departure (UTC+8)"
+                    const stdLabel = Array.from(form.querySelectorAll('label')).find(l => l.innerText.includes('Sched Departure'));
+                    if (stdLabel) stdLabel.innerText = `Sched Departure (${tz})`;
+                    const atdLabel = Array.from(form.querySelectorAll('label')).find(l => l.innerText.includes('Actual Departure'));
+                    if (atdLabel) atdLabel.innerText = `Actual Departure (${tz})`;
+                } else {
+                    const staLabel = Array.from(form.querySelectorAll('label')).find(l => l.innerText.includes('Sched Arrival'));
+                    if (staLabel) staLabel.innerText = `Sched Arrival (${tz})`;
+                    const ataLabel = Array.from(form.querySelectorAll('label')).find(l => l.innerText.includes('Actual Arrival'));
+                    if (ataLabel) ataLabel.innerText = `Actual Arrival (${tz})`;
+                }
+            }
+        };
+
+        originSelect.addEventListener('change', (e) => updateAirportInfo(e.target.value, originTermSelect, 'Origin'));
+        destSelect.addEventListener('change', (e) => updateAirportInfo(e.target.value, destTermSelect, 'Dest'));
+
+        // --- Aircraft Variant Logic ---
+        const aircraftSelect = form.querySelector('[name="aircraft_model_id"]');
+        const genSelect = form.querySelector('[name="tag_generation"]');
+        const winSelect = form.querySelector('[name="tag_winglets"]');
+        const confSelect = form.querySelector('[name="tag_config"]');
+
+        const updateVariants = (modelId) => {
+            // Reset all
+            [genSelect, winSelect, confSelect].forEach(s => s.innerHTML = '<option value="">-- Select --</option>');
+
+            const model = aircraft.find(m => m.id == modelId);
+            if (!model) return;
+
+            const populate = (select, tags) => {
+                if (!tags) return;
+                const options = tags.split(',').map(t => t.trim());
+                options.forEach(opt => {
+                    const el = document.createElement('option');
+                    el.value = opt;
+                    el.textContent = opt;
+                    select.appendChild(el);
+                });
+            };
+
+            populate(genSelect, model.tags_generation);
+            populate(winSelect, model.tags_winglets);
+            populate(confSelect, model.tags_config);
+        };
+
+        aircraftSelect.addEventListener('change', (e) => updateVariants(e.target.value));
+
+        return form;
+    }, async (data) => {
         await API.post('flights', data);
         if (State.currentView === 'flights') loadFlights();
         if (State.currentView === 'profile') loadProfile();
