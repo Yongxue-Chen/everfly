@@ -74,7 +74,7 @@ const DATASETS = {
             { key: 'tags_config', label: 'Config Options' }
         ],
         fields: [
-            { key: 'manufacturer', label: 'Manufacturer', type: 'text' },
+            { key: 'manufacturer', label: 'Manufacturer', type: 'select', options: ['Boeing', 'Airbus'] },
             { key: 'model', label: 'Model', type: 'text' },
             { key: 'series', label: 'Series', type: 'text' },
             { key: 'subtype', label: 'Subtype', type: 'text' },
@@ -905,9 +905,9 @@ function renderFlights() {
 
     data.forEach(f => {
         const tr = document.createElement('tr');
-        const formatTime = (iso) => iso ? iso.replace('T', ' ') : '-';
-        // Extract plain date for display if f.date is a full timestamp
-        const displayDate = f.date && f.date.includes('T') ? f.date.split('T')[0] : (f.date || '-');
+        const formatTime = (iso) => iso ? iso.replace('T', ' ').substring(0, 16) : '-';
+        // Extract plain date for display (handle T or space separator)
+        const displayDate = f.date ? f.date.split(/[ T]/)[0] : '-';
 
         tr.innerHTML = `
             <td style="white-space:nowrap; font-weight:500;">${displayDate}</td>
@@ -918,7 +918,11 @@ function renderFlights() {
                 <div style="font-size:0.75rem; color:#333">ATA: ${formatTime(f.ata)}</div>
             </td>
             <td>${f.flight_number}</td>
-            <td>${f.registration || '-'}</td>
+            <td>
+                ${f.registration ?
+                `<a href="https://www.flightera.net/en/planes/${f.registration}" target="_blank" style="color:var(--primary-color); text-decoration:none; font-weight:500;">${f.registration}</a>`
+                : '-'}
+            </td>
             <td>
                 <div style="font-weight:500">${f.origin_name || f.origin_code}</div>
                 <div style="font-size:0.75rem; color:#666">${f.origin_code} ${f.origin_terminal ? `(${f.origin_terminal})` : ''}</div>
@@ -1064,24 +1068,24 @@ async function openEditFlightModal(item) {
     // Sync cache
     State.cache.airports = airports;
     State.cache.airlines = airlines;
-    State.cache.models = aircraft;
+    State.cache.aircraft_models = aircraft;
 
     const flightFields = [
         { key: 'flight_number', label: 'Flight Number', type: 'text' },
         { key: 'registration', label: 'Aircraft Reg', type: 'text' },
         { key: 'origin_airport_id', label: 'Origin', type: 'select', lookup: 'airports', display: 'name' },
-        { key: 'origin_terminal', label: 'Origin Terminal', type: 'select', options: [] },
         { key: 'dest_airport_id', label: 'Destination', type: 'select', lookup: 'airports', display: 'name' },
-        { key: 'dest_terminal', label: 'Dest Terminal', type: 'select', options: [] },
         { key: 'std', label: 'Sched Departure', type: 'datetime-local' },
         { key: 'atd', label: 'Actual Departure', type: 'datetime-local' },
         { key: 'sta', label: 'Sched Arrival', type: 'datetime-local' },
         { key: 'ata', label: 'Actual Arrival', type: 'datetime-local' },
-        { key: 'distance', label: 'Distance', type: 'number' },
+        { key: 'origin_terminal', label: 'Origin Terminal', type: 'select', features: ['dynamic_add'], options: [] },
+        { key: 'dest_terminal', label: 'Dest Terminal', type: 'select', features: ['dynamic_add'], options: [] },
+        { key: 'distance', label: 'Distance (km)', type: 'number' },
         { key: 'duration_scheduled', label: 'Sched Duration (min)', type: 'number' },
         { key: 'duration_actual', label: 'Actual Duration (min)', type: 'number' },
         { key: 'airline_id', label: 'Airline', type: 'select', lookup: 'airlines', display: 'name' },
-        { key: 'aircraft_model_id', label: 'Aircraft', type: 'select', lookup: 'models', display: 'name' },
+        { key: 'aircraft_model_id', label: 'Aircraft', type: 'select', lookup: 'aircraft_models', display: 'name' },
         { key: 'tag_generation', label: 'Generation', type: 'select', options: [] },
         { key: 'tag_winglets', label: 'Winglets', type: 'select', options: [] },
         { key: 'tag_config', label: 'Config', type: 'select', options: [] },
@@ -1092,6 +1096,17 @@ async function openEditFlightModal(item) {
     ];
 
     openModal('Edit Flight', () => {
+        // Pre-process times for datetime-local input (YYYY-MM-DDTHH:MM)
+        ['std', 'atd', 'sta', 'ata'].forEach(k => {
+            if (item[k]) {
+                // If format is "YYYY-MM-DD HH:MM:SS" (from DB) -> "YYYY-MM-DDTHH:MM"
+                // If format is "YYYY-MM-DDTHH:MM..." (ISO) -> "YYYY-MM-DDTHH:MM"
+                let val = item[k].replace(' ', 'T');
+                if (val.length > 16) val = val.substring(0, 16);
+                item[k] = val;
+            }
+        });
+
         const form = createForm(flightFields, item);
 
         // Re-inject dynamic logic (Terminals & Variants)
@@ -1312,10 +1327,8 @@ async function openAddFlightModal() {
             if (State.currentView === 'flights') loadFlights();
             if (State.currentView === 'profile') loadProfile(); // Update profile counts
 
-            // Auto Update Prompt
-            if (confirm('Flight added. Fetch details from AeroAPI now?')) {
-                updateFlightFromAeroAPI(flightId);
-            }
+            // Manual update only via cloud button
+
         } catch (e) {
             alert('Error creating flight: ' + e);
         }
@@ -1325,122 +1338,319 @@ async function openAddFlightModal() {
 // --- Profile & Stats ---
 // --- Profile & Stats ---
 // --- Profile & Stats ---
-async function loadProfile() {
-    const flights = await API.get('flights/detailed');
+// --- Profile Stats Helpers ---
+const renderStatsDashboard = (stats, container) => {
+    if (!container) return;
+    container.innerHTML = '';
 
-    // --- Year Filter Logic ---
-    const yearSelect = document.getElementById('year-filter');
-    if (yearSelect && yearSelect.options.length <= 1) {
-        // Extract years
-        const years = new Set(flights.map(f => f.date ? f.date.substring(0, 4) : null).filter(y => y));
-        const sortedYears = Array.from(years).sort().reverse();
-        sortedYears.forEach(year => {
-            const opt = document.createElement('option');
-            opt.value = year;
-            opt.textContent = year;
-            yearSelect.appendChild(opt);
+    // Card 1: Locations
+    const locCard = document.createElement('div');
+    locCard.className = 'stats-card card-teal';
+    locCard.innerHTML = `<div class="stats-header">Locations</div>`;
+    const locList = document.createElement('div');
+    const addLocItem = (label, count, key, title) => {
+        const row = document.createElement('div');
+        row.style.display = 'flex'; row.style.justifyContent = 'space-between'; row.style.padding = '8px 0'; row.style.borderBottom = '1px solid #f9f9f9';
+
+        row.innerHTML = `<span style="color:#555">${label}</span><strong style="color:#333">${count !== undefined ? count : 0}</strong>`;
+        if (key && stats.top[key]) {
+            row.style.cursor = 'pointer';
+            row.onclick = (e) => { e.stopPropagation(); showStatsModal(title, stats.top[key]); };
+        }
+        locList.appendChild(row);
+    };
+    addLocItem('Continents', stats.totals.continents, 'continents', 'Top Continents');
+    addLocItem('Countries', stats.totals.countries, 'countries', 'Top Countries');
+    addLocItem('Cities', stats.totals.cities, 'cities', 'Top Cities');
+    addLocItem('Airports', stats.totals.airports, 'airports', 'Top Airports');
+    addLocItem('Routes', stats.totals.routes, 'routes', 'Top Routes');
+    locCard.appendChild(locList);
+
+    // Card 2: Airlines
+    const majorAlliances = ['天合联盟', '星空联盟', '寰宇一家', 'SkyTeam', 'Star Alliance', 'Oneworld'];
+    const alCard = document.createElement('div');
+    alCard.className = 'stats-card card-orange';
+    alCard.innerHTML = `<div class="stats-header">Airlines</div><div class="stats-total">${stats.totals.airlines}</div><div class="stats-subtext">Total Airlines</div>`;
+
+    // Alliance Breakdown (Merged)
+    const alList = document.createElement('div');
+    alList.style.marginTop = '15px';
+
+    const groups = {
+        'SkyTeam (天合联盟)': ['SkyTeam', '天合联盟'],
+        'Star Alliance (星空联盟)': ['Star Alliance', '星空联盟'],
+        'Oneworld (寰宇一家)': ['Oneworld', '寰宇一家']
+    };
+    const counts = {
+        'SkyTeam (天合联盟)': 0,
+        'Star Alliance (星空联盟)': 0,
+        'Oneworld (寰宇一家)': 0
+    };
+
+    Object.entries(stats.breakdowns.alliance || {}).forEach(([k, v]) => {
+        for (const [groupName, keywords] of Object.entries(groups)) {
+            if (keywords.some(kw => k.includes(kw))) {
+                counts[groupName] += v;
+                break;
+            }
+        }
+    });
+
+    Object.entries(counts)
+        .filter(([k, v]) => v > 0)
+        .sort((a, b) => b[1] - a[1])
+        .forEach(([k, v]) => {
+            const d = document.createElement('div');
+            d.style.display = 'flex'; d.style.justifyContent = 'space-between'; d.style.marginBottom = '6px';
+            d.style.cursor = 'pointer';
+            d.style.padding = '2px 4px'; d.style.borderRadius = '4px';
+            d.onmouseenter = () => d.style.background = '#f0f0f0';
+            d.onmouseleave = () => d.style.background = 'transparent';
+
+            d.innerHTML = `<span style="font-size:0.9rem; color:#666">${k}</span><b>${v}</b>`;
+            d.onclick = (e) => {
+                e.stopPropagation();
+                // Filter airlines by group keywords
+                const keywords = groups[k];
+                const filtered = stats.top.airlines.filter(a => keywords.some(kw => (a.extra || '').includes(kw)));
+                showStatsModal(k, filtered);
+            };
+            alList.appendChild(d);
         });
+    alCard.appendChild(alList);
+    alCard.onclick = () => showStatsModal('Top Airlines', stats.top.airlines);
 
-        // Attach listener
-        yearSelect.onchange = loadProfile;
+    // Card 3: Aircraft
+    const acCard = document.createElement('div');
+    acCard.className = 'stats-card card-red';
+    acCard.innerHTML = `<div class="stats-header">Aircraft</div><div class="stats-total">${stats.totals.aircraft}</div><div class="stats-subtext">Aircraft Models</div>`;
+    const acList = document.createElement('div');
+    acList.style.marginTop = '15px';
+    const mfrs = Object.entries(stats.breakdowns.manufacturer || {}).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    mfrs.forEach(([k, v]) => {
+        const d = document.createElement('div');
+        d.style.display = 'flex'; d.style.justifyContent = 'space-between'; d.style.marginBottom = '6px';
+        d.style.cursor = 'pointer';
+        d.style.padding = '2px 4px'; d.style.borderRadius = '4px';
+        d.onmouseenter = () => d.style.background = '#f0f0f0';
+        d.onmouseleave = () => d.style.background = 'transparent';
+
+        d.innerHTML = `<span style="font-size:0.9rem; color:#666">${k}</span><b>${v}</b>`;
+        d.onclick = (e) => {
+            e.stopPropagation();
+            // Filter aircraft by manufacturer (which is in 'extra')
+            const filtered = stats.top.aircraft.filter(a => a.extra === k);
+            showStatsModal(k + ' Models', filtered);
+        };
+        acList.appendChild(d);
+    });
+    acCard.appendChild(acList);
+    acCard.onclick = () => showStatsModal('Top Aircraft', stats.top.aircraft);
+
+    container.appendChild(locCard);
+    container.appendChild(alCard);
+    container.appendChild(acCard);
+};
+
+const showStatsModal = (title, data) => {
+    openModal(title, () => {
+        const d = document.createElement('div');
+        d.style.maxHeight = '60vh'; d.style.overflowY = 'auto'; d.style.paddingRight = '10px';
+        if (!data || data.length === 0) {
+            d.innerHTML = '<p style="padding:10px; color:#666">No data available.</p>';
+            return d;
+        }
+        const max = Math.max(...data.map(d => d.count), 1);
+        data.forEach(item => {
+            const row = document.createElement('div');
+            row.className = 'chart-row';
+            const pct = (item.count / max) * 100;
+            const extra = item.extra ? ` <small style='color:#999; margin-left:5px;'>${item.extra}</small>` : '';
+            row.innerHTML = `
+                <div class="chart-label" title="${item.name}">${item.name || 'Unknown'}${extra}</div>
+                <div class="chart-bar-bg"><div class="chart-bar" style="width:${pct}%"></div></div>
+                <div class="chart-val">${item.count}</div>
+            `;
+            d.appendChild(row);
+        });
+        return d;
+    });
+};
+
+// Calculate & Render Header Stats
+const renderHeaderStats = (flights) => {
+    let totalDist = flights.reduce((sum, f) => sum + (parseFloat(f.distance) || 0), 0);
+    let totalMin = flights.reduce((sum, f) => sum + (f.duration_actual || f.duration_scheduled || 0), 0);
+    const hours = Math.floor(totalMin / 60);
+    const mins = totalMin % 60;
+
+    // Inject Container if missing
+    const view = document.getElementById('view-profile');
+    let header = document.getElementById('profile-header-stats');
+    if (!header && view) {
+        header = document.createElement('div');
+        header.id = 'profile-header-stats';
+        // Insert before map container (not flight-map itself which is nested)
+        const mapContainer = document.querySelector('#view-profile .map-container');
+        if (mapContainer) view.insertBefore(header, mapContainer);
+        else view.prepend(header);
     }
 
-    const selectedYear = yearSelect ? yearSelect.value : 'all';
-    const filteredFlights = selectedYear === 'all'
-        ? flights
-        : flights.filter(f => f.date && f.date.startsWith(selectedYear));
+    if (header) {
+        header.innerHTML = `
+            <div class="ph-stat"><b>${flights.length}</b><span>Flights</span></div>
+            <div class="ph-stat"><b>${Math.round(totalDist).toLocaleString()}</b><span>km Distance</span></div>
+            <div class="ph-stat"><b>${hours}h ${mins}m</b><span>Duration</span></div>
+        `;
+    }
+};
 
-    // --- Stats Calculation ---
-    const totalFlights = filteredFlights.length;
+async function loadProfile() {
+    try {
+        const [stats, flights] = await Promise.all([
+            API.get('stats'),
+            API.get('flights/detailed')
+        ]);
+        console.log(`Data fetched: ${flights.length} flights`);
 
-    const totalDist = filteredFlights.reduce((sum, f) => sum + (parseFloat(f.distance) || 0), 0);
-
-    const totalMinutes = filteredFlights.reduce((sum, f) => sum + (f.duration_actual || f.duration_scheduled || 0), 0);
-    const hours = Math.floor(totalMinutes / 60);
-    const mins = totalMinutes % 60;
-
-    // Render Stats
-    const statsContainer = document.querySelector('.stats-container');
-    statsContainer.innerHTML = `
-        <div class="stat-card" style="background:#fff; padding:20px; border-radius:4px; box-shadow:0 1px 3px rgba(0,0,0,0.1); display:flex; gap:40px;">
-            <div>
-                <h1 style="margin:0; font-size:2.5rem;">${totalFlights}</h1>
-                <span style="color:#666;">flights</span>
-            </div>
-            <div>
-                <h1 style="margin:0; font-size:2.5rem;">${Math.round(totalDist).toLocaleString()} km</h1> 
-                <span style="color:#666;">distance</span>
-            </div>
-            <div>
-                <h1 style="margin:0; font-size:2.5rem;">${hours}h ${mins}m</h1> 
-                <span style="color:#666;">duration</span>
-            </div>
-        </div>
-    `;
-
-    // Render Map
-    if (State.map) {
-        // Clear layers
-        State.map.eachLayer((layer) => {
-            if (layer instanceof L.Polyline || layer instanceof L.Marker) {
-                layer.remove();
-            }
-        });
-
-        // Helper for Great Circle Path
-        const getGeodesicPath = (lat1, lon1, lat2, lon2, numPoints = 100) => {
-            if (lat1 === lat2 && lon1 === lon2) return [[lat1, lon1]];
-            const toRad = x => x * Math.PI / 180;
-            const toDeg = x => x * 180 / Math.PI;
-            const phi1 = toRad(lat1), lambda1 = toRad(lon1);
-            const phi2 = toRad(lat2), lambda2 = toRad(lon2);
-            const d = 2 * Math.asin(Math.sqrt(Math.pow(Math.sin((phi1 - phi2) / 2), 2) +
-                Math.cos(phi1) * Math.cos(phi2) * Math.pow(Math.sin((lambda1 - lambda2) / 2), 2)));
-
-            if (d === 0) return [[lat1, lon1]];
-
-            let points = [];
-            for (let i = 0; i <= numPoints; i++) {
-                const f = i / numPoints;
-                const A = Math.sin((1 - f) * d) / Math.sin(d);
-                const B = Math.sin(f * d) / Math.sin(d);
-                const x = A * Math.cos(phi1) * Math.cos(lambda1) + B * Math.cos(phi2) * Math.cos(lambda2);
-                const y = A * Math.cos(phi1) * Math.sin(lambda1) + B * Math.cos(phi2) * Math.sin(lambda2);
-                const z = A * Math.sin(phi1) + B * Math.sin(phi2);
-                const phi = Math.atan2(z, Math.sqrt(x * x + y * y));
-                const lambda = Math.atan2(y, x);
-                points.push([toDeg(phi), toDeg(lambda)]);
-            }
-            return points;
-        };
-
-        filteredFlights.forEach(f => {
-            if (f.origin_lat && f.dest_lat) {
-                // Draw Geodesic Line
-                const curvePoints = getGeodesicPath(
-                    parseFloat(f.origin_lat), parseFloat(f.origin_lon),
-                    parseFloat(f.dest_lat), parseFloat(f.dest_lon)
-                );
-
-                L.polyline(curvePoints, { color: '#ffb800', weight: 2, opacity: 0.8 }).addTo(State.map);
-
-                // Add markers
-                L.circleMarker([f.origin_lat, f.origin_lon], { radius: 3, color: '#00b0ff', fillColor: '#00b0ff', fillOpacity: 1 }).addTo(State.map);
-                L.circleMarker([f.dest_lat, f.dest_lon], { radius: 3, color: '#00b0ff', fillColor: '#00b0ff', fillOpacity: 1 }).addTo(State.map);
-            }
-        });
-
-        // Fit bounds if flights exist
-        if (filteredFlights.length > 0) {
-            // Optional: Create bounds from all points
-            // State.map.fitBounds(...)
+        // 1. Header Stats
+        try {
+            renderHeaderStats(flights);
+            console.log("Header stats rendered");
+        } catch (e) {
+            console.error("Header error: " + e.message);
         }
+
+        // 2. Dashboard
+        try {
+            renderStatsDashboard(stats, document.getElementById('profile-stats-dashboard'));
+            console.log("Dashboard rendered");
+        } catch (e) {
+            console.error("Dashboard error: " + e.message);
+        }
+
+        // 3. Map
+        try {
+            renderProfileMap(flights, 'all');
+            console.log("Map rendered");
+        } catch (e) {
+            console.error("Map error: " + e.message);
+        }
+
+        // Year Logic
+        const yearSelect = document.getElementById('year-filter');
+        if (yearSelect) {
+            yearSelect.innerHTML = '<option value="all">All Years</option>';
+            const years = new Set(flights.map(f => f.date ? f.date.substring(0, 4) : null).filter(y => y));
+            const sortedYears = Array.from(years).sort().reverse();
+            sortedYears.forEach(year => yearSelect.options.add(new Option(year, year)));
+
+            // Remove old listeners by cloning or reassigning
+            const newSelect = yearSelect.cloneNode(true);
+            yearSelect.parentNode.replaceChild(newSelect, yearSelect);
+            newSelect.onchange = () => {
+                const val = newSelect.value;
+                const filtered = val === 'all' ? flights : flights.filter(f => f.date && f.date.startsWith(val));
+                renderHeaderStats(filtered);
+                renderProfileMap(flights, val);
+            };
+        }
+
+    } catch (e) {
+        console.error("Profile load error", e);
     }
 }
 
+// Extracted Map Rendering
+function renderProfileMap(flights, selectedYear) {
+    if (!State.map) initMap();
+    if (!State.map) return;
+
+    const filtered = selectedYear === 'all' ? flights : flights.filter(f => f.date && f.date.startsWith(selectedYear));
+
+    // Clear Layers
+    if (State.profileLayers) {
+        State.profileLayers.forEach(l => l.remove());
+    }
+    State.profileLayers = [];
+
+    // Helper for Great Circle Path (Geodesic)
+    const getGeodesicPath = (lat1, lon1, lat2, lon2, numPoints = 100) => {
+        if (lat1 === lat2 && lon1 === lon2) return [[lat1, lon1]];
+        const toRad = x => x * Math.PI / 180;
+        const toDeg = x => x * 180 / Math.PI;
+        const phi1 = toRad(lat1), lambda1 = toRad(lon1);
+        const phi2 = toRad(lat2), lambda2 = toRad(lon2);
+        const d = 2 * Math.asin(Math.sqrt(Math.pow(Math.sin((phi1 - phi2) / 2), 2) +
+            Math.cos(phi1) * Math.cos(phi2) * Math.pow(Math.sin((lambda1 - lambda2) / 2), 2)));
+        if (d === 0) return [[lat1, lon1]];
+        let points = [];
+        for (let i = 0; i <= numPoints; i++) {
+            const f = i / numPoints;
+            const A = Math.sin((1 - f) * d) / Math.sin(d);
+            const B = Math.sin(f * d) / Math.sin(d);
+            const x = A * Math.cos(phi1) * Math.cos(lambda1) + B * Math.cos(phi2) * Math.cos(lambda2);
+            const y = A * Math.cos(phi1) * Math.sin(lambda1) + B * Math.cos(phi2) * Math.sin(lambda2);
+            const z = A * Math.sin(phi1) + B * Math.sin(phi2);
+            points.push([toDeg(Math.atan2(z, Math.sqrt(x * x + y * y))), toDeg(Math.atan2(y, x))]);
+        }
+        return points;
+    };
+
+    const airports = {};
+    let drawnCount = 0;
+
+    console.log("renderProfileMap: filtered flights =", filtered.length);
+    filtered.forEach(f => {
+        console.log("Flight:", f);
+        if (!f.origin || !f.dest) {
+            console.log("Missing origin or dest");
+            return;
+        }
+        const lat1 = parseFloat(f.origin.lat), lon1 = parseFloat(f.origin.lon);
+        const lat2 = parseFloat(f.dest.lat), lon2 = parseFloat(f.dest.lon);
+
+        if (isNaN(lat1) || isNaN(lon1) || isNaN(lat2) || isNaN(lon2)) return;
+
+        // Draw Geodesic Line
+        const curvePoints = getGeodesicPath(lat1, lon1, lat2, lon2);
+        const line = L.polyline(curvePoints, { color: '#ffb800', weight: 2, opacity: 0.6 });
+        // Popup info
+        line.bindPopup(`${f.flight_number}<br>${f.date}<br>${f.origin.code} -> ${f.dest.code}`);
+        line.addTo(State.map);
+        State.profileLayers.push(line);
+        drawnCount++;
+
+        airports[f.origin.code] = { loc: [lat1, lon1], name: f.origin.name };
+        airports[f.dest.code] = { loc: [lat2, lon2], name: f.dest.name };
+    });
+
+    // Draw Markers
+    Object.entries(airports).forEach(([code, data]) => {
+        const m = L.circleMarker(data.loc, { radius: 4, color: '#00b0ff', fillColor: '#00b0ff', fillOpacity: 0.8 });
+        m.bindPopup(`<b>${code}</b><br>${data.name}`);
+        m.addTo(State.map);
+        State.profileLayers.push(m);
+    });
+
+    // Fit Bounds
+    if (State.profileLayers.length > 0) {
+        const group = new L.featureGroup(State.profileLayers);
+        State.map.fitBounds(group.getBounds(), { padding: [50, 50] });
+    }
+    console.log(`Map rendering complete: ${drawnCount} lines drawn, ${Object.keys(airports).length} airports`);
+}
 
 // --- Initialization ---
 window.addEventListener('DOMContentLoaded', () => {
-    initMap();
-    navigateTo('profile');
+    try {
+        console.log("FlightLog: App Initializing...");
+        initMap();
+        console.log("FlightLog: Map Initialized");
+        navigateTo('profile');
+        console.log("FlightLog: Navigated to Profile");
+    } catch (e) {
+        console.error("FlightLog Init Error:", e);
+        alert("App Initialization Failed: " + e.message);
+    }
 });

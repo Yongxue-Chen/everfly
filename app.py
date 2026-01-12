@@ -73,12 +73,14 @@ def create_crud_routes(endpoint, table_name, columns):
         valid_data = {k: v for k, v in data.items() if k in columns}
 
         # Special logic for flights duration
+        # Special logic for flights duration
         if table_name == 'flights':
             conn = database.get_db()
             try:
                 origin_id = valid_data.get('origin_airport_id')
                 dest_id = valid_data.get('dest_airport_id')
                 if origin_id and dest_id:
+
                     if valid_data.get('std') and valid_data.get('sta') and not valid_data.get('duration_scheduled'):
                         valid_data['duration_scheduled'] = calculate_duration(conn, origin_id, dest_id, valid_data['std'], valid_data['sta'])
                     if valid_data.get('atd') and valid_data.get('ata') and not valid_data.get('duration_actual'):
@@ -155,9 +157,9 @@ def create_crud_routes(endpoint, table_name, columns):
 # --- Define Entities ---
 # Schema columns for validation (excluding id)
 # Schema columns for validation (excluding id)
-cities_cols = ['name', 'country', 'country_code', 'timezone']
+cities_cols = ['name', 'country', 'country_code', 'timezone', 'continent']
 airports_cols = ['name', 'iata_code', 'icao_code', 'city_id', 'lat', 'lon', 'terminals', 'timezone']
-airlines_cols = ['name', 'iata_code', 'icao_code', 'frequent_flyer_program', 'frequent_flyer_id']
+airlines_cols = ['name', 'iata_code', 'icao_code', 'frequent_flyer_program', 'frequent_flyer_id', 'alliance']
 aircraft_cols = ['name', 'manufacturer', 'model', 'series', 'subtype', 'generation', 'engine_type', 'winglets',
                  'tags_generation', 'tags_winglets', 'tags_config']
 flights_cols = ['date', 'flight_number', 'airline_id', 'aircraft_model_id', 'origin_airport_id', 'dest_airport_id',
@@ -179,11 +181,16 @@ def migrate_schema():
              conn.execute("ALTER TABLE cities ADD COLUMN country_code TEXT")
         if 'timezone' not in cities_cols_db:
              conn.execute("ALTER TABLE cities ADD COLUMN timezone TEXT")
-             print("Migrated: Added timezone to cities")
+        if 'continent' not in cities_cols_db:
+             conn.execute("ALTER TABLE cities ADD COLUMN continent TEXT")
+             print("Migrated: Added continent to cities")
 
         # Airlines
         cur = conn.execute("PRAGMA table_info(airlines)")
         airlines_cols_db = [row[1] for row in cur.fetchall()]
+        if 'alliance' not in airlines_cols_db:
+             conn.execute("ALTER TABLE airlines ADD COLUMN alliance TEXT")
+             print("Migrated: Added alliance to airlines")
         if 'icao_code' not in airlines_cols_db:
             conn.execute("ALTER TABLE airlines ADD COLUMN icao_code TEXT")
         if 'frequent_flyer_id' not in airlines_cols_db:
@@ -214,7 +221,6 @@ def migrate_schema():
                 UPDATE aircraft_models 
                 SET name = model || '-' || CASE WHEN subtype IS NOT NULL AND subtype != '' THEN subtype ELSE series END
              """)
-             print("Migrated: added and populated name to aircraft_models")
 
         # Flights
         cur = conn.execute("PRAGMA table_info(flights)")
@@ -652,38 +658,6 @@ def clear_table(table_name):
         return jsonify({'error': str(e)}), 500
 
 
-# --- Special Route for Stats/Map Data if needed ---
-@app.route('/api/flights/detailed', methods=['GET'])
-def get_flights_detailed():
-    conn = database.get_db()
-    cursor = conn.execute('''
-        SELECT f.*, 
-               oa.iata_code as origin_code, oa.name as origin_name, oa.lat as origin_lat, oa.lon as origin_lon,
-               oc.timezone as origin_tz,
-               da.iata_code as dest_code, da.name as dest_name, da.lat as dest_lat, da.lon as dest_lon,
-               dc.timezone as dest_tz,
-               al.name as airline_name,
-               am.name as aircraft_model
-        FROM flights f
-        JOIN airports oa ON f.origin_airport_id = oa.id
-        JOIN cities oc ON oa.city_id = oc.id
-        JOIN airports da ON f.dest_airport_id = da.id
-        JOIN cities dc ON da.city_id = dc.id
-        JOIN airlines al ON f.airline_id = al.id
-        JOIN aircraft_models am ON f.aircraft_model_id = am.id
-        ORDER BY f.date DESC
-    ''')
-    rows = cursor.fetchall()
-    
-    flights = []
-    # Convert row to dict manually or use row_factory
-    col_names = [description[0] for description in cursor.description]
-    for row in rows:
-        flights.append(dict(zip(col_names, row)))
-        
-    conn.close()
-    return jsonify(flights)
-
 # --- Automation Logic ---
 import airportsdata
 import pycountry
@@ -940,18 +914,34 @@ def get_or_create_airport(icao, iata, conn):
     if info:
         # Check/Create City
         city_name = info['city']
-        cur = conn.execute("SELECT id, timezone FROM cities WHERE name = ?", (city_name,))
+        cur = conn.execute("SELECT id, timezone, continent FROM cities WHERE name = ?", (city_name,))
         city_row = cur.fetchone()
         
         if city_row:
             city_id = city_row[0]
-            # Backfill timezone if missing
-            if not city_row[1] and info.get('tz'):
-                 conn.execute("UPDATE cities SET timezone = ? WHERE id = ?", (info['tz'], city_id))
+            # Backfill timezone/continent if missing
+            db_tz = city_row[1]
+            db_cont = city_row[2]
+            new_tz = info.get('tz')
+            new_cont = info.get('continent')
+            
+            updates = []
+            vals = []
+            if not db_tz and new_tz:
+                updates.append("timezone = ?")
+                vals.append(new_tz)
+            if not db_cont and new_cont:
+                updates.append("continent = ?")
+                vals.append(new_cont)
+            
+            if updates:
+                vals.append(city_id)
+                conn.execute(f"UPDATE cities SET {', '.join(updates)} WHERE id = ?", vals)
         else:
             # Try to guess timezone
-            tz = info['tz']
-            cur = conn.execute("INSERT INTO cities (name, country, timezone) VALUES (?, ?, ?)", (city_name, info['country'], tz))
+            tz = info.get('tz')
+            cont = info.get('continent')
+            cur = conn.execute("INSERT INTO cities (name, country, timezone, continent) VALUES (?, ?, ?, ?)", (city_name, info['country'], tz, cont))
             city_id = cur.lastrowid
             
         cur = conn.execute('''
@@ -1039,31 +1029,214 @@ def calculate_duration():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# --- Stats API ---
+@app.route('/api/stats', methods=['GET'])
+def get_stats():
+    conn = database.get_db()
+    
+    stats = {
+        'totals': {},
+        'top': {},
+        'breakdowns': {}
+    }
+    
+    # Totals
+    stats['totals']['flights'] = conn.execute("SELECT COUNT(*) FROM flights").fetchone()[0]
+    stats['totals']['airlines'] = conn.execute("SELECT COUNT(DISTINCT airline_id) FROM flights").fetchone()[0]
+    stats['totals']['aircraft'] = conn.execute("""
+        SELECT COUNT(DISTINCT am.model || ' ' || am.series) 
+        FROM flights f 
+        JOIN aircraft_models am ON f.aircraft_model_id = am.id
+    """).fetchone()[0]
+    stats['totals']['routes'] = conn.execute("SELECT COUNT(DISTINCT origin_airport_id || '-' || dest_airport_id) FROM flights").fetchone()[0]
+    
+    # Complex Totals (Countries, Continents)
+    # Get all visited city IDs (origin + dest)
+    conn.execute("CREATE TEMP TABLE visited_cities AS SELECT city_id FROM airports WHERE id IN (SELECT origin_airport_id FROM flights UNION SELECT dest_airport_id FROM flights)")
+    stats['totals']['cities'] = conn.execute("SELECT COUNT(DISTINCT city_id) FROM visited_cities").fetchone()[0]
+    stats['totals']['countries'] = conn.execute("SELECT COUNT(DISTINCT country) FROM cities WHERE id IN (SELECT city_id FROM visited_cities)").fetchone()[0]
+    stats['totals']['continents'] = conn.execute("SELECT COUNT(DISTINCT continent) FROM cities WHERE id IN (SELECT city_id FROM visited_cities) AND continent IS NOT NULL").fetchone()[0]
+    stats['totals']['airports'] = conn.execute("SELECT COUNT(DISTINCT id) FROM airports WHERE id IN (SELECT origin_airport_id FROM flights UNION SELECT dest_airport_id FROM flights)").fetchone()[0]
+    
+    conn.execute("DROP TABLE visited_cities")
+    
+    # Top Lists Helper
+    def get_top(query, params=()):
+        return [{'name': r[0], 'count': r[1], 'extra': r[2] if len(r)>2 else None} for r in conn.execute(query, params).fetchall()]
+
+    # Top Continents
+    # Count flights involving continent? Or just distinct visits? User says "sorted from large to small". Usually flight count.
+    # We count a flight as "touching" a continent if origin OR dest is there? Or just Origin?
+    # Simple: Join Origin.
+    # Top Continents (Origin + Dest)
+    stats['top']['continents'] = get_top("""
+        SELECT c.continent, COUNT(*) as cnt
+        FROM (
+            SELECT origin_airport_id as aid FROM flights
+            UNION ALL
+            SELECT dest_airport_id as aid FROM flights
+        ) t
+        JOIN airports a ON t.aid = a.id
+        JOIN cities c ON a.city_id = c.id
+        WHERE c.continent IS NOT NULL AND c.continent != ''
+        GROUP BY c.continent
+        ORDER BY cnt DESC
+    """)
+    
+    # Top Countries (Origin + Dest)
+    stats['top']['countries'] = get_top("""
+        SELECT c.country, COUNT(*) as cnt, c.country_code
+        FROM (
+            SELECT origin_airport_id as aid FROM flights
+            UNION ALL
+            SELECT dest_airport_id as aid FROM flights
+        ) t
+        JOIN airports a ON t.aid = a.id
+        JOIN cities c ON a.city_id = c.id
+        GROUP BY c.country 
+        ORDER BY cnt DESC
+    """)
+
+    # Top Cities (Origin + Dest)
+    stats['top']['cities'] = get_top("""
+        SELECT c.name, COUNT(*) as cnt, c.country_code
+        FROM (
+            SELECT origin_airport_id as aid FROM flights
+            UNION ALL
+            SELECT dest_airport_id as aid FROM flights
+        ) t
+        JOIN airports a ON t.aid = a.id
+        JOIN cities c ON a.city_id = c.id
+        GROUP BY c.id
+        ORDER BY cnt DESC
+    """)
+    
+    # Top Airports (Dep + Arr)
+    stats['top']['airports'] = get_top("""
+        SELECT a.iata_code, COUNT(*) as cnt, a.name
+        FROM (
+            SELECT origin_airport_id as aid FROM flights
+            UNION ALL
+            SELECT dest_airport_id as aid FROM flights
+        ) t
+        JOIN airports a ON t.aid = a.id
+        GROUP BY a.iata_code
+        ORDER BY cnt DESC
+    """)
+    
+    # Top Routes
+    stats['top']['routes'] = get_top("""
+        SELECT a1.iata_code || '-' || a2.iata_code, COUNT(*) as cnt
+        FROM flights f
+        JOIN airports a1 ON f.origin_airport_id = a1.id
+        JOIN airports a2 ON f.dest_airport_id = a2.id
+        GROUP BY f.origin_airport_id, f.dest_airport_id
+        ORDER BY cnt DESC
+    """)
+    
+    # Top Airlines
+    stats['top']['airlines'] = get_top("""
+        SELECT al.name, COUNT(*) as cnt, al.frequent_flyer_program
+        FROM flights f
+        JOIN airlines al ON f.airline_id = al.id
+        GROUP BY al.id
+        ORDER BY cnt DESC
+    """)
+    
+    # Top Aircraft (Model + Series)
+    stats['top']['aircraft'] = get_top("""
+        SELECT am.model || ' ' || am.series, COUNT(*) as cnt, am.manufacturer
+        FROM flights f
+        JOIN aircraft_models am ON f.aircraft_model_id = am.id
+        GROUP BY am.model, am.series
+        ORDER BY cnt DESC
+    """)
+    
+    # Breakdowns
+    # Alliance (Use frequent_flyer_program as user requested)
+    stats['breakdowns']['alliance'] = {r[0]: r[1] for r in conn.execute("""
+        SELECT al.frequent_flyer_program, COUNT(*) 
+        FROM flights f JOIN airlines al ON f.airline_id = al.id 
+        WHERE al.frequent_flyer_program IS NOT NULL AND al.frequent_flyer_program != ''
+        GROUP BY al.frequent_flyer_program
+    """).fetchall()}
+    
+    # Manufacturer
+    stats['breakdowns']['manufacturer'] = {r[0]: r[1] for r in conn.execute("""
+        SELECT am.manufacturer, COUNT(*) 
+        FROM flights f JOIN aircraft_models am ON f.aircraft_model_id = am.id 
+        GROUP BY am.manufacturer
+    """).fetchall()}
+
+    return jsonify(stats)
+
+@app.route('/api/flights/detailed', methods=['GET'])
+def get_detailed_flights():
+    conn = database.get_db()
+    # Complex query to satisfy both Flight Log (flat, detailed) and Profile Map (geo-coordinates)
+    cursor = conn.execute('''
+        SELECT f.*, 
+               oa.iata_code as origin_code, oa.name as origin_name, oa.lat as origin_lat, oa.lon as origin_lon, oa.city_id as origin_city_id,
+               da.iata_code as dest_code, da.name as dest_name, da.lat as dest_lat, da.lon as dest_lon, da.city_id as dest_city_id,
+               al.name as airline_name,
+               am.name as aircraft_model
+        FROM flights f
+        LEFT JOIN airports oa ON f.origin_airport_id = oa.id
+        LEFT JOIN airports da ON f.dest_airport_id = da.id
+        LEFT JOIN airlines al ON f.airline_id = al.id
+        LEFT JOIN aircraft_models am ON f.aircraft_model_id = am.id
+        ORDER BY f.date DESC
+    ''')
+    
+    flights = []
+    col_names = [d[0] for d in cursor.description]
+    
+    for row in cursor.fetchall():
+        item = dict(zip(col_names, row))
+        
+        # Add nested objects for Profile Map compatibility
+        item['origin'] = {
+            'lat': item['origin_lat'], 
+            'lon': item['origin_lon'], 
+            'code': item['origin_code'], 
+            'name': item['origin_name']
+        }
+        item['dest'] = {
+            'lat': item['dest_lat'], 
+            'lon': item['dest_lon'], 
+            'code': item['dest_code'], 
+            'name': item['dest_name']
+        }
+        
+        flights.append(item)
+        
+    conn.close()
+    return jsonify(flights)
+
 def update_single_flight_from_aeroapi(flight_id, force=False):
     conn = database.get_db()
-    # Fetch existing data including terminals
-    cur = conn.execute("SELECT flight_number, date, origin_airport_id, dest_airport_id, std, atd, registration, airline_id, aircraft_model_id, distance, duration_actual, origin_terminal, dest_terminal FROM flights WHERE id = ?", (flight_id,))
+    # Indices: 0=f_num, 1=date, 2=orig_id, 3=dest_id, 4=std, 5=atd, 6=sta, 7=ata, 8=reg, 9=airline, 10=model, 11=dist, 12=dur_sched, 13=dur_actual, 14=oterm, 15=dterm
+    cur = conn.execute("SELECT flight_number, date, origin_airport_id, dest_airport_id, std, atd, sta, ata, registration, airline_id, aircraft_model_id, distance, duration_scheduled, duration_actual, origin_terminal, dest_terminal FROM flights WHERE id = ?", (flight_id,))
     flight = cur.fetchone()
     
     if not flight:
+        conn.close()
         return {'error': 'Flight not found'}
         
-    f_num = flight[0]     # e.g. CA123
-    f_date = flight[1]    # YYYY-MM-DD
+    f_num = flight[0]
+    f_date = flight[1]
     
     if not f_num or not f_date:
+        conn.close()
         return {'error': 'Missing flight number or date'}
 
-    # Strategy: Always fetch if forced, OR if missing critical data (std, atd, reg)
-    # But when writing, ONLY write to empty fields.
-    is_missing_data = not (flight[4] and flight[5] and flight[6])
+    # Strategy: Always fetch if forced, OR if missing critical data 
+    is_missing_data = not (flight[4] and flight[5] and flight[8])
     if not force and not is_missing_data:
          conn.close()
          return {'message': 'Skipped, data exists'}
          
-    # Clean flight number for API (remove spaces, e.g. "CA 123" -> "CA123")
     f_num_clean = f_num.replace(' ', '')
-
     f_dt = dateutil.parser.parse(f_date)
     start_window = (f_dt - timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
     end_window = (f_dt + timedelta(days=2)).strftime('%Y-%m-%dT%H:%M:%SZ') 
@@ -1079,7 +1252,8 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
     
     if not raw_flights:
         conn.close()
-        return {'error': 'No data found in AeroAPI'}
+        if force: return {'error': 'No data found in AeroAPI'}
+        return {'message': 'No data found'}
 
     best_match = None
     closest_diff = float('inf')
@@ -1088,7 +1262,7 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
         t_str = f.get('scheduled_out') or f.get('actual_out')
         if not t_str: continue
         
-        t = dateutil.parser.parse(t_str).replace(tzinfo=None) # Compare naïve to date
+        t = dateutil.parser.parse(t_str).replace(tzinfo=None) 
         diff = abs((t - f_dt).total_seconds())
         if diff < 36 * 3600:
             if diff < closest_diff:
@@ -1097,46 +1271,94 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
             
     if not best_match:
         conn.close()
-        return {'error': 'No matching flight in time window'}
+        if force: return {'error': 'No matching flight in time window'}
+        return {'message': 'No matching flight'}
+
+    print(f"DEBUG: Best match for {f_num} on {f_date}: {best_match.get('ident')} at {best_match.get('scheduled_out')}")
         
     api_std = best_match.get('scheduled_out')
     api_atd = best_match.get('actual_out')
     api_sta = best_match.get('scheduled_in')
     api_ata = best_match.get('actual_in')
     api_reg = best_match.get('registration')
-    api_dist = best_match.get('route_distance') 
+    
+    # Calculate Durations (UTC diff)
+    dur_sched = None
+    if api_std and api_sta:
+        try:
+             d1 = dateutil.parser.parse(api_std)
+             d2 = dateutil.parser.parse(api_sta)
+             dur_sched = int((d2 - d1).total_seconds() / 60)
+        except: pass
+        
+    dur_actual = None
+    if api_atd and api_ata:
+        try:
+             d1 = dateutil.parser.parse(api_atd)
+             d2 = dateutil.parser.parse(api_ata)
+             dur_actual = int((d2 - d1).total_seconds() / 60)
+        except: pass
+    
+    # Distance conversion: Miles -> KM
+    api_dist = best_match.get('route_distance')
+    if api_dist is not None:
+        try:
+            api_dist = int(api_dist * 1.60934)
+        except:
+            pass
     
     api_origin_code = best_match.get('origin', {}).get('code')
     api_dest_code = best_match.get('destination', {}).get('code')
-    
+
     api_origin_term = best_match.get('origin', {}).get('terminal')
     api_dest_term = best_match.get('destination', {}).get('terminal')
+    
+    api_origin_tz = best_match.get('origin', {}).get('timezone')
+    api_dest_tz = best_match.get('destination', {}).get('timezone')
+
+    def to_local_str(utc_str, tz_name):
+        if not utc_str: return None
+        try:
+            dt_utc = dateutil.parser.parse(utc_str)
+            if tz_name:
+                try:
+                    tz = pytz.timezone(tz_name)
+                    dt_local = dt_utc.astimezone(tz)
+                    return dt_local.strftime('%Y-%m-%d %H:%M:%S')
+                except:
+                     return dt_utc.strftime('%Y-%m-%d %H:%M:%S')
+            else:
+                return dt_utc.strftime('%Y-%m-%d %H:%M:%S')
+        except:
+            return utc_str
+
+    api_std = to_local_str(api_std, api_origin_tz)
+    api_atd = to_local_str(api_atd, api_origin_tz)
+    api_sta = to_local_str(api_sta, api_dest_tz)
+    api_ata = to_local_str(api_ata, api_dest_tz)
     
     update_fields = []
     update_values = []
     
-    # Helper to only update if current is empty
     def add_update(col, val, current_val):
-        # Strict rule: Only update if current_val is empty/None
-        if val and not current_val:
+        if val is not None and (force or not current_val):
              update_fields.append(f"{col} = ?")
              update_values.append(val)
 
     add_update('std', api_std, flight[4])
     add_update('atd', api_atd, flight[5])
-    add_update('sta', api_sta, None) # Assuming not fetched in SELECT, can't check. But usually safe to fill if we fill others.
-    # Wait, fetching sta/ata was not in SELECT above. Let's fix that or assume it's okay to overwrite if std was empty?
-    # Better to fetch them. Or just trust that if std is empty, sta is likely empty.
-    # Actually, let's fetch sta/ata to be safe. SELECT ... std, atd, sta, ata ...
-    # Refetching logic below since I can't change the SELECT string easily in `add_update` call without changing `flight` indices.
-    # I'll update the SELECT query at the top.
+    add_update('sta', api_sta, flight[6])
+    add_update('ata', api_ata, flight[7])
     
-    add_update('registration', api_reg, flight[6])
-    add_update('distance', api_dist, flight[9])
+    add_update('registration', api_reg, flight[8])
+    add_update('distance', api_dist, flight[11])
+    
+    add_update('duration_scheduled', dur_sched, flight[12])
+    add_update('duration_actual', dur_actual, flight[13])
     
     # Terminals
-    add_update('origin_terminal', api_origin_term, flight[11])
-    add_update('dest_terminal', api_dest_term, flight[12])
+    add_update('origin_terminal', api_origin_term, flight[14])
+    add_update('dest_terminal', api_dest_term, flight[15])
 
     
     # helper for airport terminals update
@@ -1151,7 +1373,6 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
                 if term not in terms_list:
                     print(f"Adding terminal {term} to airport {airport_id}")
                     terms_list.append(term)
-                    # Sort numerically/alphabetically?
                     terms_list.sort()
                     new_str = ", ".join(terms_list)
                     conn.execute("UPDATE airports SET terminals = ? WHERE id = ?", (new_str, airport_id))
@@ -1165,8 +1386,6 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
             if not flight[2]: # Only update airport if missing
                  update_fields.append("origin_airport_id = ?")
                  update_values.append(aid)
-            # Check terminal for this airport (either existing or new)
-            # Use flight[2] if it existed, or aid if we just set it.
             target_aid = flight[2] if flight[2] else aid
             ensure_terminal_in_db(target_aid, api_origin_term)
 
@@ -1179,26 +1398,9 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
             target_aid = flight[3] if flight[3] else aid
             ensure_terminal_in_db(target_aid, api_dest_term)
              
-    # Aircraft Type
-    api_type = best_match.get('aircraft_type')
-    if api_type and not flight[8]: # Only if missing
-        cur_am = conn.execute("SELECT id FROM aircraft_models WHERE icao_code = ?", (api_type,))
-        row = cur_am.fetchone()
-        mid = None
-        if row: 
-            mid = row[0]
-        else:
-             print(f"Creating aircraft model: {api_type}")
-             cur_am = conn.execute("INSERT INTO aircraft_models (name, icao_code) VALUES (?, ?)", (api_type, api_type))
-             mid = cur_am.lastrowid
-        
-        if mid:
-            update_fields.append("aircraft_model_id = ?")
-            update_values.append(mid)
-            
     # Airline
     api_airline = best_match.get('operator')
-    if api_airline and not flight[7]: # Only if missing
+    if api_airline and not flight[9]: # Only if missing
          al_id = get_or_create_airline(api_airline, None, conn)
          if al_id:
               update_fields.append("airline_id = ?")
@@ -1214,12 +1416,19 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
     conn.commit()
     conn.close()
     
-    return {'success': True, 'fields_updated': len(update_fields)}
+    return {'success': True, 'fields_updated': len(update_fields), 'debug_match': best_match.get('ident')}
+
+import pycountry
+import traceback
 
 @app.route('/api/flights/<int:flight_id>/update_aeroapi', methods=['POST'])
 def update_flight_aeroapi(flight_id):
-    result = update_single_flight_from_aeroapi(flight_id, force=True)
-    return jsonify(result)
+    try:
+        result = update_single_flight_from_aeroapi(flight_id, force=True)
+        return jsonify(result)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/flights/update_aeroapi_missing', methods=['POST'])
 def update_missing_flights_aeroapi():
