@@ -61,23 +61,68 @@
         <!-- Flights View -->
         <section id="view-flights" class="view" style="display: none;">
             <div class="container">
-                <h2>Flight History</h2>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h2>Flight History</h2>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-sm btn-secondary" onclick="openImportFlightsModal()">
+                            <i class="fa-solid fa-file-upload"></i> Import CSV
+                        </button>
+                    </div>
+                </div>
                 <div class="table-responsive">
                     <table class="flight-table" id="flights-table">
                         <thead>
                             <tr>
-                                <th>Date</th>
-                                <th>Flight</th>
-                                <th>Reg</th>
-                                <th>From</th>
-                                <th>To</th>
-                                <th>Dep</th>
-                                <th>Arr</th>
-                                <th>Airline</th>
-                                <th>Aircraft</th>
-                                <th>Seat</th>
+                                <th onclick="sortFlights('date')" style="cursor:pointer">Date <i
+                                        class="fas fa-sort"></i></th>
+                                <th onclick="sortFlights('std')" style="cursor:pointer">Times <i
+                                        class="fas fa-sort"></i></th>
+                                <th onclick="sortFlights('flight_number')" style="cursor:pointer">Flight <i
+                                        class="fas fa-sort"></i></th>
+                                <th onclick="sortFlights('registration')" style="cursor:pointer">Reg <i
+                                        class="fas fa-sort"></i></th>
+                                <th onclick="sortFlights('origin_name')" style="cursor:pointer">From <i
+                                        class="fas fa-sort"></i></th>
+                                <th onclick="sortFlights('dest_name')" style="cursor:pointer">To <i
+                                        class="fas fa-sort"></i></th>
+                                <th onclick="sortFlights('distance')" style="cursor:pointer">Dist <i
+                                        class="fas fa-sort"></i></th>
+                                <th onclick="sortFlights('duration_actual')" style="cursor:pointer">Dur <i
+                                        class="fas fa-sort"></i></th>
+                                <th onclick="sortFlights('airline_name')" style="cursor:pointer">Airline <i
+                                        class="fas fa-sort"></i></th>
+                                <th onclick="sortFlights('aircraft_model')" style="cursor:pointer">Aircraft <i
+                                        class="fas fa-sort"></i></th>
+                                <th>Variants</th>
+                                <th onclick="sortFlights('seat_number')" style="cursor:pointer">Seat/Type <i
+                                        class="fas fa-sort"></i></th>
+                                <th onclick="sortFlights('flight_class')" style="cursor:pointer">Class <i
+                                        class="fas fa-sort"></i></th>
                                 <th>Note</th>
                                 <th>Actions</th>
+                            </tr>
+                            <tr class="filter-row">
+                                <th><input type="text" onkeyup="filterFlights()" placeholder="Date" style="width:80px">
+                                </th>
+                                <th></th>
+                                <th><input type="text" onkeyup="filterFlights()" placeholder="No." style="width:60px">
+                                </th>
+                                <th><input type="text" onkeyup="filterFlights()" placeholder="Reg" style="width:50px">
+                                </th>
+                                <th><input type="text" onkeyup="filterFlights()" placeholder="Dep" style="width:40px">
+                                </th>
+                                <th><input type="text" onkeyup="filterFlights()" placeholder="Arr" style="width:40px">
+                                </th>
+                                <th></th>
+                                <th></th>
+                                <th><input type="text" onkeyup="filterFlights()" placeholder="Airline"></th>
+                                <th><input type="text" onkeyup="filterFlights()" placeholder="Model"></th>
+                                <th></th>
+                                <th><input type="text" onkeyup="filterFlights()" placeholder="Seat"></th>
+                                <th><input type="text" onkeyup="filterFlights()" placeholder="Class" style="width:50px">
+                                </th>
+                                <th><input type="text" onkeyup="filterFlights()" placeholder="Note"></th>
+                                <th></th>
                             </tr>
                         </thead>
                         <tbody>

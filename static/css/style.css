@@ -121,7 +121,7 @@ body {
 
 /* Layout */
 .container {
-    max-width: 1200px;
+    max-width: 96%;
     margin: 20px auto;
     padding: 0 20px;
 }

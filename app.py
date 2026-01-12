@@ -52,8 +52,22 @@ def create_crud_routes(endpoint, table_name, columns):
     @app.route(f'/api/{endpoint}', methods=['POST'], endpoint=f'create_{endpoint}')
     def create_item():
         data = request.json
-        # Filter data to only include valid columns
         valid_data = {k: v for k, v in data.items() if k in columns}
+
+        # Special logic for flights duration
+        if table_name == 'flights':
+            conn = database.get_db()
+            try:
+                origin_id = valid_data.get('origin_airport_id')
+                dest_id = valid_data.get('dest_airport_id')
+                if origin_id and dest_id:
+                    if valid_data.get('std') and valid_data.get('sta') and not valid_data.get('duration_scheduled'):
+                        valid_data['duration_scheduled'] = calculate_duration(conn, origin_id, dest_id, valid_data['std'], valid_data['sta'])
+                    if valid_data.get('atd') and valid_data.get('ata') and not valid_data.get('duration_actual'):
+                        valid_data['duration_actual'] = calculate_duration(conn, origin_id, dest_id, valid_data['atd'], valid_data['ata'])
+            finally:
+                conn.close()
+
         if not valid_data:
              return jsonify({'error': 'No valid data provided'}), 400
         
@@ -63,7 +77,6 @@ def create_crud_routes(endpoint, table_name, columns):
         
         try:
             new_id = execute_db(f"INSERT INTO {table_name} ({cols}) VALUES ({placeholders})", values)
-            # return the new item
             new_item = query_db(f"SELECT * FROM {table_name} WHERE id = ?", (new_id,), one=True)
             return jsonify(new_item), 201
         except Exception as e:
@@ -74,6 +87,30 @@ def create_crud_routes(endpoint, table_name, columns):
     def update_item(id):
         data = request.json
         valid_data = {k: v for k, v in data.items() if k in columns}
+
+        # Special logic for flights duration
+        if table_name == 'flights':
+            conn = database.get_db()
+            try:
+                # Fetch existing to compare or fill
+                cur = conn.execute("SELECT origin_airport_id, dest_airport_id, std, sta, atd, ata FROM flights WHERE id = ?", (id,))
+                row = cur.fetchone()
+                if row:
+                    merged = {
+                        'origin_airport_id': valid_data.get('origin_airport_id', row[0]),
+                        'dest_airport_id': valid_data.get('dest_airport_id', row[1]),
+                        'std': valid_data.get('std', row[2]),
+                        'sta': valid_data.get('sta', row[3]),
+                        'atd': valid_data.get('atd', row[4]),
+                        'ata': valid_data.get('ata', row[5])
+                    }
+                    if merged['std'] and merged['sta'] and not valid_data.get('duration_scheduled'):
+                        valid_data['duration_scheduled'] = calculate_duration(conn, merged['origin_airport_id'], merged['dest_airport_id'], merged['std'], merged['sta'])
+                    if merged['atd'] and merged['ata'] and not valid_data.get('duration_actual'):
+                        valid_data['duration_actual'] = calculate_duration(conn, merged['origin_airport_id'], merged['dest_airport_id'], merged['atd'], merged['ata'])
+            finally:
+                conn.close()
+
         if not valid_data:
             return jsonify({'error': 'No valid data provided'}), 400
 
@@ -203,8 +240,53 @@ create_crud_routes('flights', 'flights', flights_cols)
 
 
 # --- CSV Import Route ---
-import csv
+import os
 import io
+import csv
+from datetime import datetime
+import pytz
+import airlines_data
+
+def calculate_duration(conn, origin_id, dest_id, dep_str, arr_str):
+    """Calculate duration in minutes considering timezones."""
+    if not dep_str or not arr_str: return None
+    try:
+        # Get Timezones
+        def get_tz(aid):
+            cur = conn.execute('''
+                SELECT c.timezone FROM airports a 
+                JOIN cities c ON a.city_id = c.id 
+                WHERE a.id = ?
+            ''', (aid,))
+            row = cur.fetchone()
+            return row[0] if row else 'UTC'
+        
+        origin_tz_name = get_tz(origin_id)
+        dest_tz_name = get_tz(dest_id)
+        
+        # Parse Dates (Try with/without T)
+        def parse_dt(dt_str, tz_name):
+            dt_str = dt_str.replace('T', ' ')
+            # Fallback formats
+            fmts = ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"]
+            for fmt in fmts:
+                try:
+                    dt = datetime.strptime(dt_str, fmt)
+                    tz = pytz.timezone(tz_name)
+                    return tz.localize(dt)
+                except:
+                    pass
+            return None
+
+        dep_dt = parse_dt(dep_str, origin_tz_name)
+        arr_dt = parse_dt(arr_str, dest_tz_name)
+        
+        if dep_dt and arr_dt:
+            diff = arr_dt - dep_dt
+            return int(diff.total_seconds() / 60)
+    except Exception as e:
+        print(f"Duration calc error: {e}")
+    return None
 
 @app.route('/api/import/<table_name>', methods=['POST'])
 def import_csv(table_name):
@@ -305,17 +387,23 @@ def import_csv(table_name):
                 'dest_code': ['destination', 'to', 'dest_code', 'arr'],
                 'airline_val': ['airline', 'airline_name', 'carrier'], # Lookup
                 'aircraft_val': ['aircraft', 'type', 'aircraft_model', 'equipment'], # Lookup
-                'dep_time_scheduled': ['std', 'dep_time', 'scheduled_dep', 'departure'],
-                'arr_time_scheduled': ['sta', 'arr_time', 'scheduled_arr', 'arrival'],
+                'std': ['std', 'dep_time_scheduled', 'dep_time', 'scheduled_dep', 'departure'],
+                'atd': ['atd', 'dep_time_actual', 'actual_dep'],
+                'sta': ['sta', 'arr_time_scheduled', 'arr_time', 'scheduled_arr', 'arrival'],
+                'ata': ['ata', 'arr_time_actual', 'actual_arr'],
                 'seat_number': ['seat', 'seat_no'],
                 'flight_class': ['class', 'cabin'],
                 'seat_type': ['seat_type', 'window/aisle'],
                 'note': ['note', 'notes', 'comment'],
                 'origin_terminal': ['origin_terminal', 'from_terminal', 'dep_terminal'],
                 'dest_terminal': ['dest_terminal', 'to_terminal', 'arr_terminal'],
-                'tag_generation': ['tag_generation', 'selected_gen'],
-                'tag_winglets': ['tag_winglets', 'selected_winglets'],
-                'tag_config': ['tag_config', 'selected_config']
+                'registration': ['registration', 'reg', 'tail_number', 'aircraft_registration'],
+                'distance': ['distance', 'dist', 'mileage'],
+                'duration_scheduled': ['duration_scheduled', 'sched_duration', 'flight_time_scheduled'],
+                'duration_actual': ['duration_actual', 'actual_duration', 'flight_time_actual'],
+                'tag_generation': ['tag_generation', 'selected_gen', 'generation'],
+                'tag_winglets': ['tag_winglets', 'selected_winglets', 'winglets'],
+                'tag_config': ['tag_config', 'selected_config', 'config']
             }
         }
         
@@ -340,13 +428,40 @@ def import_csv(table_name):
             # 2. Auto-Linking Logic
             # Lookup Helpers
             if table_name == 'airports':
-                if 'city_id' not in normalized_row or not normalized_row['city_id']:
-                    cname = normalized_row.get('city_name')
+                # Smart Fetch from IATA
+                iata = normalized_row.get('iata_code')
+                if iata and len(iata) == 3:
+                    # If name or lat/lon missing, try to fetch from airportsdata
+                    if not normalized_row.get('name') or not normalized_row.get('lat') or not normalized_row.get('icao_code'):
+                        ad_data = airportsdata.load('IATA')
+                        info = ad_data.get(iata.upper())
+                        if info:
+                            if not normalized_row.get('name'): normalized_row['name'] = info.get('name')
+                            if not normalized_row.get('icao_code'): normalized_row['icao_code'] = info.get('icao')
+                            if not normalized_row.get('lat'): normalized_row['lat'] = info.get('lat')
+                            if not normalized_row.get('lon'): normalized_row['lon'] = info.get('lon')
+                            # City logic: if city_id missing, use info.get('city') etc
+                            if 'city_id' not in normalized_row:
+                                city_name = info.get('city')
+                                country_code = info.get('country')
+                                if city_name:
+                                    # Reuse logic from _update_airport_logic if possible, or just look up
+                                    cur_c = conn.execute("SELECT id FROM cities WHERE name = ? AND country_code = ?", (city_name, country_code))
+                                    res_c = cur_c.fetchone()
+                                    if res_c: normalized_row['city_id'] = res_c[0]
+                                    else:
+                                        # Create basic city
+                                        conn.execute("INSERT INTO cities (name, country, country_code, timezone) VALUES (?, ?, ?, ?)",
+                                                   (city_name, country_code, country_code, info.get('tz')))
+                                        normalized_row['city_id'] = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+                # Manual Autolink City (Fallback if not fetched above)
+                if 'city_id' not in normalized_row:
+                    cname = normalized_row.get('city') or normalized_row.get('city_name')
                     if cname:
                         cid = lookup_id('cities', 'name', cname)
                         if cid: normalized_row['city_id'] = cid
-                        else: errors.append(f"Row {i+1}: City '{cname}' not found.") # Non-blocking for now? No, required.
-                        # Note: if city_id is required by DB, insert will fail later if we don't handle it.
+                        else: errors.append(f"Row {i+1}: City '{cname}' not found.")
                         if not cid: continue 
 
             if table_name == 'aircraft_models':
@@ -382,8 +497,10 @@ def import_csv(table_name):
                 if 'airline_id' not in normalized_row:
                     val = normalized_row.get('airline_val')
                     if val:
-                        # Try IATA then Name
-                        aid = lookup_id('airlines', 'iata_code', val) or lookup_id('airlines', 'name', val)
+                        # Try IATA then ICAO then Name
+                        aid = lookup_id('airlines', 'iata_code', val) or \
+                              lookup_id('airlines', 'icao_code', val) or \
+                              lookup_id('airlines', 'name', val)
                         if aid: normalized_row['airline_id'] = aid
                         else: errors.append(f"Row {i+1}: Airline '{val}' not found."); continue
 
@@ -398,6 +515,79 @@ def import_csv(table_name):
                         
                         if aid: normalized_row['aircraft_model_id'] = aid
                         else: errors.append(f"Row {i+1}: Aircraft '{val}' not found."); continue
+                
+                # Auto-Calculate Durations & TZ Conversion
+                std = normalized_row.get('std')
+                sta = normalized_row.get('sta')
+                atd = normalized_row.get('atd')
+                ata = normalized_row.get('ata')
+                origin_id = normalized_row.get('origin_airport_id')
+                dest_id = normalized_row.get('dest_airport_id')
+
+                # Helper to convert to Airport Local Time if TZ info is present
+                def convert_to_local(dt_str, airport_id):
+                    if not dt_str or not airport_id: return dt_str
+                    try:
+                         # 1. Parse string to datetime (dateutil is best but using basic first)
+                        dt = None
+                        # Trying flexible parsing with dateutil if available, else basic
+                        from dateutil import parser
+                        dt = parser.parse(dt_str)
+                        
+                        # 2. If naive, assume it's already local, return formatted
+                        if dt.tzinfo is None:
+                            return dt.strftime('%Y-%m-%d %H:%M')
+                        
+                        # 3. If aware, find airport timezone
+                        # Need efficient lookup. Cache? Doing per-row for now as volume is low.
+                        cur_tz = conn.execute('''
+                            SELECT c.timezone FROM airports a 
+                            JOIN cities c ON a.city_id = c.id 
+                            WHERE a.id = ?
+                        ''', (airport_id,))
+                        row_tz = cur_tz.fetchone()
+                        if row_tz and row_tz[0]:
+                            target_tz = pytz.timezone(row_tz[0])
+                            dt_local = dt.astimezone(target_tz)
+                            return dt_local.strftime('%Y-%m-%d %H:%M') # Return naive string
+                        else:
+                            # No airport TZ found, fallback to UTC or keep as is? 
+                            # If we can't convert, keeping original might be safer or strip tz
+                            return dt.replace(tzinfo=None).strftime('%Y-%m-%d %H:%M')
+                    except Exception as e:
+                        print(f"Time parse error: {e}")
+                        return dt_str # Return original on failure
+
+                # Convert input times to correct local times if they have TZ info
+                if origin_id:
+                    if std: normalized_row['std'] = convert_to_local(std, origin_id)
+                    if atd: normalized_row['atd'] = convert_to_local(atd, origin_id)
+                if dest_id:
+                    if sta: normalized_row['sta'] = convert_to_local(sta, dest_id)
+                    if ata: normalized_row['ata'] = convert_to_local(ata, dest_id)
+                
+                # Fetch new values after conversion for duration calc
+                std = normalized_row.get('std')
+                sta = normalized_row.get('sta')
+                atd = normalized_row.get('atd')
+                ata = normalized_row.get('ata')
+
+                # Auto-fill Date if missing
+                if 'date' not in normalized_row or not normalized_row['date']:
+                    # Try to get date from STD, then ATD
+                    ref_time = std if std else atd
+                    if ref_time:
+                         try:
+                             # format is YYYY-MM-DD HH:MM
+                             normalized_row['date'] = ref_time.split(' ')[0]
+                         except:
+                             pass
+
+                if origin_id and dest_id:
+                    if std and sta and not normalized_row.get('duration_scheduled'):
+                        normalized_row['duration_scheduled'] = calculate_duration(conn, origin_id, dest_id, std, sta)
+                    if atd and ata and not normalized_row.get('duration_actual'):
+                        normalized_row['duration_actual'] = calculate_duration(conn, origin_id, dest_id, atd, ata)
 
             # 3. Prepare Final Data
             valid_data = {k: v for k, v in normalized_row.items() if k in target_cols}
@@ -447,9 +637,9 @@ def get_flights_detailed():
     conn = database.get_db()
     cursor = conn.execute('''
         SELECT f.*, 
-               oa.iata_code as origin_code, oa.lat as origin_lat, oa.lon as origin_lon,
+               oa.iata_code as origin_code, oa.name as origin_name, oa.lat as origin_lat, oa.lon as origin_lon,
                oc.timezone as origin_tz,
-               da.iata_code as dest_code, da.lat as dest_lat, da.lon as dest_lon,
+               da.iata_code as dest_code, da.name as dest_name, da.lat as dest_lat, da.lon as dest_lon,
                dc.timezone as dest_tz,
                al.name as airline_name,
                am.name as aircraft_model
@@ -564,6 +754,52 @@ def batch_update_airports():
         conn.commit()
         conn.close()
         return jsonify({'message': f'Processed {len(ids)} airports, Updated {count}.'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def _update_airline_logic(id, conn):
+    """Helper to update single airline IATA from ICAO if possible."""
+    cur = conn.execute("SELECT icao_code, iata_code FROM airlines WHERE id = ?", (id,))
+    row = cur.fetchone()
+    if not row or not row[0]: return False, "No ICAO code"
+    icao = row[0].upper()
+    
+    idata = airlines_data.AIRLINES_ICAO_TO_IATA.get(icao)
+    if idata:
+        conn.execute("UPDATE airlines SET iata_code = ? WHERE id = ?", (idata, id))
+        return True, "Updated"
+    
+    return False, "ICAO code not found in database"
+
+@app.route('/api/airlines/<int:id>/update', methods=['POST'])
+def update_airline(id):
+    try:
+        conn = database.get_db()
+        success, res = _update_airline_logic(id, conn)
+        conn.commit()
+        conn.close()
+        if success: return jsonify({'message': 'Updated'})
+        else: return jsonify({'error': res}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/airlines/batch_update', methods=['POST'])
+def batch_update_airlines():
+    try:
+        conn = database.get_db()
+        # Select ALL airlines with an ICAO code to allow correcting wrong IATA codes
+        cur = conn.execute("SELECT id FROM airlines WHERE icao_code IS NOT NULL AND icao_code != ''")
+        ids = [row[0] for row in cur.fetchall()]
+        
+        count = 0
+        for aid in ids:
+            # logic already does a lookup and update if found
+            success, _ = _update_airline_logic(aid, conn)
+            if success: count += 1
+            
+        conn.commit()
+        conn.close()
+        return jsonify({'message': f'Processed {len(ids)} airlines, Updated {count}.'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
