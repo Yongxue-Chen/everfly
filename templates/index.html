@@ -46,6 +46,9 @@
             <div class="map-container">
                 <div id="flight-map"></div>
                 <div class="map-controls">
+                    <select id="year-filter" style="padding: 5px; margin-right: 5px;">
+                        <option value="all">All Years</option>
+                    </select>
                     <button onclick="setMapLayer('map')">Map</button>
                     <button onclick="setMapLayer('satellite')">Satellite</button>
                 </div>
@@ -66,6 +69,10 @@
                     <div style="display: flex; gap: 10px;">
                         <button class="btn btn-sm btn-secondary" onclick="openImportFlightsModal()">
                             <i class="fa-solid fa-file-upload"></i> Import CSV
+                        </button>
+                        <button class="btn btn-sm btn-secondary" onclick="updateMissingFlights()"
+                            title="Update missing info from AeroAPI">
+                            <i class="fa-solid fa-cloud-download-alt"></i> Update Missing
                         </button>
                     </div>
                 </div>

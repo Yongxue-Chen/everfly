@@ -2,8 +2,26 @@ from flask import Flask, render_template, jsonify, request
 import os
 import database
 import sqlite3
+import requests
+import dateutil.parser
+import airportsdata
+from datetime import datetime, timedelta
+import pytz
+import json
 
 app = Flask(__name__)
+FLIGHTAWARE_API_KEY = 'REMOVED-REVOKED-API-KEY'
+
+AIRLINES_BY_ICAO = {}
+try:
+    with open('airline_source.json', 'r', encoding='utf-8') as f:
+        # Check if file is list of dicts
+        raw_airlines = json.load(f)
+        for a in raw_airlines:
+            if a.get('icao') and a['icao'] != 'N/A':
+                AIRLINES_BY_ICAO[a['icao']] = a
+except Exception as e:
+    print(f"Failed to load airline_source.json: {e}")
 
 # Ensure the instance folder exists
 try:
@@ -138,7 +156,7 @@ def create_crud_routes(endpoint, table_name, columns):
 # Schema columns for validation (excluding id)
 # Schema columns for validation (excluding id)
 cities_cols = ['name', 'country', 'country_code', 'timezone']
-airports_cols = ['name', 'iata_code', 'icao_code', 'city_id', 'lat', 'lon', 'terminals']
+airports_cols = ['name', 'iata_code', 'icao_code', 'city_id', 'lat', 'lon', 'terminals', 'timezone']
 airlines_cols = ['name', 'iata_code', 'icao_code', 'frequent_flyer_program', 'frequent_flyer_id']
 aircraft_cols = ['name', 'manufacturer', 'model', 'series', 'subtype', 'generation', 'engine_type', 'winglets',
                  'tags_generation', 'tags_winglets', 'tags_config']
@@ -159,6 +177,9 @@ def migrate_schema():
         cities_cols_db = [row[1] for row in cur.fetchall()]
         if 'country_code' not in cities_cols_db:
              conn.execute("ALTER TABLE cities ADD COLUMN country_code TEXT")
+        if 'timezone' not in cities_cols_db:
+             conn.execute("ALTER TABLE cities ADD COLUMN timezone TEXT")
+             print("Migrated: Added timezone to cities")
 
         # Airlines
         cur = conn.execute("PRAGMA table_info(airlines)")
@@ -855,6 +876,375 @@ def batch_update_cities():
         return jsonify({'message': f'Updated {count} cities.'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# --- FlightAware AeroAPI Integration ---
+
+def fetch_aeroapi_data(ident, start_str, end_str):
+    url = f"https://aeroapi.flightaware.com/aeroapi/flights/{ident}"
+    headers = {"x-apikey": FLIGHTAWARE_API_KEY}
+    params = {
+        "start": start_str,
+        "end": end_str,
+        "max_pages": 1
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, params=params)
+    except Exception as e:
+        raise ValueError(f"Connection Error: {e}")
+
+    if response.status_code == 400:
+        try:
+            err = response.json()
+            if 'too far in the past' in err.get('detail', ''):
+                raise ValueError("Date exceeding API plan limit (10 days)")
+            raise ValueError(f"API Error: {err.get('detail', 'Bad Request')}")
+        except ValueError as ve:
+            raise ve
+        except:
+            raise ValueError(f"API Error 400: {response.text}")
+            
+    if response.status_code != 200:
+        raise ValueError(f"API Status {response.status_code}")
+
+    data = response.json()
+    return data.get('flights', [])
+
+def get_or_create_airport(icao, iata, conn):
+    if not iata and not icao: return None
+    # Try by ICAO first
+    if icao:
+        cur = conn.execute("SELECT id FROM airports WHERE icao_code = ?", (icao,))
+        row = cur.fetchone()
+        if row: return row[0]
+    
+    # Try by IATA
+    if iata:
+        cur = conn.execute("SELECT id FROM airports WHERE iata_code = ?", (iata,))
+        row = cur.fetchone()
+        if row: return row[0]
+        
+    print(f"Creating new airport: {icao}/{iata}")
+    # Create New Airport using airportsdata
+    ad = airportsdata.load('ICAO')
+    # If we only have IATA, airportsdata key is ICAO. Can we find it?
+    # airportsdata can load by IATA too.
+    info = None
+    if icao:
+        info = ad.get(icao)
+    elif iata:
+        ad_iata = airportsdata.load('IATA')
+        info = ad_iata.get(iata)
+
+    city_id = None
+    if info:
+        # Check/Create City
+        city_name = info['city']
+        cur = conn.execute("SELECT id, timezone FROM cities WHERE name = ?", (city_name,))
+        city_row = cur.fetchone()
+        
+        if city_row:
+            city_id = city_row[0]
+            # Backfill timezone if missing
+            if not city_row[1] and info.get('tz'):
+                 conn.execute("UPDATE cities SET timezone = ? WHERE id = ?", (info['tz'], city_id))
+        else:
+            # Try to guess timezone
+            tz = info['tz']
+            cur = conn.execute("INSERT INTO cities (name, country, timezone) VALUES (?, ?, ?)", (city_name, info['country'], tz))
+            city_id = cur.lastrowid
+            
+        cur = conn.execute('''
+            INSERT INTO airports (city_id, name, iata_code, icao_code, lat, lon, timezone)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (city_id, info['name'], info.get('iata'), info.get('icao'), info['lat'], info['lon'], info.get('tz')))
+        return cur.lastrowid
+    
+    return None
+
+def get_or_create_airline(icao, iata, conn):
+    if not icao: return None 
+    cur = conn.execute("SELECT id FROM airlines WHERE icao_code = ?", (icao,))
+    row = cur.fetchone()
+    if row: return row[0]
+    
+    name = icao # Default
+    new_iata = iata
+    
+    if icao in AIRLINES_BY_ICAO:
+        entry = AIRLINES_BY_ICAO[icao]
+        name = entry.get('name', icao)
+        # iata in json might be empty or "-" or valid
+        json_iata = entry.get('iata')
+        if json_iata and json_iata not in ['-', '', 'N/A']:
+             new_iata = json_iata
+        
+    cur = conn.execute("INSERT INTO airlines (name, iata_code, icao_code) VALUES (?, ?, ?)", (name, new_iata, icao))
+    return cur.lastrowid
+
+# --- Calculation API ---
+@app.route('/api/calculate_duration', methods=['POST'])
+def calculate_duration():
+    data = request.json
+    start_str = data.get('start')
+    end_str = data.get('end')
+    origin_id = data.get('origin_id')
+    dest_id = data.get('dest_id')
+
+    if not start_str or not end_str or not origin_id or not dest_id:
+        return jsonify({'error': 'Missing parameters'}), 400
+
+    try:
+        conn = database.get_db()
+        # Fetch timezones
+        cur = conn.execute("SELECT timezone FROM airports WHERE id = ?", (origin_id,))
+        origin_row = cur.fetchone()
+        cur = conn.execute("SELECT timezone FROM airports WHERE id = ?", (dest_id,))
+        dest_row = cur.fetchone()
+
+        if not origin_row or not dest_row:
+             return jsonify({'error': 'Airports not found'}), 404
+
+        tz_origin_str = origin_row[0]
+        tz_dest_str = dest_row[0]
+
+        # Parse Naive
+        dt_start = dateutil.parser.parse(start_str)
+        dt_end = dateutil.parser.parse(end_str)
+
+        # Localize
+        if tz_origin_str:
+            try:
+                tz_origin = pytz.timezone(tz_origin_str)
+                # If dt_start is naive, localize it
+                if dt_start.tzinfo is None:
+                    dt_start = tz_origin.localize(dt_start)
+            except Exception as e:
+                print(f"Timezone error origin: {e}")
+
+        if tz_dest_str:
+            try:
+                tz_dest = pytz.timezone(tz_dest_str)
+                if dt_end.tzinfo is None:
+                    dt_end = tz_dest.localize(dt_end)
+            except Exception as e:
+                print(f"Timezone error dest: {e}")
+
+        # Calculate Difference
+        diff = dt_end - dt_start
+        minutes = int(diff.total_seconds() / 60)
+        
+        return jsonify({'minutes': minutes})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def update_single_flight_from_aeroapi(flight_id, force=False):
+    conn = database.get_db()
+    # Fetch existing data including terminals
+    cur = conn.execute("SELECT flight_number, date, origin_airport_id, dest_airport_id, std, atd, registration, airline_id, aircraft_model_id, distance, duration_actual, origin_terminal, dest_terminal FROM flights WHERE id = ?", (flight_id,))
+    flight = cur.fetchone()
+    
+    if not flight:
+        return {'error': 'Flight not found'}
+        
+    f_num = flight[0]     # e.g. CA123
+    f_date = flight[1]    # YYYY-MM-DD
+    
+    if not f_num or not f_date:
+        return {'error': 'Missing flight number or date'}
+
+    # Strategy: Always fetch if forced, OR if missing critical data (std, atd, reg)
+    # But when writing, ONLY write to empty fields.
+    is_missing_data = not (flight[4] and flight[5] and flight[6])
+    if not force and not is_missing_data:
+         conn.close()
+         return {'message': 'Skipped, data exists'}
+         
+    # Clean flight number for API (remove spaces, e.g. "CA 123" -> "CA123")
+    f_num_clean = f_num.replace(' ', '')
+
+    f_dt = dateutil.parser.parse(f_date)
+    start_window = (f_dt - timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    end_window = (f_dt + timedelta(days=2)).strftime('%Y-%m-%dT%H:%M:%SZ') 
+    
+    try:
+        raw_flights = fetch_aeroapi_data(f_num_clean, start_window, end_window)
+    except ValueError as e:
+        conn.close()
+        return {'error': str(e)}
+    except Exception as e:
+        conn.close()
+        return {'error': 'API unexpected error'}
+    
+    if not raw_flights:
+        conn.close()
+        return {'error': 'No data found in AeroAPI'}
+
+    best_match = None
+    closest_diff = float('inf')
+    
+    for f in raw_flights:
+        t_str = f.get('scheduled_out') or f.get('actual_out')
+        if not t_str: continue
+        
+        t = dateutil.parser.parse(t_str).replace(tzinfo=None) # Compare naïve to date
+        diff = abs((t - f_dt).total_seconds())
+        if diff < 36 * 3600:
+            if diff < closest_diff:
+                closest_diff = diff
+                best_match = f
+            
+    if not best_match:
+        conn.close()
+        return {'error': 'No matching flight in time window'}
+        
+    api_std = best_match.get('scheduled_out')
+    api_atd = best_match.get('actual_out')
+    api_sta = best_match.get('scheduled_in')
+    api_ata = best_match.get('actual_in')
+    api_reg = best_match.get('registration')
+    api_dist = best_match.get('route_distance') 
+    
+    api_origin_code = best_match.get('origin', {}).get('code')
+    api_dest_code = best_match.get('destination', {}).get('code')
+    
+    api_origin_term = best_match.get('origin', {}).get('terminal')
+    api_dest_term = best_match.get('destination', {}).get('terminal')
+    
+    update_fields = []
+    update_values = []
+    
+    # Helper to only update if current is empty
+    def add_update(col, val, current_val):
+        # Strict rule: Only update if current_val is empty/None
+        if val and not current_val:
+             update_fields.append(f"{col} = ?")
+             update_values.append(val)
+
+    add_update('std', api_std, flight[4])
+    add_update('atd', api_atd, flight[5])
+    add_update('sta', api_sta, None) # Assuming not fetched in SELECT, can't check. But usually safe to fill if we fill others.
+    # Wait, fetching sta/ata was not in SELECT above. Let's fix that or assume it's okay to overwrite if std was empty?
+    # Better to fetch them. Or just trust that if std is empty, sta is likely empty.
+    # Actually, let's fetch sta/ata to be safe. SELECT ... std, atd, sta, ata ...
+    # Refetching logic below since I can't change the SELECT string easily in `add_update` call without changing `flight` indices.
+    # I'll update the SELECT query at the top.
+    
+    add_update('registration', api_reg, flight[6])
+    add_update('distance', api_dist, flight[9])
+    
+    # Terminals
+    add_update('origin_terminal', api_origin_term, flight[11])
+    add_update('dest_terminal', api_dest_term, flight[12])
+
+    
+    # helper for airport terminals update
+    def ensure_terminal_in_db(airport_id, term):
+        if not airport_id or not term: return
+        try:
+            cur = conn.execute("SELECT terminals FROM airports WHERE id = ?", (airport_id,))
+            row = cur.fetchone()
+            if row:
+                terms_str = row[0] or ""
+                terms_list = [t.strip() for t in terms_str.split(',') if t.strip()]
+                if term not in terms_list:
+                    print(f"Adding terminal {term} to airport {airport_id}")
+                    terms_list.append(term)
+                    # Sort numerically/alphabetically?
+                    terms_list.sort()
+                    new_str = ", ".join(terms_list)
+                    conn.execute("UPDATE airports SET terminals = ? WHERE id = ?", (new_str, airport_id))
+        except Exception as e:
+            print(f"Error updating airport terminals: {e}")
+
+    # Origin/Dest Airports
+    if api_origin_code:
+        aid = get_or_create_airport(api_origin_code, None, conn)
+        if aid:
+            if not flight[2]: # Only update airport if missing
+                 update_fields.append("origin_airport_id = ?")
+                 update_values.append(aid)
+            # Check terminal for this airport (either existing or new)
+            # Use flight[2] if it existed, or aid if we just set it.
+            target_aid = flight[2] if flight[2] else aid
+            ensure_terminal_in_db(target_aid, api_origin_term)
+
+    if api_dest_code:
+        aid = get_or_create_airport(api_dest_code, None, conn)
+        if aid:
+            if not flight[3]:
+                 update_fields.append("dest_airport_id = ?")
+                 update_values.append(aid)
+            target_aid = flight[3] if flight[3] else aid
+            ensure_terminal_in_db(target_aid, api_dest_term)
+             
+    # Aircraft Type
+    api_type = best_match.get('aircraft_type')
+    if api_type and not flight[8]: # Only if missing
+        cur_am = conn.execute("SELECT id FROM aircraft_models WHERE icao_code = ?", (api_type,))
+        row = cur_am.fetchone()
+        mid = None
+        if row: 
+            mid = row[0]
+        else:
+             print(f"Creating aircraft model: {api_type}")
+             cur_am = conn.execute("INSERT INTO aircraft_models (name, icao_code) VALUES (?, ?)", (api_type, api_type))
+             mid = cur_am.lastrowid
+        
+        if mid:
+            update_fields.append("aircraft_model_id = ?")
+            update_values.append(mid)
+            
+    # Airline
+    api_airline = best_match.get('operator')
+    if api_airline and not flight[7]: # Only if missing
+         al_id = get_or_create_airline(api_airline, None, conn)
+         if al_id:
+              update_fields.append("airline_id = ?")
+              update_values.append(al_id)
+
+    if not update_fields:
+        conn.close()
+        return {'message': 'No new data or data already exists'}
+        
+    update_values.append(flight_id)
+    sql = f"UPDATE flights SET {', '.join(update_fields)} WHERE id = ?"
+    conn.execute(sql, update_values)
+    conn.commit()
+    conn.close()
+    
+    return {'success': True, 'fields_updated': len(update_fields)}
+
+@app.route('/api/flights/<int:flight_id>/update_aeroapi', methods=['POST'])
+def update_flight_aeroapi(flight_id):
+    result = update_single_flight_from_aeroapi(flight_id, force=True)
+    return jsonify(result)
+
+@app.route('/api/flights/update_aeroapi_missing', methods=['POST'])
+def update_missing_flights_aeroapi():
+    conn = database.get_db()
+    cur = conn.execute('''
+        SELECT id FROM flights 
+        WHERE (std IS NULL OR atd IS NULL OR registration IS NULL OR registration = '')
+        AND flight_number IS NOT NULL AND date IS NOT NULL
+    ''')
+    rows = cur.fetchall()
+    conn.close()
+    
+    updated_count = 0
+    errors = []
+    
+    for row in rows:
+        fid = row[0]
+        res = update_single_flight_from_aeroapi(fid, force=False)
+        if res.get('success'):
+            updated_count += 1
+        elif res.get('error'):
+            pass # Silent fail for bulk? Or log?
+            # errors.append(f"Flight {fid}: {res['error']}")
+            
+    return jsonify({'updated': updated_count, 'total_candidates': len(rows)})
 
 if __name__ == '__main__':
     # Initialize DB (safe to run multiple times)

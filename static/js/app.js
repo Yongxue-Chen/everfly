@@ -455,34 +455,190 @@ function renderDatasetTable(config, data) {
 }
 
 // --- Modals ---
-let currentModalSuccessCallback = null;
+// --- Modals (Stacked) ---
+const modalStack = [];
 
 function openModal(title, contentFn, onSave) {
-    document.getElementById('modal-title').textContent = title;
-    const body = document.getElementById('modal-body');
-    body.innerHTML = '';
+    const zIndex = 2000 + (modalStack.length * 10);
+
+    // Create DOM
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = zIndex;
+
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'modal-header';
+    header.innerHTML = `<h3>${title}</h3><button class="close-btn">&times;</button>`;
+    header.querySelector('.close-btn').onclick = () => closeModal();
+
+    // Body
+    const body = document.createElement('div');
+    body.className = 'modal-body';
     body.appendChild(contentFn());
 
-    document.getElementById('modal-container').style.display = 'flex';
-    currentModalSuccessCallback = onSave;
+    // Footer
+    const footer = document.createElement('div');
+    footer.className = 'modal-footer';
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'btn btn-primary';
+    saveBtn.textContent = 'Save';
 
-    // Save button handler
-    const saveBtn = document.getElementById('modal-save-btn');
-    saveBtn.onclick = async () => {
-        const form = body.querySelector('form');
-        const formData = new FormData(form);
-        const data = Object.fromEntries(formData.entries());
+    if (onSave) {
+        saveBtn.onclick = async () => {
+            const form = body.querySelector('form');
+            if (form && !form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
 
-        if (currentModalSuccessCallback) {
-            await currentModalSuccessCallback(data);
-        }
-        closeModal();
-    };
+            let data = {};
+            if (form) {
+                const formData = new FormData(form);
+                data = Object.fromEntries(formData.entries());
+            }
+
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+
+            try {
+                const result = await onSave(data);
+                if (result !== false) closeModal(); // Only close if not explicitly false
+            } catch (e) {
+                alert(e);
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save';
+            }
+        };
+    } else {
+        saveBtn.style.display = 'none';
+    }
+
+    footer.appendChild(saveBtn);
+    modal.appendChild(header);
+    modal.appendChild(body);
+    modal.appendChild(footer);
+    overlay.appendChild(modal);
+
+    document.body.appendChild(overlay);
+    modalStack.push(overlay);
 }
 
 function closeModal() {
-    document.getElementById('modal-container').style.display = 'none';
-    currentModalSuccessCallback = null;
+    if (modalStack.length === 0) return;
+    const overlay = modalStack.pop();
+    overlay.remove();
+}
+
+// --- Forms ---
+function createForm(fields, item = {}) {
+    const form = document.createElement('form');
+    fields.forEach(col => {
+        const formGroup = document.createElement('div');
+        formGroup.className = 'form-group';
+
+        const label = document.createElement('label');
+        label.textContent = col.label;
+        formGroup.appendChild(label);
+
+        let input;
+
+        if (col.type === 'select' || col.type === 'lookup') {
+            // Wrapper for flex
+            const wrapper = document.createElement('div');
+            wrapper.style.display = 'flex';
+            wrapper.style.gap = '5px';
+
+            input = document.createElement('select');
+            input.name = col.key;
+            if (col.required) input.required = true;
+
+            // Populate options helper
+            const populate = (items) => {
+                input.innerHTML = '<option value="">-- Select --</option>';
+                items.forEach(opt => {
+                    const el = document.createElement('option');
+                    if (typeof opt === 'object') {
+                        el.value = opt.id || opt;
+                        el.textContent = opt[col.display || 'name'] || opt.label || opt;
+                    } else {
+                        el.value = opt;
+                        el.textContent = opt;
+                    }
+                    if (item && item[col.key] == el.value) el.selected = true;
+                    input.appendChild(el);
+                });
+            };
+
+            // Lookup vs Options
+            if (col.lookup && State.cache[col.lookup]) {
+                const list = [...State.cache[col.lookup]];
+                // basic sort by name if available
+                if (list.length > 0 && list[0].name) {
+                    list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                }
+                populate(list);
+
+                // Add (+) Button for lookups
+                const addBtn = document.createElement('button');
+                addBtn.type = 'button';
+                addBtn.className = 'btn btn-sm btn-secondary';
+                addBtn.innerText = '+';
+                addBtn.title = 'Add New Item';
+                addBtn.onclick = () => {
+                    // Open Create Modal for this entity
+                    // We need to know which dataset key maps to this lookup
+                    // Usually col.lookup matches the dataset key (airports, airlines, etc)
+                    openEditDatasetModal({}, col.lookup, async (newId) => {
+                        // Success callback
+                        State.cache[col.lookup] = await API.get(DATASETS[col.lookup].endpoint);
+                        // Re-sort
+                        const newList = [...State.cache[col.lookup]];
+                        if (newList.length > 0 && newList[0].name) {
+                            newList.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+                        }
+                        populate(newList);
+                        input.value = newId;
+                        input.dispatchEvent(new Event('change'));
+                    });
+                };
+                wrapper.appendChild(input);
+                wrapper.appendChild(addBtn);
+                input.style.flex = '1';
+
+            } else if (col.options) {
+                populate(col.options);
+                wrapper.appendChild(input);
+            } else {
+                wrapper.appendChild(input);
+            }
+
+            formGroup.appendChild(wrapper);
+
+        } else if (col.type === 'textarea') {
+            input = document.createElement('textarea');
+            input.name = col.key;
+            input.rows = 3;
+            if (item[col.key]) input.value = item[col.key];
+            formGroup.appendChild(input);
+        } else {
+            input = document.createElement('input');
+            input.type = col.type || 'text';
+            input.name = col.key;
+            if (col.placeholder) input.placeholder = col.placeholder;
+            if (col.required) input.required = true;
+            if (col.step) input.step = col.step;
+            if (item[col.key]) input.value = item[col.key];
+            formGroup.appendChild(input);
+        }
+
+        form.appendChild(formGroup);
+    });
+    return form;
 }
 
 // --- Form Generators ---
@@ -497,24 +653,46 @@ async function openAddDatasetModal() {
             const suffix = (data.subtype && data.subtype.trim()) ? data.subtype : data.series;
             data.name = `${data.model}-${suffix}`;
         }
-        await API.post(config.endpoint, data);
+        const res = await API.post(config.endpoint, data);
+        if (res.error) {
+            alert(res.error);
+            return false; // Prevent modal from closing
+        }
         loadDataset(State.currentDataset); // Refresh
+        return res.id; // Return the new ID for lookup callbacks
     });
 }
 
-async function openEditDatasetModal(item) {
-    const config = DATASETS[State.currentDataset];
+async function openEditDatasetModal(item, datasetOverride = null, onSuccess = null) {
+    const currentDatasetKey = datasetOverride || State.currentDataset;
+    const config = DATASETS[currentDatasetKey];
     // Ensure dependencies are loaded
-    if (State.currentDataset === 'airports' && !State.cache.cities) State.cache.cities = await API.get('cities');
+    if (currentDatasetKey === 'airports' && !State.cache.cities) State.cache.cities = await API.get('cities');
 
-    openModal(`Edit ${config.label}`, () => createForm(config.fields, item), async (data) => {
+    openModal(`${item.id ? 'Edit' : 'Add'} ${config.label}`, () => createForm(config.fields, item), async (data) => {
         // Auto-Generate Name for Aircraft
-        if (State.currentDataset === 'aircraft_models') {
+        if (currentDatasetKey === 'aircraft_models') {
             const suffix = (data.subtype && data.subtype.trim()) ? data.subtype : data.series;
             data.name = `${data.model}-${suffix}`;
         }
-        await API.put(config.endpoint, item.id, data);
-        loadDataset(State.currentDataset); // Refresh
+        let res;
+        if (item.id) {
+            res = await API.put(config.endpoint, item.id, data);
+        } else {
+            res = await API.post(config.endpoint, data);
+        }
+
+        if (res.error) {
+            alert(res.error);
+            return false; // Prevent modal from closing
+        }
+
+        if (onSuccess) {
+            onSuccess(res.id); // Pass the new/updated ID to the callback
+        } else {
+            loadDataset(State.currentDataset); // Refresh only if not a lookup add
+        }
+        return res.id; // Return the new ID for lookup callbacks
     });
 }
 
@@ -620,57 +798,6 @@ function openImportModal() {
     };
 }
 
-function createForm(fields, values = {}) {
-    const form = document.createElement('form');
-    fields.forEach(field => {
-        const grp = document.createElement('div');
-        grp.className = 'form-group';
-
-        const label = document.createElement('label');
-        label.textContent = field.label;
-        grp.appendChild(label);
-
-        let input;
-        if (field.type === 'select') {
-            input = document.createElement('select');
-            input.name = field.key;
-
-            // Add Default Option
-            const defOpt = document.createElement('option');
-            defOpt.value = "";
-            defOpt.textContent = "-- Select --";
-            input.appendChild(defOpt);
-
-            if (field.lookup) {
-                const lookupData = State.cache[field.lookup] || [];
-                lookupData.forEach(opt => {
-                    const option = document.createElement('option');
-                    option.value = opt.id;
-                    option.textContent = opt[field.display];
-                    if (values[field.key] == opt.id) option.selected = true;
-                    input.appendChild(option);
-                });
-            } else if (field.options) {
-                field.options.forEach(opt => {
-                    const option = document.createElement('option');
-                    option.value = opt.value || opt;
-                    option.textContent = opt.label || opt;
-                    if (values[field.key] == option.value) option.selected = true;
-                    input.appendChild(option);
-                });
-            }
-        } else {
-            input = document.createElement('input');
-            input.type = field.type;
-            input.name = field.key;
-            input.value = values[field.key] || '';
-        }
-
-        grp.appendChild(input);
-        form.appendChild(grp);
-    });
-    return form;
-}
 
 async function deleteDatasetItem(id) {
     if (!confirm('Are you sure?')) return;
@@ -809,6 +936,7 @@ function renderFlights() {
             <td>${f.flight_class || '-'}</td>
             <td style="max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${f.note || ''}">${f.note || ''}</td>
             <td>
+                <button class="btn btn-sm btn-icon" style="color:var(--accent-blue)" title="Update from AeroAPI" onclick="updateFlightFromAeroAPI(${f.id})"><i class="fa-solid fa-cloud-arrow-down"></i></button>
                 <button class="btn btn-sm btn-icon" onclick="openEditFlightModal(${JSON.stringify(f).replace(/"/g, '&quot;')})"><i class="fa-solid fa-pen"></i></button>
                 <button class="btn btn-sm btn-icon" style="color:var(--danger)" onclick="deleteFlight(${f.id})"><i class="fa-solid fa-trash"></i></button>
             </td>
@@ -823,6 +951,34 @@ function renderFlights() {
             // lazy checking, remove logic for simplicity or improve UI feedback later
         }
     });
+}
+
+async function updateFlightFromAeroAPI(id) {
+    if (!confirm('Fill in missing flight details from AeroAPI?')) return;
+    try {
+        const res = await API.post(`flights/${id}/update_aeroapi`, {});
+        if (res.success) {
+            alert(`Updated ${res.fields_updated} fields.`);
+            loadFlights();
+        } else {
+            alert('Update failed: ' + (res.error || res.message));
+        }
+    } catch (e) { alert('Error: ' + e); }
+}
+
+async function updateMissingFlights() {
+    const btn = document.querySelector('button[onclick="updateMissingFlights()"]');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...'; }
+
+    try {
+        const res = await API.post('flights/update_aeroapi_missing', {});
+        alert(`Bulk update complete.\nUpdated: ${res.updated}\nTotal Candidates: ${res.total_candidates}`);
+        loadFlights();
+    } catch (e) {
+        alert('Bulk update error: ' + e);
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-cloud-download-alt"></i> Update Missing'; }
+    }
 }
 
 function openImportFlightsModal() {
@@ -987,10 +1143,134 @@ async function openEditFlightModal(item) {
         destSelect.addEventListener('change', (e) => updateAirportInfo(e.target.value, destTermSelect, 'Dest'));
         aircraftSelect.addEventListener('change', (e) => updateVariants(e.target.value));
 
+        // --- Dynamic Add Helper ---
+        const injectAddButton = (select, parentSelect, parentList, parentField, apiEndpoint, refreshFn, itemKey) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn btn-sm btn-secondary';
+            btn.innerText = '+';
+            btn.title = 'Add New Item';
+            btn.onclick = async () => {
+                const parentId = parentSelect.value;
+                if (!parentId) return alert('Please select a parent item first.');
+
+                const newValue = prompt(`Enter new value for ${parentField}:`);
+                if (!newValue) return;
+
+                const parentObj = parentList.find(x => x.id == parentId);
+                if (!parentObj) return;
+
+                let current = parentObj[parentField] || '';
+                // Check duplicate
+                if (current.split(',').map(s => s.trim()).includes(newValue.trim())) {
+                    alert('Item already exists.');
+                    return;
+                }
+
+                parentObj[parentField] = current ? current + ', ' + newValue : newValue;
+
+                try {
+                    // Update Backend
+                    await API.put(apiEndpoint, parentId, parentObj);
+
+                    // Update Local Item state so refreshFn selects it (if refreshFn uses item)
+                    // Terminal refresh uses 'item', Variant refresh uses 'item'
+                    item[itemKey] = newValue;
+
+                    // Refresh Options
+                    refreshFn(parentId);
+
+                    // Explicitly set value just in case
+                    select.value = newValue;
+                } catch (e) {
+                    alert('Update failed: ' + e);
+                }
+            };
+
+            // Append to wrapper
+            if (select.parentNode) {
+                select.parentNode.appendChild(btn);
+                select.style.flex = '1';
+            }
+        };
+
+        // Inject Buttons
+        injectAddButton(originTermSelect, originSelect, airports, 'terminals', 'airports', (pid) => updateAirportInfo(pid, originTermSelect, 'Origin'), 'origin_terminal');
+        injectAddButton(destTermSelect, destSelect, airports, 'terminals', 'airports', (pid) => updateAirportInfo(pid, destTermSelect, 'Dest'), 'dest_terminal');
+
+        injectAddButton(genSelect, aircraftSelect, aircraft, 'tags_generation', 'aircraft_models', updateVariants, 'tag_generation');
+        injectAddButton(wlSelect, aircraftSelect, aircraft, 'tags_winglets', 'aircraft_models', updateVariants, 'tag_winglets');
+        injectAddButton(cfgSelect, aircraftSelect, aircraft, 'tags_config', 'aircraft_models', updateVariants, 'tag_config');
+
         // Initial Trigger
         updateAirportInfo(item.origin_airport_id, originTermSelect, 'Origin');
         updateAirportInfo(item.dest_airport_id, destTermSelect, 'Dest');
         updateVariants(item.aircraft_model_id);
+
+        // --- Auto-Calc Duration Logic ---
+        const stdInput = form.querySelector('[name="std"]');
+        const staInput = form.querySelector('[name="sta"]');
+        const durSchedInput = form.querySelector('[name="duration_scheduled"]');
+
+        const atdInput = form.querySelector('[name="atd"]');
+        const ataInput = form.querySelector('[name="ata"]');
+        const durActualInput = form.querySelector('[name="duration_actual"]');
+
+        if (durSchedInput) {
+            durSchedInput.readOnly = true;
+            durSchedInput.style.backgroundColor = '#f0f0f0';
+        }
+        if (durActualInput) {
+            durActualInput.readOnly = true;
+            durActualInput.style.backgroundColor = '#f0f0f0';
+        }
+
+        const calcDuration = async (startIn, endIn, durIn) => {
+            if (!startIn || !endIn || !durIn) return;
+            const startVal = startIn.value;
+            const endVal = endIn.value;
+            const oid = originSelect.value;
+            const did = destSelect.value;
+
+            if (startVal && endVal && oid && did) {
+                // Show loading state?
+                durIn.style.backgroundColor = '#e0e0e0';
+                try {
+                    const res = await API.post('calculate_duration', {
+                        start: startVal,
+                        end: endVal,
+                        origin_id: oid,
+                        dest_id: did
+                    });
+                    if (res.minutes !== undefined) {
+                        durIn.value = res.minutes;
+                    } else if (res.error) {
+                        console.error(res.error);
+                    }
+                } catch (e) {
+                    console.error(e);
+                } finally {
+                    durIn.style.backgroundColor = '#f0f0f0';
+                }
+            }
+        };
+
+        const attachCalc = (s, e, d) => {
+            const handler = () => calcDuration(s, e, d);
+            s.addEventListener('change', handler);
+            e.addEventListener('change', handler);
+            // Also re-calc if airports change?
+            originSelect.addEventListener('change', handler);
+            destSelect.addEventListener('change', handler);
+        };
+
+        if (stdInput && staInput && durSchedInput) {
+            attachCalc(stdInput, staInput, durSchedInput);
+        }
+
+        if (atdInput && ataInput && durActualInput) {
+            attachCalc(atdInput, ataInput, durActualInput);
+        }
 
         return form;
     }, async (data) => {
@@ -1000,164 +1280,84 @@ async function openEditFlightModal(item) {
 }
 
 async function openAddFlightModal() {
-    // We need to fetch all dependencies: Airports, Airlines, Aircraft
-    const [airports, airlines, aircraft] = await Promise.all([
-        API.get('airports'),
-        API.get('airlines'),
-        API.get('aircraft_models')
-    ]);
-
-    // Cache them for form generation
-    State.cache.airports = airports;
-    State.cache.airlines = airlines;
-    State.cache.models = aircraft; // mismatched key, let's just make custom form or align keys
-
+    // Simplified Quick Add Mode
+    // Only ask for Flight Number and Date
     const flightFields = [
-        { key: 'flight_number', label: 'Flight Number', type: 'text' },
-        { key: 'registration', label: 'Aircraft Reg', type: 'text', placeholder: 'e.g. B-1234' },
-
-        { key: 'origin_airport_id', label: 'Origin', type: 'select', lookup: 'airports', display: 'name' },
-        { key: 'origin_terminal', label: 'Origin Terminal', type: 'select', options: [] }, // Dynamic
-        { key: 'dest_airport_id', label: 'Destination', type: 'select', lookup: 'airports', display: 'name' },
-        { key: 'dest_terminal', label: 'Dest Terminal', type: 'select', options: [] }, // Dynamic
-
-        // Date & Times (ISO Datetime)
-        { key: 'std', label: 'Sched Departure (Local)', type: 'datetime-local' },
-        { key: 'atd', label: 'Actual Departure (Local)', type: 'datetime-local' },
-        { key: 'sta', label: 'Sched Arrival (Local)', type: 'datetime-local' },
-        { key: 'ata', label: 'Actual Arrival (Local)', type: 'datetime-local' },
-
-        { key: 'distance', label: 'Distance', type: 'number', placeholder: 'km/mi' },
-        { key: 'duration_scheduled', label: 'Sched Duration (min)', type: 'number' },
-        { key: 'duration_actual', label: 'Actual Duration (min)', type: 'number' },
-
-        { key: 'airline_id', label: 'Airline', type: 'select', lookup: 'airlines', display: 'name' },
-        { key: 'aircraft_model_id', label: 'Aircraft', type: 'select', lookup: 'models', display: 'name' }, // Using Name ID
-
-        // Dynamic Variant Selects
-        { key: 'tag_generation', label: 'Generation', type: 'select', options: [] },
-        { key: 'tag_winglets', label: 'Winglets', type: 'select', options: [] },
-        { key: 'tag_config', label: 'Config', type: 'select', options: [] },
-
-        { key: 'seat_number', label: 'Seat Number', type: 'text' },
-        { key: 'seat_type', label: 'Seat Type', type: 'select', options: ['Window', 'Middle', 'Aisle'] },
-        { key: 'flight_class', label: 'Class', type: 'text' },
-        { key: 'note', label: 'Note', type: 'textarea' }
+        { key: 'flight_number', label: 'Flight Number', type: 'text', placeholder: 'e.g. CA123' },
+        { key: 'date', label: 'Date', type: 'date' } // Use date input, backend stores YYYY-MM-DD
     ];
 
-    // Hack: manually fix the lookup in createForm to look at the right cache key
-    State.cache.models = aircraft;
-
-    openModal('Add Flight', () => {
+    openModal('Add Flight (Quick)', () => {
         const form = createForm(flightFields);
-
-        // --- Airport Terminal & Timezone Logic ---
-        const originSelect = form.querySelector('[name="origin_airport_id"]');
-        const destSelect = form.querySelector('[name="dest_airport_id"]');
-        const originTermSelect = form.querySelector('[name="origin_terminal"]');
-        const destTermSelect = form.querySelector('[name="dest_terminal"]');
-
-        // Helper to find timezone
-        const getTz = (airportId) => {
-            const airport = airports.find(a => a.id == airportId);
-            if (airport && airport.city_id && State.cache.cities) {
-                const city = State.cache.cities.find(c => c.id == airport.city_id);
-                return city ? city.timezone : '';
-            }
-            return '';
-        };
-
-        const updateAirportInfo = (airportId, terminalSelect, labelPrefix) => {
-            // Update Terminals
-            terminalSelect.innerHTML = '<option value="">-- Select --</option>';
-            const airport = airports.find(a => a.id == airportId);
-            if (airport && airport.terminals) {
-                const terms = airport.terminals.split(',').map(t => t.trim());
-                if (terms.length > 0) {
-                    terms.forEach(t => {
-                        const opt = document.createElement('option');
-                        opt.value = t;
-                        opt.textContent = t;
-                        terminalSelect.appendChild(opt);
-                    });
-                }
-            }
-
-            // update timezone label hint
-            const tz = getTz(airportId);
-            if (tz) {
-                // Find label for this SELECT and append TZ
-                // Simplified: just log or alert for now, or updating label text?
-                // Better: Update the label of the "Sched Departure" / "Sched Arrival" inputs to include TZ
-                if (labelPrefix === 'Origin') {
-                    const l1 = form.querySelector('label[for="std"]'); // form generator might not set ids match keys exactly without looping
-                    // Our createForm helper creates labels? 
-                    // Let's just assume we can find fields. 
-                    // Actually, let's just use a floating info span if possible, or update the label directly if we can find it.
-                    // For now, let's just store it or use a simple alert/console. 
-                    // A proper way is to modify the label text: "Sched Departure (UTC+8)"
-                    const stdLabel = Array.from(form.querySelectorAll('label')).find(l => l.innerText.includes('Sched Departure'));
-                    if (stdLabel) stdLabel.innerText = `Sched Departure (${tz})`;
-                    const atdLabel = Array.from(form.querySelectorAll('label')).find(l => l.innerText.includes('Actual Departure'));
-                    if (atdLabel) atdLabel.innerText = `Actual Departure (${tz})`;
-                } else {
-                    const staLabel = Array.from(form.querySelectorAll('label')).find(l => l.innerText.includes('Sched Arrival'));
-                    if (staLabel) staLabel.innerText = `Sched Arrival (${tz})`;
-                    const ataLabel = Array.from(form.querySelectorAll('label')).find(l => l.innerText.includes('Actual Arrival'));
-                    if (ataLabel) ataLabel.innerText = `Actual Arrival (${tz})`;
-                }
-            }
-        };
-
-        originSelect.addEventListener('change', (e) => updateAirportInfo(e.target.value, originTermSelect, 'Origin'));
-        destSelect.addEventListener('change', (e) => updateAirportInfo(e.target.value, destTermSelect, 'Dest'));
-
-        // --- Aircraft Variant Logic ---
-        const aircraftSelect = form.querySelector('[name="aircraft_model_id"]');
-        const genSelect = form.querySelector('[name="tag_generation"]');
-        const winSelect = form.querySelector('[name="tag_winglets"]');
-        const confSelect = form.querySelector('[name="tag_config"]');
-
-        const updateVariants = (modelId) => {
-            // Reset all
-            [genSelect, winSelect, confSelect].forEach(s => s.innerHTML = '<option value="">-- Select --</option>');
-
-            const model = aircraft.find(m => m.id == modelId);
-            if (!model) return;
-
-            const populate = (select, tags) => {
-                if (!tags) return;
-                const options = tags.split(',').map(t => t.trim());
-                options.forEach(opt => {
-                    const el = document.createElement('option');
-                    el.value = opt;
-                    el.textContent = opt;
-                    select.appendChild(el);
-                });
-            };
-
-            populate(genSelect, model.tags_generation);
-            populate(winSelect, model.tags_winglets);
-            populate(confSelect, model.tags_config);
-        };
-
-        aircraftSelect.addEventListener('change', (e) => updateVariants(e.target.value));
-
+        // Set default date to today
+        const dateInput = form.querySelector('[name="date"]');
+        if (dateInput) {
+            dateInput.value = new Date().toISOString().split('T')[0];
+        }
         return form;
     }, async (data) => {
-        await API.post('flights', data);
-        if (State.currentView === 'flights') loadFlights();
-        if (State.currentView === 'profile') loadProfile();
-        alert('Flight added!');
+        // Create skeleton flight
+        // We might need to ensure backend accepts missing FKs. 
+        // Assuming database schema allows NULLs for origin/dest/airline/etc.
+
+        try {
+            const res = await API.post('flights', data);
+            if (res.error) {
+                alert('Error: ' + res.error);
+                return;
+            }
+
+            const flightId = res.id || res.lastrowid; // Check what API returns
+
+            if (State.currentView === 'flights') loadFlights();
+            if (State.currentView === 'profile') loadProfile(); // Update profile counts
+
+            // Auto Update Prompt
+            if (confirm('Flight added. Fetch details from AeroAPI now?')) {
+                updateFlightFromAeroAPI(flightId);
+            }
+        } catch (e) {
+            alert('Error creating flight: ' + e);
+        }
     });
 }
 
 // --- Profile & Stats ---
+// --- Profile & Stats ---
+// --- Profile & Stats ---
 async function loadProfile() {
     const flights = await API.get('flights/detailed');
-    // Calculate total stats
-    const totalFlights = flights.length;
-    // ... calculate distance if we had geolib, for now mocked
+
+    // --- Year Filter Logic ---
+    const yearSelect = document.getElementById('year-filter');
+    if (yearSelect && yearSelect.options.length <= 1) {
+        // Extract years
+        const years = new Set(flights.map(f => f.date ? f.date.substring(0, 4) : null).filter(y => y));
+        const sortedYears = Array.from(years).sort().reverse();
+        sortedYears.forEach(year => {
+            const opt = document.createElement('option');
+            opt.value = year;
+            opt.textContent = year;
+            yearSelect.appendChild(opt);
+        });
+
+        // Attach listener
+        yearSelect.onchange = loadProfile;
+    }
+
+    const selectedYear = yearSelect ? yearSelect.value : 'all';
+    const filteredFlights = selectedYear === 'all'
+        ? flights
+        : flights.filter(f => f.date && f.date.startsWith(selectedYear));
+
+    // --- Stats Calculation ---
+    const totalFlights = filteredFlights.length;
+
+    const totalDist = filteredFlights.reduce((sum, f) => sum + (parseFloat(f.distance) || 0), 0);
+
+    const totalMinutes = filteredFlights.reduce((sum, f) => sum + (f.duration_actual || f.duration_scheduled || 0), 0);
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
 
     // Render Stats
     const statsContainer = document.querySelector('.stats-container');
@@ -1168,8 +1368,12 @@ async function loadProfile() {
                 <span style="color:#666;">flights</span>
             </div>
             <div>
-                <h1 style="margin:0; font-size:2.5rem;">0 km</h1> 
-                <span style="color:#666;">distance (calculation pending)</span>
+                <h1 style="margin:0; font-size:2.5rem;">${Math.round(totalDist).toLocaleString()} km</h1> 
+                <span style="color:#666;">distance</span>
+            </div>
+            <div>
+                <h1 style="margin:0; font-size:2.5rem;">${hours}h ${mins}m</h1> 
+                <span style="color:#666;">duration</span>
             </div>
         </div>
     `;
@@ -1183,20 +1387,54 @@ async function loadProfile() {
             }
         });
 
-        flights.forEach(f => {
+        // Helper for Great Circle Path
+        const getGeodesicPath = (lat1, lon1, lat2, lon2, numPoints = 100) => {
+            if (lat1 === lat2 && lon1 === lon2) return [[lat1, lon1]];
+            const toRad = x => x * Math.PI / 180;
+            const toDeg = x => x * 180 / Math.PI;
+            const phi1 = toRad(lat1), lambda1 = toRad(lon1);
+            const phi2 = toRad(lat2), lambda2 = toRad(lon2);
+            const d = 2 * Math.asin(Math.sqrt(Math.pow(Math.sin((phi1 - phi2) / 2), 2) +
+                Math.cos(phi1) * Math.cos(phi2) * Math.pow(Math.sin((lambda1 - lambda2) / 2), 2)));
+
+            if (d === 0) return [[lat1, lon1]];
+
+            let points = [];
+            for (let i = 0; i <= numPoints; i++) {
+                const f = i / numPoints;
+                const A = Math.sin((1 - f) * d) / Math.sin(d);
+                const B = Math.sin(f * d) / Math.sin(d);
+                const x = A * Math.cos(phi1) * Math.cos(lambda1) + B * Math.cos(phi2) * Math.cos(lambda2);
+                const y = A * Math.cos(phi1) * Math.sin(lambda1) + B * Math.cos(phi2) * Math.sin(lambda2);
+                const z = A * Math.sin(phi1) + B * Math.sin(phi2);
+                const phi = Math.atan2(z, Math.sqrt(x * x + y * y));
+                const lambda = Math.atan2(y, x);
+                points.push([toDeg(phi), toDeg(lambda)]);
+            }
+            return points;
+        };
+
+        filteredFlights.forEach(f => {
             if (f.origin_lat && f.dest_lat) {
-                const latlngs = [
-                    [f.origin_lat, f.origin_lon],
-                    [f.dest_lat, f.dest_lon]
-                ];
-                // Draw line (Great Circle would require Arc.js or similar, using straight line for MVP)
-                L.polyline(latlngs, { color: 'red', weight: 2, opacity: 0.7 }).addTo(State.map);
+                // Draw Geodesic Line
+                const curvePoints = getGeodesicPath(
+                    parseFloat(f.origin_lat), parseFloat(f.origin_lon),
+                    parseFloat(f.dest_lat), parseFloat(f.dest_lon)
+                );
+
+                L.polyline(curvePoints, { color: '#ffb800', weight: 2, opacity: 0.8 }).addTo(State.map);
 
                 // Add markers
-                L.circleMarker([f.origin_lat, f.origin_lon], { radius: 3, color: 'red' }).addTo(State.map);
-                L.circleMarker([f.dest_lat, f.dest_lon], { radius: 3, color: 'red' }).addTo(State.map);
+                L.circleMarker([f.origin_lat, f.origin_lon], { radius: 3, color: '#00b0ff', fillColor: '#00b0ff', fillOpacity: 1 }).addTo(State.map);
+                L.circleMarker([f.dest_lat, f.dest_lon], { radius: 3, color: '#00b0ff', fillColor: '#00b0ff', fillOpacity: 1 }).addTo(State.map);
             }
         });
+
+        // Fit bounds if flights exist
+        if (filteredFlights.length > 0) {
+            // Optional: Create bounds from all points
+            // State.map.fitBounds(...)
+        }
     }
 }
 
