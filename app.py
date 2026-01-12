@@ -1143,6 +1143,9 @@ def get_stats():
         ORDER BY cnt DESC
     """)
     
+    # Flights by Year (for Chart)
+    stats['flights_by_year'] = [{'year': r[0], 'count': r[1]} for r in conn.execute("SELECT strftime('%Y', date) as y, COUNT(*) FROM flights WHERE date IS NOT NULL AND date != '' GROUP BY y ORDER BY y ASC").fetchall()]
+    
     # Top Aircraft (Model + Series)
     stats['top']['aircraft'] = get_top("""
         SELECT am.model || ' ' || am.series, COUNT(*) as cnt, am.manufacturer

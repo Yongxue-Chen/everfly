@@ -1450,6 +1450,72 @@ const renderStatsDashboard = (stats, container) => {
     container.appendChild(locCard);
     container.appendChild(alCard);
     container.appendChild(acCard);
+
+    // --- Chart: Flights per Year ---
+    if (stats.flights_by_year && stats.flights_by_year.length > 0) {
+        const chartCard = document.createElement('div');
+        chartCard.className = 'stats-card';
+        // Force full width if in grid
+        chartCard.style.gridColumn = '1 / -1';
+        chartCard.style.marginTop = '20px';
+        chartCard.innerHTML = `
+            <div class="stats-header">Flights per Year</div>
+            <div style="height:300px; width:100%; position:relative;">
+                <canvas id="yearChart"></canvas>
+            </div>
+        `;
+        container.appendChild(chartCard);
+
+        const ctx = chartCard.querySelector('#yearChart').getContext('2d');
+        // Destroy previous chart if exists? 
+        // Render function re-clears container (line 1344: container.innerHTML = ''), so safe to new Chart.
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: stats.flights_by_year.map(d => d.year),
+                datasets: [{
+                    label: 'Flights',
+                    data: stats.flights_by_year.map(d => d.count),
+                    borderColor: '#00cec9', // Teal accent
+                    backgroundColor: 'rgba(0, 206, 201, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: true,
+                    pointBackgroundColor: '#fff',
+                    pointBorderColor: '#00cec9',
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        padding: 10,
+                        cornerRadius: 4,
+                        displayColors: false,
+                        callbacks: {
+                            label: (ctx) => `${ctx.parsed.y} Flights`
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: { borderDash: [4, 4], color: '#f5f5f5', drawBorder: false },
+                        ticks: { font: { size: 11 }, color: '#999', padding: 8 }
+                    },
+                    x: {
+                        grid: { display: false },
+                        ticks: { font: { size: 11 }, color: '#999', padding: 8 }
+                    }
+                }
+            }
+        });
+    }
 };
 
 const showStatsModal = (title, data) => {
