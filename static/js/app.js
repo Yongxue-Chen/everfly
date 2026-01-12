@@ -836,15 +836,20 @@ function sortFlights(key) {
 }
 
 function filterFlights() {
-    const inputs = document.querySelectorAll('.filter-row input');
+    const filterRow = document.querySelector('.filter-row');
+    if (!filterRow) return;
+    const ths = filterRow.querySelectorAll('th');
+
     State.flightFilters = {};
     const map = [
         'date', null, 'flight_number', 'registration', 'origin_name', 'dest_name',
         null, null, 'airline_name', 'aircraft_model', null, 'seat_number', 'flight_class',
         'note', null
     ];
-    inputs.forEach((input, idx) => {
-        if (input.value && map[idx]) {
+
+    ths.forEach((th, idx) => {
+        const input = th.querySelector('input');
+        if (input && input.value && map[idx]) {
             State.flightFilters[map[idx]] = input.value.toLowerCase();
         }
     });
@@ -1090,7 +1095,7 @@ async function openEditFlightModal(item) {
         { key: 'tag_winglets', label: 'Winglets', type: 'select', options: [] },
         { key: 'tag_config', label: 'Config', type: 'select', options: [] },
         { key: 'seat_number', label: 'Seat', type: 'text' },
-        { key: 'seat_type', label: 'Seat Type', type: 'text' },
+        { key: 'seat_type', label: 'Seat Type', type: 'select', options: ['Window', 'Aisle', 'Middle'] },
         { key: 'flight_class', label: 'Class', type: 'text' },
         { key: 'note', label: 'Note', type: 'textarea' }
     ];

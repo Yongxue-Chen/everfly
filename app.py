@@ -1313,8 +1313,12 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
     api_origin_code = best_match.get('origin', {}).get('code')
     api_dest_code = best_match.get('destination', {}).get('code')
 
-    api_origin_term = best_match.get('origin', {}).get('terminal')
-    api_dest_term = best_match.get('destination', {}).get('terminal')
+    def _fmt_term(t):
+        if t and t.isdigit(): return f"T{t}"
+        return t
+
+    api_origin_term = _fmt_term(best_match.get('terminal_origin'))
+    api_dest_term = _fmt_term(best_match.get('terminal_destination'))
     
     api_origin_tz = best_match.get('origin', {}).get('timezone')
     api_dest_tz = best_match.get('destination', {}).get('timezone')
