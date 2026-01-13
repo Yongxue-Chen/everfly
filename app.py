@@ -58,6 +58,12 @@ def execute_db(query, args=()):
         conn.close()
         raise e
 
+def get_continent_from_tz(tz_name):
+    """Extract continent from timezone string (e.g., 'Asia/Shanghai' -> 'Asia')."""
+    if not tz_name or '/' not in tz_name:
+        return None
+    return tz_name.split('/')[0]
+
 # --- CRUD Routes Generation Helper ---
 def create_crud_routes(endpoint, table_name, columns):
     # GET all
@@ -87,6 +93,10 @@ def create_crud_routes(endpoint, table_name, columns):
                         valid_data['duration_actual'] = calculate_duration(conn, origin_id, dest_id, valid_data['atd'], valid_data['ata'])
             finally:
                 conn.close()
+
+        if table_name == 'cities':
+            if valid_data.get('timezone') and not valid_data.get('continent'):
+                valid_data['continent'] = get_continent_from_tz(valid_data['timezone'])
 
         if not valid_data:
              return jsonify({'error': 'No valid data provided'}), 400
@@ -130,6 +140,10 @@ def create_crud_routes(endpoint, table_name, columns):
                         valid_data['duration_actual'] = calculate_duration(conn, merged['origin_airport_id'], merged['dest_airport_id'], merged['atd'], merged['ata'])
             finally:
                 conn.close()
+
+        if table_name == 'cities':
+             if 'timezone' in valid_data and 'continent' not in valid_data:
+                  valid_data['continent'] = get_continent_from_tz(valid_data['timezone'])
 
         if not valid_data:
             return jsonify({'error': 'No valid data provided'}), 400
@@ -503,6 +517,10 @@ def import_csv(table_name):
                     else:
                         normalized_row['name'] = f"{model}-{series}"
 
+            if table_name == 'cities':
+                if normalized_row.get('timezone') and not normalized_row.get('continent'):
+                    normalized_row['continent'] = get_continent_from_tz(normalized_row['timezone'])
+
             if table_name == 'flights':
                 # Origin
                 if 'origin_airport_id' not in normalized_row:
@@ -709,11 +727,12 @@ def _update_airport_logic(id, conn):
             if len(matches) == 1 and not matches[0][1]:
                 # Legacy Update
                 city_id = matches[0][0]
-                conn.execute("UPDATE cities SET country_code = ?, timezone = ? WHERE id = ?", (country_code, tz, city_id))
+                conn.execute("UPDATE cities SET country_code = ?, timezone = ?, continent = ? WHERE id = ?", 
+                             (country_code, tz, get_continent_from_tz(tz), city_id))
             else:
                 # Create New
-                conn.execute("INSERT INTO cities (name, country, country_code, timezone) VALUES (?, ?, ?, ?)",
-                            (city_name, country_code, country_code, tz))
+                conn.execute("INSERT INTO cities (name, country, country_code, timezone, continent) VALUES (?, ?, ?, ?, ?)",
+                            (city_name, country_code, country_code, tz, get_continent_from_tz(tz)))
                 city_id = cur.lastrowid
         
         conn.execute("UPDATE airports SET city_id = ? WHERE id = ?", (city_id, id))

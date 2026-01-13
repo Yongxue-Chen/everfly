@@ -10,13 +10,15 @@ const DATASETS = {
             { key: 'name', label: 'Name' },
             { key: 'country', label: 'Country' },
             { key: 'country_code', label: 'Code' },
-            { key: 'timezone', label: 'Timezone' }
+            { key: 'timezone', label: 'Timezone' },
+            { key: 'continent', label: 'Continent' }
         ],
         fields: [
             { key: 'name', label: 'Name', type: 'text' },
             { key: 'country', label: 'Country', type: 'text' },
             { key: 'country_code', label: 'Country Code', type: 'text', placeholder: 'e.g. US' },
-            { key: 'timezone', label: 'Timezone', type: 'text' }
+            { key: 'timezone', label: 'Timezone', type: 'text' },
+            { key: 'continent', label: 'Continent', type: 'text', placeholder: 'Auto-filled' }
         ]
     },
     airports: {
