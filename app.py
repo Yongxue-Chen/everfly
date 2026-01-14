@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, g, session, redirect, url_for, flash
 import os
 import database
 import sqlite3
@@ -8,30 +8,163 @@ import airportsdata
 from datetime import datetime, timedelta
 import pytz
 import json
+import werkzeug.security
 
 app = Flask(__name__)
+app.secret_key = 'dev_secret_key' # In prod this should be secure random
 FLIGHTAWARE_API_KEY = 'REMOVED-REVOKED-API-KEY'
 
-AIRLINES_BY_ICAO = {}
-try:
-    with open('airline_source.json', 'r', encoding='utf-8') as f:
-        # Check if file is list of dicts
-        raw_airlines = json.load(f)
-        for a in raw_airlines:
-            if a.get('icao') and a['icao'] != 'N/A':
-                AIRLINES_BY_ICAO[a['icao']] = a
-except Exception as e:
-    print(f"Failed to load airline_source.json: {e}")
+# --- Auth Middleware ---
+@app.before_request
+def load_logged_in_user():
+    user_id = session.get('user_id')
+    if user_id is None:
+        g.user = None
+    else:
+        conn = database.get_users_db()
+        g.user = conn.execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
+        conn.close()
+        
+    if g.user:
+        g.db_path = g.user['db_filename']
+    else:
+        # No user -> No DB path unless we want a demo mode? 
+        # For now, undefined requests to API will likely fail if they try to access DB, which is correct.
+        pass
 
-# Ensure the instance folder exists
-try:
-    os.makedirs(app.instance_path)
-except OSError:
-    pass
+def login_required(view):
+    import functools
+    @functools.wraps(view)
+    def wrapped_view(**kwargs):
+        if g.user is None:
+            return redirect(url_for('login'))
+        return view(**kwargs)
+    return wrapped_view
+
+# --- Auth Routes ---
+@app.route('/register', methods=('GET', 'POST'))
+def register():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        error = None
+
+        if not username:
+            error = 'Username is required.'
+        elif not password:
+            error = 'Password is required.'
+        
+        if error is None:
+            conn = database.get_users_db()
+            try:
+                # 1. Create User
+                password_hash = werkzeug.security.generate_password_hash(password)
+                
+                # Assign a unique DB file
+                # To be improved: sanitize username for filename or use UUID
+                clean_username = "".join([c for c in username if c.isalpha() or c.isdigit()]).lower()
+                db_filename = os.path.join(app.instance_path, f"user_{clean_username}.db")
+                
+                cur = conn.execute(
+                    'INSERT INTO users (username, password_hash, db_filename) VALUES (?, ?, ?)',
+                    (username, password_hash, db_filename)
+                )
+                conn.commit()
+                
+                # 2. Init User DB
+                # Initialize the new user database with the schema
+                database.init_db(target_db_path=db_filename)
+                
+                flash('Registration successful. Please log in.')
+                return redirect(url_for('login'))
+                
+            except sqlite3.IntegrityError:
+                error = f"User {username} is already registered."
+            finally:
+                conn.close()
+
+        flash(error)
+
+    return render_template('register.html')
+
+@app.route('/login', methods=('GET', 'POST'))
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        conn = database.get_users_db()
+        error = None
+        user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+        conn.close()
+
+        if user is None:
+            error = 'Incorrect username.'
+        elif not werkzeug.security.check_password_hash(user['password_hash'], password):
+            error = 'Incorrect password.'
+
+        if error is None:
+            session.clear()
+            session['user_id'] = user['id']
+            # flash('Login successful!') # Optional, maybe too noisy? User asked for it. 
+            # Actually, standard UX: redirect to index. But user specifically asked for "login success" feedback.
+            # Usually index page is enough, but let's add it if they want.
+            # But wait, index page might not show flash? Let's assume templates support it (we will add it).
+            # Let's add it.
+            flash('Login successful!')
+            return redirect(url_for('index'))
+
+        flash(error)
+
+    return render_template('login.html')
+
+    return render_template('login.html')
+
+@app.route('/api/profile/update', methods=['POST'])
+@login_required
+def update_profile():
+    data = request.json
+    new_username = data.get('username')
+    new_password = data.get('password')
+    
+    if not new_username:
+        return jsonify({'error': 'Username is required'}), 400
+        
+    conn = database.get_users_db()
+    try:
+        # Check if username exists (if changed)
+        if new_username != g.user['username']:
+            existing = conn.execute('SELECT id FROM users WHERE username = ?', (new_username,)).fetchone()
+            if existing:
+                return jsonify({'error': 'Username already taken'}), 400
+            
+            conn.execute('UPDATE users SET username = ? WHERE id = ?', (new_username, g.user['id']))
+            # Note: We do NOT rename the database file. It stays user_<original_name>.db to avoid complexity.
+            
+        if new_password:
+            password_hash = werkzeug.security.generate_password_hash(new_password)
+            conn.execute('UPDATE users SET password_hash = ? WHERE id = ?', (password_hash, g.user['id']))
+            
+        conn.commit()
+        return jsonify({'message': 'Profile updated successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
 
 @app.route('/')
+@login_required
 def index():
-    return render_template('index.html')
+    # Pass user info to template for profile display
+    user_info = {
+        'id': g.user['id'],
+        'username': g.user['username']
+    }
+    return render_template('index.html', user=user_info)
 
 @app.route('/api/health')
 def health():
@@ -39,6 +172,7 @@ def health():
 
 # --- Helper Functions ---
 def query_db(query, args=(), one=False):
+    if not g.user: return None # Security check
     conn = database.get_db()
     cur = conn.execute(query, args)
     rv = [dict(row) for row in cur.fetchall()]
@@ -46,6 +180,7 @@ def query_db(query, args=(), one=False):
     return (rv[0] if rv else None) if one else rv
 
 def execute_db(query, args=()):
+    if not g.user: raise Exception("Unauthorized")
     conn = database.get_db()
     try:
         cur = conn.execute(query, args)
@@ -68,12 +203,14 @@ def get_continent_from_tz(tz_name):
 def create_crud_routes(endpoint, table_name, columns):
     # GET all
     @app.route(f'/api/{endpoint}', methods=['GET'], endpoint=f'get_{endpoint}')
+    @login_required
     def get_all():
         rows = query_db(f"SELECT * FROM {table_name}")
         return jsonify(rows)
 
     # POST create
     @app.route(f'/api/{endpoint}', methods=['POST'], endpoint=f'create_{endpoint}')
+    @login_required
     def create_item():
         data = request.json
         valid_data = {k: v for k, v in data.items() if k in columns}
@@ -114,6 +251,7 @@ def create_crud_routes(endpoint, table_name, columns):
 
     # PUT update
     @app.route(f'/api/{endpoint}/<int:id>', methods=['PUT'], endpoint=f'update_{endpoint}')
+    @login_required
     def update_item(id):
         data = request.json
         valid_data = {k: v for k, v in data.items() if k in columns}
@@ -161,12 +299,14 @@ def create_crud_routes(endpoint, table_name, columns):
 
     # DELETE
     @app.route(f'/api/{endpoint}/<int:id>', methods=['DELETE'], endpoint=f'delete_{endpoint}')
+    @login_required
     def delete_item(id):
         try:
             execute_db(f"DELETE FROM {table_name} WHERE id = ?", (id,))
             return jsonify({'message': 'Deleted', 'id': id})
         except Exception as e:
             return jsonify({'error': str(e)}), 500
+
 
 # --- Define Entities ---
 # Schema columns for validation (excluding id)
@@ -330,6 +470,7 @@ def calculate_duration(conn, origin_id, dest_id, dep_str, arr_str):
     return None
 
 @app.route('/api/import/<table_name>', methods=['POST'])
+@login_required
 def import_csv(table_name):
     # Security check for allowed tables
     ALLOWED_TABLES = ['cities', 'airports', 'airlines', 'aircraft_models', 'flights']
@@ -659,6 +800,7 @@ def import_csv(table_name):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/clear/<table_name>', methods=['DELETE'])
+@login_required
 def clear_table(table_name):
     ALLOWED_TABLES = ['cities', 'airports', 'airlines', 'aircraft_models', 'flights']
     if table_name not in ALLOWED_TABLES:
@@ -742,6 +884,7 @@ def _update_airport_logic(id, conn):
 
 # --- API Routes for Automation ---
 @app.route('/api/airports/<int:id>/update', methods=['POST'])
+@login_required
 def update_airport(id):
     try:
         conn = database.get_db()
@@ -754,6 +897,7 @@ def update_airport(id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/airports/batch_update', methods=['POST'])
+@login_required
 def batch_update_airports():
     try:
         conn = database.get_db()
@@ -786,6 +930,7 @@ def _update_airline_logic(id, conn):
     return False, "ICAO code not found in database"
 
 @app.route('/api/airlines/<int:id>/update', methods=['POST'])
+@login_required
 def update_airline(id):
     try:
         conn = database.get_db()
@@ -798,6 +943,7 @@ def update_airline(id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/airlines/batch_update', methods=['POST'])
+@login_required
 def batch_update_airlines():
     try:
         conn = database.get_db()
@@ -818,6 +964,7 @@ def batch_update_airlines():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/cities/<int:id>/update', methods=['POST'])
+@login_required
 def update_city(id):
     try:
         conn = database.get_db()
@@ -846,6 +993,7 @@ def update_city(id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/cities/batch_update', methods=['POST'])
+@login_required
 def batch_update_cities():
     try:
         conn = database.get_db()
@@ -1483,5 +1631,6 @@ def update_missing_flights_aeroapi():
 
 if __name__ == '__main__':
     # Initialize DB (safe to run multiple times)
-    database.init_db()
+    with app.app_context():
+        database.init_db()
     app.run(debug=True, port=5000)

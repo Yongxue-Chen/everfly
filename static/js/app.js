@@ -2,6 +2,14 @@
 // --- Constants & Config ---
 const API_BASE = '/api';
 
+// Init User Info
+if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
+    const avatar = document.getElementById('user-avatar-initial');
+    const name = document.getElementById('user-display-name');
+    if (avatar && CURRENT_USER.username) avatar.textContent = CURRENT_USER.username[0].toUpperCase();
+    if (name && CURRENT_USER.username) name.textContent = CURRENT_USER.username;
+}
+
 const DATASETS = {
     cities: {
         label: 'Cities',
@@ -138,6 +146,55 @@ const API = {
         return res.json();
     }
 };
+
+function openEditProfileModal() {
+    openModal('Edit Profile', () => {
+        const div = document.createElement('div');
+        div.innerHTML = `
+            <form id="edit-profile-form">
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" name="username" value="${CURRENT_USER.username}" required>
+                </div>
+                <div class="form-group">
+                    <label>New Password (leave blank to keep current)</label>
+                    <input type="password" name="password" placeholder="New Password">
+                </div>
+                <div class="form-group">
+                    <label>Confirm Password</label>
+                    <input type="password" name="confirm_password" placeholder="Confirm Password">
+                </div>
+            </form>
+        `;
+        return div;
+    }, async () => {
+        const form = document.querySelector('#edit-profile-form');
+        const formData = new FormData(form);
+        const data = Object.fromEntries(formData.entries());
+
+        if (data.password && data.password !== data.confirm_password) {
+            alert("Passwords do not match!");
+            return false;
+        }
+
+        const payload = {
+            username: data.username,
+            password: data.password || null
+        };
+
+        const res = await API.post('profile/update', payload);
+        if (res.error) {
+            alert(res.error);
+            return false;
+        } else {
+            alert(res.message);
+            // Update local state
+            CURRENT_USER.username = data.username;
+            document.getElementById('user-display-name').textContent = data.username;
+            document.getElementById('user-avatar-initial').textContent = data.username[0].toUpperCase();
+        }
+    });
+}
 
 // --- View Management ---
 function navigateTo(viewName) {

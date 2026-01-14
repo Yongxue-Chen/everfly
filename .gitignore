@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environments
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Notes: Databases are intentionally NOT ignored per user request.
+# *.db
+# instance/

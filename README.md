@@ -4,6 +4,9 @@ FlightLog is a Python Flask-based web application designed to manage and track f
 
 ## Features
 
+- **User Authentication**: Secure multi-user support with isolated databases for each user.
+    - Registration and Login with feedback.
+    - Profile management (change username/password).
 - **Flight Management**: Log details including dates, flight numbers, aircraft, airports, terminals, and times (scheduled vs. actual).
 - **Database Management**: Comprehensive CRUD (Create, Read, Update, Delete) operations for:
     - Cities (with automatic Timezone and Continent resolution)
@@ -15,7 +18,7 @@ FlightLog is a Python Flask-based web application designed to manage and track f
     - Fetch airport details (ICAO, Lat/Lon, City) using `airportsdata`.
     - Sync timezones and continents for cities and airports.
 - **Bulk Import**: Support for CSV imports for all major entities.
-- **Statistics**: Built-in logic for tracking flight stats (implied by file structure).
+- **Statistics**: Built-in logic for tracking flight stats.
 
 ## Prerequisites
 
@@ -89,5 +92,5 @@ FlightLog is a Python Flask-based web application designed to manage and track f
 
 ## Notes
 
-- The application uses a local SQLite database `flightlog.db`.
+- The application uses a central `users.db` for authentication and individual SQLite databases (e.g., `instance/user_username.db`) for each user's flight data.
 - API Keys: The application may contain placeholders or hardcoded keys for external services (e.g., FlightAware). Ensure you have valid keys if using those specific features.

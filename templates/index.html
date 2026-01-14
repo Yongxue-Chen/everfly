@@ -15,6 +15,9 @@
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
+    <script>
+        const CURRENT_USER = {{ user| tojson | safe }};
+    </script>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 
@@ -43,6 +46,30 @@
 
         <!-- Profile View -->
         <section id="view-profile" class="view active">
+            <!-- User Profile Card -->
+            <div class="user-card"
+                style="background:#fff; padding:15px; border-radius:8px; margin-bottom:15px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+                <div style="display:flex; align-items:center; gap:15px;">
+                    <div
+                        style="width:40px; height:40px; border-radius:50%; background:var(--primary); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:1.2rem;">
+                        <span id="user-avatar-initial">U</span>
+                    </div>
+                    <div>
+                        <div style="font-weight:bold; font-size:1.1rem;" id="user-display-name">Username</div>
+                        <div style="font-size:0.85rem; color:#666;">FlightLog User</div>
+                    </div>
+                </div>
+                <div style="display:flex; gap:10px;">
+                    <button class="btn btn-sm btn-secondary" onclick="openEditProfileModal()">
+                        <i class="fa-solid fa-pen-to-square"></i> Edit Profile
+                    </button>
+                    <a href="/logout" class="btn btn-sm btn-secondary"
+                        style="color:var(--danger); border-color:var(--danger); text-decoration:none;">
+                        <i class="fa-solid fa-sign-out-alt"></i> Logout
+                    </a>
+                </div>
+            </div>
+
             <div class="map-container">
                 <div id="flight-map"></div>
                 <div class="map-controls">

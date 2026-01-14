@@ -3,7 +3,8 @@ CREATE TABLE IF NOT EXISTS cities (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     country TEXT NOT NULL,
-    timezone TEXT NOT NULL
+    timezone TEXT NOT NULL,
+    continent TEXT
 );
 
 CREATE TABLE IF NOT EXISTS airports (
