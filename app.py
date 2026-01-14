@@ -185,6 +185,8 @@ def update_profile():
     if not new_username:
         return jsonify({'error': 'Username is required'}), 400
         
+    new_username = new_username.lower()
+        
     conn = database.get_users_db()
     try:
         # Check if username exists (if changed)
