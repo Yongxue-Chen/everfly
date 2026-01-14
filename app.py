@@ -39,6 +39,12 @@ def load_logged_in_user():
         # For now, undefined requests to API will likely fail if they try to access DB, which is correct.
         pass
 
+@app.teardown_appcontext
+def close_connection(exception):
+    db = getattr(g, 'db', None)
+    if db is not None:
+        db.close()
+
 def login_required(view):
     import functools
     @functools.wraps(view)
@@ -183,7 +189,7 @@ def query_db(query, args=(), one=False):
     conn = database.get_db()
     cur = conn.execute(query, args)
     rv = [dict(row) for row in cur.fetchall()]
-    conn.close()
+    # conn.close() # Managed by teardown
     return (rv[0] if rv else None) if one else rv
 
 def execute_db(query, args=()):
@@ -193,11 +199,11 @@ def execute_db(query, args=()):
         cur = conn.execute(query, args)
         conn.commit()
         lastrowid = cur.lastrowid
-        conn.close()
+        # conn.close() # Managed by teardown
         return lastrowid
     except Exception as e:
         conn.rollback()
-        conn.close()
+        # conn.close() # Managed by teardown
         raise e
 
 def get_continent_from_tz(tz_name):
@@ -235,8 +241,10 @@ def create_crud_routes(endpoint, table_name, columns):
                         valid_data['duration_scheduled'] = calculate_duration(conn, origin_id, dest_id, valid_data['std'], valid_data['sta'])
                     if valid_data.get('atd') and valid_data.get('ata') and not valid_data.get('duration_actual'):
                         valid_data['duration_actual'] = calculate_duration(conn, origin_id, dest_id, valid_data['atd'], valid_data['ata'])
-            finally:
-                conn.close()
+            except Exception as e:
+                print(f"Error calculating duration: {e}")
+            # finally:
+            #    conn.close() # Managed by teardown
 
         if table_name == 'cities':
             if valid_data.get('timezone') and not valid_data.get('continent'):
@@ -283,8 +291,10 @@ def create_crud_routes(endpoint, table_name, columns):
                         valid_data['duration_scheduled'] = calculate_duration(conn, merged['origin_airport_id'], merged['dest_airport_id'], merged['std'], merged['sta'])
                     if merged['atd'] and merged['ata'] and not valid_data.get('duration_actual'):
                         valid_data['duration_actual'] = calculate_duration(conn, merged['origin_airport_id'], merged['dest_airport_id'], merged['atd'], merged['ata'])
-            finally:
-                conn.close()
+            except Exception as e:
+                 print(f"Error calculating duration update: {e}")
+            # finally:
+            #    conn.close() # Managed by teardown
 
         if table_name == 'cities':
              if 'timezone' in valid_data and 'continent' not in valid_data:
@@ -1588,14 +1598,12 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
               update_values.append(al_id)
 
     if not update_fields:
-        conn.close()
         return {'message': 'No new data or data already exists'}
         
     update_values.append(flight_id)
     sql = f"UPDATE flights SET {', '.join(update_fields)} WHERE id = ?"
     conn.execute(sql, update_values)
     conn.commit()
-    conn.close()
     
     return {'success': True, 'fields_updated': len(update_fields), 'debug_match': best_match.get('ident')}
 
@@ -1620,7 +1628,6 @@ def update_missing_flights_aeroapi():
         AND flight_number IS NOT NULL AND date IS NOT NULL
     ''')
     rows = cur.fetchall()
-    conn.close()
     
     updated_count = 0
     errors = []
