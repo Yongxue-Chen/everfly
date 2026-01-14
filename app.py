@@ -30,7 +30,9 @@ def load_logged_in_user():
         # DB might contain Windows path "C:\...\file.db" but we are on Linux.
         # So we extract just the filename and prepend the current instance path.
         stored_path = g.user['db_filename']
-        filename = os.path.basename(stored_path)
+        # Normalized handling: Replace backslash with forward slash and take the last part.
+        # This handles Windows paths (C:\...) even when running on Linux.
+        filename = stored_path.replace('\\', '/').split('/')[-1]
         g.db_path = os.path.join(app.instance_path, filename)
     else:
         # No user -> No DB path unless we want a demo mode? 
