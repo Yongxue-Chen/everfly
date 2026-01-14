@@ -96,12 +96,12 @@ After=network.target
 [Service]
 User=ubuntu
 Group=www-data
-WorkingDirectory=/home/ubuntu/flightlog
-Environment="PATH=/home/ubuntu/flightlog/venv/bin"
+WorkingDirectory=/home/ubuntu/FlightLog
+Environment="PATH=/home/ubuntu/FlightLog/venv/bin"
 # ExecStart 启动 Gunicorn
 # -w 4: 启动 4 个工作进程
 # -b 0.0.0.0:5000: 绑定到 5000 端口
-ExecStart=/home/ubuntu/flightlog/venv/bin/gunicorn --workers 4 --bind 0.0.0.0:5000 app:app
+ExecStart=/home/ubuntu/FlightLog/venv/bin/gunicorn --workers 4 --bind 0.0.0.0:5000 app:app
 
 [Install]
 WantedBy=multi-user.target

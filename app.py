@@ -26,7 +26,12 @@ def load_logged_in_user():
         conn.close()
         
     if g.user:
-        g.db_path = g.user['db_filename']
+        # FIX for cross-platform migration:
+        # DB might contain Windows path "C:\...\file.db" but we are on Linux.
+        # So we extract just the filename and prepend the current instance path.
+        stored_path = g.user['db_filename']
+        filename = os.path.basename(stored_path)
+        g.db_path = os.path.join(app.instance_path, filename)
     else:
         # No user -> No DB path unless we want a demo mode? 
         # For now, undefined requests to API will likely fail if they try to access DB, which is correct.
