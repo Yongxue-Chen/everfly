@@ -115,7 +115,8 @@ const State = {
 // --- API Client ---
 const API = {
     async get(endpoint) {
-        const res = await fetch(`${API_BASE}/${endpoint}`);
+        const separator = endpoint.includes('?') ? '&' : '?';
+        const res = await fetch(`${API_BASE}/${endpoint}${separator}_t=${Date.now()}`);
         return res.json();
     },
     async post(endpoint, data) {
@@ -988,16 +989,16 @@ function renderFlights() {
                 : '-'}
             </td>
             <td>
-                <div style="font-weight:500">${f.origin_name || f.origin_code}</div>
-                <div style="font-size:0.75rem; color:#666">${f.origin_code} ${f.origin_terminal ? `(${f.origin_terminal})` : ''}</div>
+                <div style="font-weight:500">${f.origin_name || f.origin_code || '-'}</div>
+                <div style="font-size:0.75rem; color:#666">${f.origin_code || '-'} ${f.origin_terminal ? `(${f.origin_terminal})` : ''}</div>
             </td>
             <td>
-                <div style="font-weight:500">${f.dest_name || f.dest_code}</div>
-                <div style="font-size:0.75rem; color:#666">${f.dest_code} ${f.dest_terminal ? `(${f.dest_terminal})` : ''}</div>
+                <div style="font-weight:500">${f.dest_name || f.dest_code || '-'}</div>
+                <div style="font-size:0.75rem; color:#666">${f.dest_code || '-'} ${f.dest_terminal ? `(${f.dest_terminal})` : ''}</div>
             </td>
             <td>${f.distance || '-'}</td>
             <td>${f.duration_scheduled || '-'}<br>${f.duration_actual || '-'}</td>
-            <td>${f.airline_name}</td>
+            <td>${f.airline_name || '-'}</td>
             <td>${f.aircraft_model}</td>
             <td><small>${f.tag_generation || '-'}<br>${f.tag_winglets || '-'}<br>${f.tag_config || '-'}</small></td>
             <td>${f.seat_number || '-'}<br><small>${f.seat_type || '-'}</small></td>

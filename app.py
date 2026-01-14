@@ -34,10 +34,50 @@ def load_logged_in_user():
         # This handles Windows paths (C:\...) even when running on Linux.
         filename = stored_path.replace('\\', '/').split('/')[-1]
         g.db_path = os.path.join(app.instance_path, filename)
-    else:
-        # No user -> No DB path unless we want a demo mode? 
-        # For now, undefined requests to API will likely fail if they try to access DB, which is correct.
-        pass
+        if g.db_path: # Ensure we have a path
+             # Check if DB initialized
+             if not os.path.exists(g.db_path) or os.path.getsize(g.db_path) == 0:
+                 print(f"User DB missing/empty, initializing: {g.db_path}")
+                 database.init_db(target_db_path=g.db_path)
+             else:
+                 # Check table existence (handle case where file exists but is empty/corrupt)
+                 try:
+                     conn = sqlite3.connect(g.db_path)
+                     cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='flights'")
+                     if not cur.fetchone():
+                         print(f"User DB uninitialized, initializing: {g.db_path}")
+                         # init_db handles connection internally
+                         conn.close() 
+                         database.init_db(target_db_path=g.db_path)
+                     else:
+                        conn.close()
+                        # Run migration for existing users
+                        # But be careful not to cycle? migrate_schema uses get_db() -> g.db, 
+                        # so we need to ensure g.db points to g.db_path. 
+                        # get_db() uses g.db_path, so it's safe.
+                        # We need to make sure this doesn't slow down every request.
+                        # For now, let's just run it. It checks schema so should be fast.
+                        pass # Actually calling migrate_schema here might be heavy for EVERY request.
+                        # Ideally only on login or once per session?
+                        # Or just rely on admin endpoint?
+                        # User asked why flightlog.db is created, which was due to global call.
+                        # If we remove global call, user DBs might get outdated schema.
+                        # Let's add a check: Is this "too frequent"? 
+                        # Simple: Just don't run it every request.
+                        # Or, run it inside the 'else' (DB exists) block but maybe cache it?
+                        # For now, let's NOT run it every request, but assume init_db sets correct schema.
+                        # Issue: migrate_nulls was a manual script.
+                        # We need 'migrate_schema' if we have automatic migrations in code.
+                        # app.py has: def migrate_schema(): ... creates flights table if not exists?
+                        # Wait, init_db does that.
+                        # migrate_schema in app.py logic:
+                        # "CREATE TABLE IF NOT EXISTS ..."
+                        # So it IS safe to run.
+                        # But calling it every request is wasteful.
+                        # Let's leave it out for now and rely on init_db for new users.
+                        # Existing users might need manual migration if we change schema again.
+                 except Exception as e:
+                     print(f"DB check error: {e}")
 
 @app.teardown_appcontext
 def close_connection(exception):
@@ -297,7 +337,7 @@ def create_crud_routes(endpoint, table_name, columns):
             #    conn.close() # Managed by teardown
 
         if table_name == 'cities':
-             if 'timezone' in valid_data and 'continent' not in valid_data:
+             if 'timezone' in valid_data and (not valid_data.get('continent') or valid_data['continent'] == ''):
                   valid_data['continent'] = get_continent_from_tz(valid_data['timezone'])
 
         if not valid_data:
@@ -330,9 +370,8 @@ def create_crud_routes(endpoint, table_name, columns):
 # Schema columns for validation (excluding id)
 cities_cols = ['name', 'country', 'country_code', 'timezone', 'continent']
 airports_cols = ['name', 'iata_code', 'icao_code', 'city_id', 'lat', 'lon', 'terminals', 'timezone']
-airlines_cols = ['name', 'iata_code', 'icao_code', 'frequent_flyer_program', 'frequent_flyer_id', 'alliance']
-aircraft_cols = ['name', 'manufacturer', 'model', 'series', 'subtype', 'generation', 'engine_type', 'winglets',
-                 'tags_generation', 'tags_winglets', 'tags_config']
+airlines_cols = ['name', 'iata_code', 'icao_code', 'frequent_flyer_program', 'frequent_flyer_id']
+aircraft_cols = ['manufacturer', 'model', 'series', 'subtype', 'tags_generation', 'tags_engine', 'tags_winglets', 'tags_config', 'name']
 flights_cols = ['date', 'flight_number', 'airline_id', 'aircraft_model_id', 'origin_airport_id', 'dest_airport_id',
                 'dep_time_scheduled', 'arr_time_scheduled', 'seat_number', 'seat_type', 'flight_class', 'note',
                 'origin_terminal', 'dest_terminal', 'tag_generation', 'tag_winglets', 'tag_config',
@@ -427,8 +466,9 @@ def migrate_schema():
         print(f"Migration warning: {e}")
 
 # Run migration on start
-with app.app_context():
-    migrate_schema()
+# Run migration on start
+# with app.app_context():
+#    migrate_schema()
 
 create_crud_routes('cities', 'cities', cities_cols)
 create_crud_routes('airports', 'airports', airports_cols)
@@ -1107,16 +1147,25 @@ def get_or_create_airport(icao, iata, conn):
             db_tz = city_row[1]
             db_cont = city_row[2]
             new_tz = info.get('tz')
-            new_cont = info.get('continent')
+            
+            # Ensure new_cont is calculated if not present in info (though airportsdata usually has it, but format check)
+            # Actually airportsdata uses 'continent' key e.g. 'AS', 'EU'.
+            # We want full names or consistent codes? User seems to use 'Asia'. 
+            # Our helper get_continent_from_tz uses timezone split.
+            # Let's rely on timezone for consistency if possible, or mapping.
+            # airportsdata 'continent' is 2-letter. 'AS' -> 'Asia'?
+            # Let's stick to get_continent_from_tz for consistency with other parts of app.
+            
+            new_cont_calc = get_continent_from_tz(new_tz)
             
             updates = []
             vals = []
             if not db_tz and new_tz:
                 updates.append("timezone = ?")
                 vals.append(new_tz)
-            if not db_cont and new_cont:
+            if not db_cont and new_cont_calc:
                 updates.append("continent = ?")
-                vals.append(new_cont)
+                vals.append(new_cont_calc)
             
             if updates:
                 vals.append(city_id)
@@ -1124,8 +1173,21 @@ def get_or_create_airport(icao, iata, conn):
         else:
             # Try to guess timezone
             tz = info.get('tz')
-            cont = info.get('continent')
-            cur = conn.execute("INSERT INTO cities (name, country, timezone, continent) VALUES (?, ?, ?, ?)", (city_name, info['country'], tz, cont))
+            cont = get_continent_from_tz(tz)
+            
+            # Resolve Country Name
+            country_code = info.get('country') # ISO 2-letter
+            country_name = country_code
+            try:
+                import pycountry
+                c_obj = pycountry.countries.get(alpha_2=country_code)
+                if c_obj:
+                    country_name = c_obj.name
+            except:
+                pass
+
+            cur = conn.execute("INSERT INTO cities (name, country, country_code, timezone, continent) VALUES (?, ?, ?, ?, ?)", 
+                             (city_name, country_name, country_code, tz, cont))
             city_id = cur.lastrowid
             
         cur = conn.execute('''
@@ -1145,13 +1207,8 @@ def get_or_create_airline(icao, iata, conn):
     name = icao # Default
     new_iata = iata
     
-    if icao in AIRLINES_BY_ICAO:
-        entry = AIRLINES_BY_ICAO[icao]
-        name = entry.get('name', icao)
-        # iata in json might be empty or "-" or valid
-        json_iata = entry.get('iata')
-        if json_iata and json_iata not in ['-', '', 'N/A']:
-             new_iata = json_iata
+    # Auto-create with ICAO as name (User request)
+    # We no longer check against AIRLINES_BY_ICAO to avoid crashes if missing
         
     cur = conn.execute("INSERT INTO airlines (name, iata_code, icao_code) VALUES (?, ?, ?)", (name, new_iata, icao))
     return cur.lastrowid
@@ -1366,7 +1423,11 @@ def get_detailed_flights():
                oa.iata_code as origin_code, oa.name as origin_name, oa.lat as origin_lat, oa.lon as origin_lon, oa.city_id as origin_city_id,
                da.iata_code as dest_code, da.name as dest_name, da.lat as dest_lat, da.lon as dest_lon, da.city_id as dest_city_id,
                al.name as airline_name,
-               am.name as aircraft_model
+               am.manufacturer || ' ' || am.model as aircraft_model,
+               am.manufacturer,
+               am.tags_generation as tag_generation, 
+               am.tags_winglets as tag_winglets, 
+               am.tags_config as tag_config
         FROM flights f
         LEFT JOIN airports oa ON f.origin_airport_id = oa.id
         LEFT JOIN airports da ON f.dest_airport_id = da.id

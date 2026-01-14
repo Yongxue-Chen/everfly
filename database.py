@@ -15,7 +15,7 @@ def get_db():
             # Let's fallback to flightlog.db only if specifically requested or legacy/dev mode.
             # For strict multi-user, we should require g.db_path.
             # However, for migration scripts, we might need manual override.
-            db_path = 'flightlog.db' 
+            return None # Don't auto-create flightlog.db
             
         g.db = sqlite3.connect(db_path)
         g.db.row_factory = sqlite3.Row
@@ -30,7 +30,11 @@ def init_db(target_db_path=None):
     # If target provided, init that. Else init current g.db_path
     path = target_db_path
     if not path:
-        path = getattr(g, 'db_path', 'flightlog.db')
+        path = getattr(g, 'db_path', None)
+        
+    if not path:
+        print("Error: No database path specified for init_db")
+        return
 
     # Ensure dir exists
     dirname = os.path.dirname(path)

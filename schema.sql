@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS cities (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     country TEXT NOT NULL,
+    country_code TEXT,
     timezone TEXT NOT NULL,
     continent TEXT
 );
@@ -15,6 +16,8 @@ CREATE TABLE IF NOT EXISTS airports (
     city_id INTEGER,
     lat REAL,
     lon REAL,
+    timezone TEXT,
+    terminals TEXT,
     FOREIGN KEY (city_id) REFERENCES cities (id)
 );
 
@@ -22,7 +25,13 @@ CREATE TABLE IF NOT EXISTS airlines (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     iata_code TEXT,
-    frequent_flyer_program TEXT
+    icao_code TEXT,
+    callsign TEXT,
+    country TEXT,
+    logo_url TEXT,
+    frequent_flyer_program TEXT,
+    frequent_flyer_id TEXT,
+    alliance TEXT
 );
 
 CREATE TABLE IF NOT EXISTS aircraft_models (
@@ -31,9 +40,11 @@ CREATE TABLE IF NOT EXISTS aircraft_models (
     model TEXT NOT NULL,
     series TEXT,
     subtype TEXT,
-    generation TEXT,
-    engine_type TEXT,
-    winglets TEXT
+    tags_generation TEXT,
+    tags_engine TEXT,
+    tags_winglets TEXT,
+    tags_config TEXT,
+    name TEXT
 );
 
 CREATE TABLE IF NOT EXISTS flights (
@@ -42,8 +53,8 @@ CREATE TABLE IF NOT EXISTS flights (
     flight_number TEXT NOT NULL,
     airline_id INTEGER,
     aircraft_model_id INTEGER,
-    origin_airport_id INTEGER NOT NULL,
-    dest_airport_id INTEGER NOT NULL,
+    origin_airport_id INTEGER,
+    dest_airport_id INTEGER,
     dep_time_scheduled TEXT,
     arr_time_scheduled TEXT,
     dep_time_actual TEXT,
@@ -53,6 +64,19 @@ CREATE TABLE IF NOT EXISTS flights (
     flight_class TEXT,
     reason TEXT,
     note TEXT,
+    origin_terminal TEXT,
+    dest_terminal TEXT,
+    tag_generation TEXT,
+    tag_winglets TEXT,
+    tag_config TEXT,
+    registration TEXT,
+    distance INTEGER,
+    duration_scheduled INTEGER,
+    duration_actual INTEGER,
+    std TEXT,
+    atd TEXT,
+    sta TEXT,
+    ata TEXT,
     FOREIGN KEY (airline_id) REFERENCES airlines (id),
     FOREIGN KEY (aircraft_model_id) REFERENCES aircraft_models (id),
     FOREIGN KEY (origin_airport_id) REFERENCES airports (id),
