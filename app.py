@@ -98,14 +98,17 @@ def login_required(view):
 @app.route('/register', methods=('GET', 'POST'))
 def register():
     if request.method == 'POST':
-        username = request.form['username']
+        username = request.form['username'].lower()
         password = request.form['password']
+        invitation_code = request.form.get('invitation_code')
         error = None
 
         if not username:
             error = 'Username is required.'
         elif not password:
             error = 'Password is required.'
+        elif invitation_code != 'FLIGHTLOG2026':
+            error = 'Invalid invitation code.'
         
         if error is None:
             conn = database.get_users_db()
