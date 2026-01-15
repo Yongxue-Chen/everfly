@@ -148,6 +148,21 @@ const API = {
     }
 };
 
+function toggleDropdown() {
+    const dropdown = document.getElementById('settings-dropdown');
+    if (dropdown) dropdown.classList.toggle('show');
+}
+
+// Close dropdown if clicked outside
+window.onclick = function (event) {
+    if (!event.target.matches('.dropdown-toggle') && !event.target.closest('.dropdown-toggle')) {
+        const dropdown = document.getElementById('settings-dropdown');
+        if (dropdown && dropdown.classList.contains('show')) {
+            dropdown.classList.remove('show');
+        }
+    }
+}
+
 function openEditProfileModal() {
     openModal('Edit Profile', () => {
         const div = document.createElement('div');
@@ -205,9 +220,9 @@ function navigateTo(viewName) {
     // Update Navbar
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
     // Simple logic to find the nav item based on text content or index (assumed order)
-    if (viewName === 'profile') document.querySelector('.nav-item:nth-child(1)').classList.add('active');
-    if (viewName === 'flights') document.querySelector('.nav-item:nth-child(2)').classList.add('active');
-    if (viewName === 'datasets') document.querySelector('.nav-item:nth-child(3)').classList.add('active');
+    if (viewName === 'profile') document.querySelector('.nav-item:nth-child(1)')?.classList.add('active');
+    if (viewName === 'flights') document.querySelector('.nav-item:nth-child(2)')?.classList.add('active');
+    // Datasets is now in dropdown, no top-level nav item to highlight
 
     // Update View Visibility
     document.querySelectorAll('.view').forEach(el => el.style.display = 'none');
@@ -1629,6 +1644,15 @@ const renderHeaderStats = (flights) => {
 
     if (header) {
         header.innerHTML = `
+            <div style="display:flex; align-items:center; gap:15px;">
+                <div style="width:40px; height:40px; border-radius:50%; background:var(--primary-color); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:1.2rem;">
+                    <span>${CURRENT_USER.username[0].toUpperCase()}</span>
+                </div>
+                <div>
+                    <div style="font-weight:bold; font-size:1.1rem; color: #2c3e50;">${CURRENT_USER.username}</div>
+                    <div style="font-size:0.85rem; color:#7f8c8d; font-weight:500;">Wing Point User</div>
+                </div>
+            </div>
             <div class="ph-stat"><b>${flights.length}</b><span>Flights</span></div>
             <div class="ph-stat"><b>${Math.round(totalDist).toLocaleString()}</b><span>km Distance</span></div>
             <div class="ph-stat"><b>${hours}h ${mins}m</b><span>Duration</span></div>

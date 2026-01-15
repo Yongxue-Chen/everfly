@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Register - FlightLog</title>
+    <title>Register - Wing Point</title>
     <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
@@ -83,11 +83,11 @@
     <div class="auth-container">
         <h1>Register</h1>
 
-        {% with messages = get_flashed_messages() %}
+        {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
         <ul class=flashes>
-            {% for message in messages %}
-            <li>{{ message }}</li>
+            {% for category, message in messages %}
+            <li class="{{ category }}">{{ message }}</li>
             {% endfor %}
         </ul>
         {% endif %}

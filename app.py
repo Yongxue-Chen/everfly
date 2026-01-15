@@ -131,7 +131,7 @@ def register():
                 # Initialize the new user database with the schema
                 database.init_db(target_db_path=db_filename)
                 
-                flash('Registration successful. Please log in.')
+                flash('Registration successful. Please log in.', 'success')
                 return redirect(url_for('login'))
                 
             except sqlite3.IntegrityError:
@@ -139,7 +139,7 @@ def register():
             finally:
                 conn.close()
 
-        flash(error)
+        flash(error, 'error')
 
     return render_template('register.html')
 
@@ -166,10 +166,10 @@ def login():
             # Usually index page is enough, but let's add it if they want.
             # But wait, index page might not show flash? Let's assume templates support it (we will add it).
             # Let's add it.
-            flash('Login successful!')
+            flash('Login successful!', 'success')
             return redirect(url_for('index'))
 
-        flash(error)
+        flash(error, 'error')
 
     return render_template('login.html')
 

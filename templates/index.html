@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FlightLog</title>
+    <title>Wing Point</title>
     <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <!-- Icons -->
@@ -26,17 +26,34 @@
     <!-- Header / Toolbar -->
     <header class="navbar">
         <div class="navbar-left">
-            <div class="nav-item active" onclick="navigateTo('profile')">Profile</div>
-            <div class="nav-item" onclick="navigateTo('flights')">Flights</div>
-            <div class="nav-item" onclick="navigateTo('datasets')">Other Datasets</div>
+            <a href="#" class="navbar-brand">
+                <i class="fa-solid fa-plane-departure"></i>
+                Wing Point
+            </a>
         </div>
         <div class="navbar-right">
+            <div class="nav-item active" onclick="navigateTo('profile')">Profile</div>
+            <div class="nav-item" onclick="navigateTo('flights')">Flights</div>
             <button class="btn btn-primary" onclick="openAddFlightModal()">
                 <i class="fa-solid fa-plus"></i> Add flight
             </button>
-            <button class="btn btn-icon">
-                <i class="fa-solid fa-wrench"></i>
-            </button>
+
+            <div class="dropdown" id="settings-dropdown">
+                <button class="btn btn-secondary dropdown-toggle" onclick="toggleDropdown()">
+                    <i class="fa-solid fa-gear"></i> Setting <i class="fa-solid fa-caret-down"></i>
+                </button>
+                <div class="dropdown-content">
+                    <button onclick="navigateTo('datasets'); toggleDropdown();">
+                        <i class="fa-solid fa-database"></i> Other Datasets
+                    </button>
+                    <button onclick="openEditProfileModal(); toggleDropdown();">
+                        <i class="fa-solid fa-user-edit"></i> Edit Profile
+                    </button>
+                    <a href="/logout">
+                        <i class="fa-solid fa-sign-out-alt"></i> Logout
+                    </a>
+                </div>
+            </div>
         </div>
     </header>
 
@@ -47,28 +64,7 @@
         <!-- Profile View -->
         <section id="view-profile" class="view active">
             <!-- User Profile Card -->
-            <div class="user-card"
-                style="background:#fff; padding:15px; border-radius:8px; margin-bottom:15px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 2px 4px rgba(0,0,0,0.1);">
-                <div style="display:flex; align-items:center; gap:15px;">
-                    <div
-                        style="width:40px; height:40px; border-radius:50%; background:var(--primary); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:1.2rem;">
-                        <span id="user-avatar-initial">U</span>
-                    </div>
-                    <div>
-                        <div style="font-weight:bold; font-size:1.1rem;" id="user-display-name">Username</div>
-                        <div style="font-size:0.85rem; color:#666;">FlightLog User</div>
-                    </div>
-                </div>
-                <div style="display:flex; gap:10px;">
-                    <button class="btn btn-sm btn-secondary" onclick="openEditProfileModal()">
-                        <i class="fa-solid fa-pen-to-square"></i> Edit Profile
-                    </button>
-                    <a href="/logout" class="btn btn-sm btn-secondary"
-                        style="color:var(--danger); border-color:var(--danger); text-decoration:none;">
-                        <i class="fa-solid fa-sign-out-alt"></i> Logout
-                    </a>
-                </div>
-            </div>
+            <!-- User Card moved to Header Stats -->
 
             <div class="map-container">
                 <div id="flight-map"></div>
@@ -94,7 +90,8 @@
                             <i class="fa-solid fa-file-upload"></i> Import CSV
                         </button>
                         <button class="btn btn-sm btn-secondary" onclick="updateMissingFlights()"
-                            title="Update missing info from AeroAPI">
+                            title="Update missing info from AeroAPI" disabled
+                            style="opacity: 0.5; cursor: not-allowed;">
                             <i class="fa-solid fa-cloud-download-alt"></i> Update Missing
                         </button>
                     </div>
