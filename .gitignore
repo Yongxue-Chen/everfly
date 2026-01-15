@@ -14,6 +14,9 @@ env/
 .vscode/
 .idea/
 
-# Notes: Databases are intentionally NOT ignored per user request.
-# *.db
+# Databases
+*.db
+!users.db
+!instance/user_yongxue.db
+
 # instance/
