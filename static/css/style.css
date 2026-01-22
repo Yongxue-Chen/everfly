@@ -68,7 +68,7 @@ body {
     background-color: var(--primary-color);
 }
 
-/* Everfly Brand */
+/* everfly Brand */
 .navbar-brand {
     font-size: 1.5rem;
     font-weight: 700;
@@ -77,6 +77,11 @@ body {
     display: flex;
     align-items: center;
     gap: 10px;
+}
+
+.navbar-brand img {
+    height: 32px;
+    width: auto;
 }
 
 .navbar-right {

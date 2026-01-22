@@ -1650,7 +1650,7 @@ const renderHeaderStats = (flights) => {
                 </div>
                 <div>
                     <div style="font-weight:bold; font-size:1.1rem; color: #2c3e50;">${CURRENT_USER.username}</div>
-                    <div style="font-size:0.85rem; color:#7f8c8d; font-weight:500;">Everfly User</div>
+                    <div style="font-size:0.85rem; color:#7f8c8d; font-weight:500;">everfly User</div>
                 </div>
             </div>
             <div class="ph-stat"><b>${flights.length}</b><span>Flights</span></div>
