@@ -1428,11 +1428,11 @@ def get_detailed_flights():
                oa.iata_code as origin_code, oa.name as origin_name, oa.lat as origin_lat, oa.lon as origin_lon, oa.city_id as origin_city_id,
                da.iata_code as dest_code, da.name as dest_name, da.lat as dest_lat, da.lon as dest_lon, da.city_id as dest_city_id,
                al.name as airline_name,
-               am.manufacturer || ' ' || am.model as aircraft_model,
+               am.manufacturer || ' ' || COALESCE(am.name, am.model) as aircraft_model,
                am.manufacturer,
-               am.tags_generation as tag_generation, 
-               am.tags_winglets as tag_winglets, 
-               am.tags_config as tag_config
+               am.tags_generation as model_tag_generation, 
+               am.tags_winglets as model_tag_winglets, 
+               am.tags_config as model_tag_config
         FROM flights f
         LEFT JOIN airports oa ON f.origin_airport_id = oa.id
         LEFT JOIN airports da ON f.dest_airport_id = da.id
