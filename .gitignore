@@ -17,7 +17,5 @@ env/
 
 # Databases
 *.db
-!users.db
-!instance/user_yongxue.db
 
 # instance/

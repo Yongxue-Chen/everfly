@@ -7,3 +7,8 @@ pycountry
 Werkzeug
 python-dotenv
 cryptography
+PyMySQL
+Flask-Limiter
+Flask-WTF
+
+gunicorn

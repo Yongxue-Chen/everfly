@@ -122,7 +122,10 @@ const API = {
     async post(endpoint, data) {
         const res = await fetch(`${API_BASE}/${endpoint}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': CSRF_TOKEN
+            },
             body: JSON.stringify(data)
         });
         return res.json();
@@ -130,6 +133,7 @@ const API = {
     async upload(endpoint, formData) {
         const res = await fetch(`${API_BASE}/${endpoint}`, {
             method: 'POST',
+            headers: { 'X-CSRFToken': CSRF_TOKEN },
             body: formData // No Content-Type header, let browser set boundary
         });
         return res.json();
@@ -137,13 +141,19 @@ const API = {
     async put(endpoint, id, data) {
         const res = await fetch(`${API_BASE}/${endpoint}/${id}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': CSRF_TOKEN
+            },
             body: JSON.stringify(data)
         });
         return res.json();
     },
     async delete(endpoint, id) {
-        const res = await fetch(`${API_BASE}/${endpoint}/${id}`, { method: 'DELETE' });
+        const res = await fetch(`${API_BASE}/${endpoint}/${id}`, {
+            method: 'DELETE',
+            headers: { 'X-CSRFToken': CSRF_TOKEN }
+        });
         return res.json();
     }
 };
@@ -391,7 +401,10 @@ async function clearCurrentDataset() {
     if (!confirm(`Really clear all ${config.label}?`)) return;
 
     try {
-        const res = await fetch(`${API_BASE}/clear/${config.endpoint}`, { method: 'DELETE' });
+        const res = await fetch(`${API_BASE}/clear/${config.endpoint}`, {
+            method: 'DELETE',
+            headers: { 'X-CSRFToken': CSRF_TOKEN }
+        });
         const json = await res.json();
 
         if (json.error) {

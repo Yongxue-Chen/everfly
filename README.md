@@ -92,5 +92,24 @@ FlightLog is a Python Flask-based web application designed to manage and track f
 
 ## Notes
 
-- The application uses a central `users.db` for authentication and individual SQLite databases (e.g., `instance/user_username.db`) for each user's flight data.
-- API Keys: The application may contain placeholders or hardcoded keys for external services (e.g., FlightAware). Ensure you have valid keys if using those specific features.
+- The application uses a central `users` table in MySQL for authentication, with all user flight data stored in the same database under separate `user_id` scopes.
+- API Keys: Each user can configure their own FlightAware AeroAPI key via the Profile page. Keys are encrypted at rest using Fernet symmetric encryption (`MASTER_SECRET_KEY`).
+
+## ⚠️ Production Deployment Checklist
+
+Before going live, make sure the following are set correctly:
+
+1. **Disable debug mode** — set `FLASK_DEBUG=false` in `.env`.  
+   Running with `FLASK_DEBUG=true` in production exposes an interactive debugger that allows arbitrary code execution on your server.
+
+2. **Enable HTTPS-only cookies** — uncomment the following line in `app.py`:
+   ```python
+   app.config['SESSION_COOKIE_SECURE'] = True
+   ```
+   This ensures session cookies are never transmitted over plain HTTP, preventing them from being intercepted on insecure networks. This requires your server to be behind HTTPS (e.g., via Nginx + Let's Encrypt).
+
+3. **Use a production WSGI server** — do not use `python app.py` in production. Use Gunicorn or uWSGI behind a reverse proxy:
+   ```bash
+   gunicorn -w 4 -b 127.0.0.1:5000 app:app
+   ```
+

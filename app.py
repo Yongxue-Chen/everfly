@@ -1,9 +1,8 @@
-from flask import Flask, render_template, jsonify, request, g, session, redirect, url_for, flash
+from flask import Flask, render_template, jsonify, request, g, session, redirect, url_for, flash, current_app
 import os
 from dotenv import load_dotenv
 from cryptography.fernet import Fernet
 import database
-import sqlite3
 import requests
 import dateutil.parser
 import airportsdata
@@ -11,11 +10,56 @@ from datetime import datetime, timedelta
 import pytz
 import json
 import werkzeug.security
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_wtf.csrf import CSRFProtect, CSRFError
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev_secret_key')
+
+# --- Proxy Configuration (Critical for 1Panel/Docker) ---
+# Tell Flask to trust headers from the reverse proxy (Nginx).
+# x_for=1: Trust the first X-Forwarded-For header (Client IP)
+# x_proto=1: Trust X-Forwarded-Proto (HTTP/HTTPS)
+# x_host=1: Trust X-Forwarded-Host
+# x_port=1: Trust X-Forwarded-Port
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
+
+# --- Security Setup ---
+# Rate Limiting
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://"
+)
+
+# CSRF Protection
+csrf = CSRFProtect(app)
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(e):
+    return render_template('error.html', reason=e.description), 400
+
+def safe_jsonify_error(e):
+    """Return generic error in production, detailed in debug."""
+    if app.debug:
+        return safe_jsonify_error(e)
+    print(f"Internal Error: {e}") # Log it
+    return jsonify({'error': 'An internal error occurred.'}), 500
+
+_secret_key = os.environ.get('FLASK_SECRET_KEY')
+if not _secret_key:
+    raise RuntimeError("FLASK_SECRET_KEY not set in environment. This is required for secure sessions.")
+app.secret_key = _secret_key
+
+# Secure session cookie settings
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+# Enable the line below when serving over HTTPS in production:
+# app.config['SESSION_COOKIE_SECURE'] = True
 
 # --- Encryption Setup ---
 _MASTER_KEY = os.environ.get('MASTER_SECRET_KEY')
@@ -50,60 +94,6 @@ def load_logged_in_user():
         conn = database.get_users_db()
         g.user = conn.execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
         conn.close()
-        
-    if g.user:
-        # FIX for cross-platform migration:
-        # DB might contain Windows path "C:\...\file.db" but we are on Linux.
-        # So we extract just the filename and prepend the current instance path.
-        stored_path = g.user['db_filename']
-        # Normalized handling: Replace backslash with forward slash and take the last part.
-        # This handles Windows paths (C:\...) even when running on Linux.
-        filename = stored_path.replace('\\', '/').split('/')[-1]
-        g.db_path = os.path.join(app.instance_path, filename)
-        if g.db_path: # Ensure we have a path
-             # Check if DB initialized
-             if not os.path.exists(g.db_path) or os.path.getsize(g.db_path) == 0:
-                 print(f"User DB missing/empty, initializing: {g.db_path}")
-                 database.init_db(target_db_path=g.db_path)
-             else:
-                 # Check table existence (handle case where file exists but is empty/corrupt)
-                 try:
-                     conn = sqlite3.connect(g.db_path)
-                     cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='flights'")
-                     if not cur.fetchone():
-                         print(f"User DB uninitialized, initializing: {g.db_path}")
-                         # init_db handles connection internally
-                         conn.close() 
-                         database.init_db(target_db_path=g.db_path)
-                     else:
-                        conn.close()
-                        # Run migration for existing users
-                        # But be careful not to cycle? migrate_schema uses get_db() -> g.db, 
-                        # so we need to ensure g.db points to g.db_path. 
-                        # get_db() uses g.db_path, so it's safe.
-                        # We need to make sure this doesn't slow down every request.
-                        # For now, let's just run it. It checks schema so should be fast.
-                        pass # Actually calling migrate_schema here might be heavy for EVERY request.
-                        # Ideally only on login or once per session?
-                        # Or just rely on admin endpoint?
-                        # User asked why flightlog.db is created, which was due to global call.
-                        # If we remove global call, user DBs might get outdated schema.
-                        # Let's add a check: Is this "too frequent"? 
-                        # Simple: Just don't run it every request.
-                        # Or, run it inside the 'else' (DB exists) block but maybe cache it?
-                        # For now, let's NOT run it every request, but assume init_db sets correct schema.
-                        # Issue: migrate_nulls was a manual script.
-                        # We need 'migrate_schema' if we have automatic migrations in code.
-                        # app.py has: def migrate_schema(): ... creates flights table if not exists?
-                        # Wait, init_db does that.
-                        # migrate_schema in app.py logic:
-                        # "CREATE TABLE IF NOT EXISTS ..."
-                        # So it IS safe to run.
-                        # But calling it every request is wasteful.
-                        # Let's leave it out for now and rely on init_db for new users.
-                        # Existing users might need manual migration if we change schema again.
-                 except Exception as e:
-                     print(f"DB check error: {e}")
 
 @app.teardown_appcontext
 def close_connection(exception):
@@ -122,6 +112,7 @@ def login_required(view):
 
 # --- Auth Routes ---
 @app.route('/register', methods=('GET', 'POST'))
+@limiter.limit("5 per hour")
 def register():
     if request.method == 'POST':
         username = request.form['username'].lower()
@@ -133,35 +124,25 @@ def register():
             error = 'Username is required.'
         elif not password:
             error = 'Password is required.'
-        elif invitation_code != 'FLIGHTLOG2026':
+        elif invitation_code != os.environ.get('INVITATION_CODE'):
             error = 'Invalid invitation code.'
         
         if error is None:
             conn = database.get_users_db()
             try:
-                # 1. Create User
                 password_hash = werkzeug.security.generate_password_hash(password)
-                
-                # Assign a unique DB file
-                # To be improved: sanitize username for filename or use UUID
-                clean_username = "".join([c for c in username if c.isalpha() or c.isdigit()]).lower()
-                db_filename = os.path.join(app.instance_path, f"user_{clean_username}.db")
-                
-                cur = conn.execute(
-                    'INSERT INTO users (username, password_hash, db_filename) VALUES (?, ?, ?)',
-                    (username, password_hash, db_filename)
+                conn.execute(
+                    'INSERT INTO users (username, password_hash) VALUES (?, ?)',
+                    (username, password_hash)
                 )
                 conn.commit()
-                
-                # 2. Init User DB
-                # Initialize the new user database with the schema
-                database.init_db(target_db_path=db_filename)
-                
                 flash('Registration successful. Please log in.', 'success')
                 return redirect(url_for('login'))
-                
-            except sqlite3.IntegrityError:
-                error = f"User {username} is already registered."
+            except Exception as e:
+                if 'Duplicate entry' in str(e) or 'UNIQUE' in str(e):
+                    error = f"User {username} is already registered."
+                else:
+                    error = str(e)
             finally:
                 conn.close()
 
@@ -170,6 +151,7 @@ def register():
     return render_template('register.html')
 
 @app.route('/login', methods=('GET', 'POST'))
+@limiter.limit("10 per minute")
 def login():
     if request.method == 'POST':
         username = request.form['username'].lower()
@@ -196,8 +178,6 @@ def login():
             return redirect(url_for('index'))
 
         flash(error, 'error')
-
-    return render_template('login.html')
 
     return render_template('login.html')
 
@@ -231,7 +211,7 @@ def update_profile():
         conn.commit()
         return jsonify({'message': 'Profile updated successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return safe_jsonify_error(e)
     finally:
         conn.close()
 
@@ -256,7 +236,7 @@ def save_api_key():
         conn.close()
         return jsonify({'message': 'API key saved successfully'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return safe_jsonify_error(e)
 
 @app.route('/logout')
 def logout():
@@ -282,8 +262,10 @@ def query_db(query, args=(), one=False):
     if not g.user: return None # Security check
     conn = database.get_db()
     cur = conn.execute(query, args)
-    rv = [dict(row) for row in cur.fetchall()]
-    # conn.close() # Managed by teardown
+    if cur.description is None:
+        return None
+    cols = [d[0] for d in cur.description]
+    rv = [dict(zip(cols, row)) for row in cur.fetchall()]
     return (rv[0] if rv else None) if one else rv
 
 def execute_db(query, args=()):
@@ -312,7 +294,7 @@ def create_crud_routes(endpoint, table_name, columns):
     @app.route(f'/api/{endpoint}', methods=['GET'], endpoint=f'get_{endpoint}')
     @login_required
     def get_all():
-        rows = query_db(f"SELECT * FROM {table_name}")
+        rows = query_db(f"SELECT * FROM {table_name} WHERE user_id = ?", (g.user['id'],))
         return jsonify(rows)
 
     # POST create
@@ -332,9 +314,9 @@ def create_crud_routes(endpoint, table_name, columns):
                 if origin_id and dest_id:
 
                     if valid_data.get('std') and valid_data.get('sta') and not valid_data.get('duration_scheduled'):
-                        valid_data['duration_scheduled'] = calculate_duration(conn, origin_id, dest_id, valid_data['std'], valid_data['sta'])
+                        valid_data['duration_scheduled'] = _calc_duration_minutes(conn, origin_id, dest_id, valid_data['std'], valid_data['sta'])
                     if valid_data.get('atd') and valid_data.get('ata') and not valid_data.get('duration_actual'):
-                        valid_data['duration_actual'] = calculate_duration(conn, origin_id, dest_id, valid_data['atd'], valid_data['ata'])
+                        valid_data['duration_actual'] = _calc_duration_minutes(conn, origin_id, dest_id, valid_data['atd'], valid_data['ata'])
             except Exception as e:
                 print(f"Error calculating duration: {e}")
             # finally:
@@ -347,16 +329,17 @@ def create_crud_routes(endpoint, table_name, columns):
         if not valid_data:
              return jsonify({'error': 'No valid data provided'}), 400
         
+        valid_data['user_id'] = g.user['id']
         cols = ', '.join(valid_data.keys())
         placeholders = ', '.join(['?'] * len(valid_data))
         values = list(valid_data.values())
         
         try:
             new_id = execute_db(f"INSERT INTO {table_name} ({cols}) VALUES ({placeholders})", values)
-            new_item = query_db(f"SELECT * FROM {table_name} WHERE id = ?", (new_id,), one=True)
+            new_item = query_db(f"SELECT * FROM {table_name} WHERE id = ? AND user_id = ?", (new_id, g.user['id']), one=True)
             return jsonify(new_item), 201
         except Exception as e:
-            return jsonify({'error': str(e)}), 500
+            return safe_jsonify_error(e)
 
     # PUT update
     @app.route(f'/api/{endpoint}/<int:id>', methods=['PUT'], endpoint=f'update_{endpoint}')
@@ -370,7 +353,7 @@ def create_crud_routes(endpoint, table_name, columns):
             conn = database.get_db()
             try:
                 # Fetch existing to compare or fill
-                cur = conn.execute("SELECT origin_airport_id, dest_airport_id, std, sta, atd, ata FROM flights WHERE id = ?", (id,))
+                cur = conn.execute("SELECT origin_airport_id, dest_airport_id, std, sta, atd, ata FROM flights WHERE id = ? AND user_id = ?", (id, g.user['id']))
                 row = cur.fetchone()
                 if row:
                     merged = {
@@ -382,9 +365,9 @@ def create_crud_routes(endpoint, table_name, columns):
                         'ata': valid_data.get('ata', row[5])
                     }
                     if merged['std'] and merged['sta'] and not valid_data.get('duration_scheduled'):
-                        valid_data['duration_scheduled'] = calculate_duration(conn, merged['origin_airport_id'], merged['dest_airport_id'], merged['std'], merged['sta'])
+                        valid_data['duration_scheduled'] = _calc_duration_minutes(conn, merged['origin_airport_id'], merged['dest_airport_id'], merged['std'], merged['sta'])
                     if merged['atd'] and merged['ata'] and not valid_data.get('duration_actual'):
-                        valid_data['duration_actual'] = calculate_duration(conn, merged['origin_airport_id'], merged['dest_airport_id'], merged['atd'], merged['ata'])
+                        valid_data['duration_actual'] = _calc_duration_minutes(conn, merged['origin_airport_id'], merged['dest_airport_id'], merged['atd'], merged['ata'])
             except Exception as e:
                  print(f"Error calculating duration update: {e}")
             # finally:
@@ -399,24 +382,24 @@ def create_crud_routes(endpoint, table_name, columns):
 
         set_clause = ', '.join([f"{k} = ?" for k in valid_data.keys()])
         values = list(valid_data.values())
-        values.append(id)
+        values.extend([id, g.user['id']])
         
         try:
-            execute_db(f"UPDATE {table_name} SET {set_clause} WHERE id = ?", values)
-            updated_item = query_db(f"SELECT * FROM {table_name} WHERE id = ?", (id,), one=True)
+            execute_db(f"UPDATE {table_name} SET {set_clause} WHERE id = ? AND user_id = ?", values)
+            updated_item = query_db(f"SELECT * FROM {table_name} WHERE id = ? AND user_id = ?", (id, g.user['id']), one=True)
             return jsonify(updated_item)
         except Exception as e:
-            return jsonify({'error': str(e)}), 500
+            return safe_jsonify_error(e)
 
     # DELETE
     @app.route(f'/api/{endpoint}/<int:id>', methods=['DELETE'], endpoint=f'delete_{endpoint}')
     @login_required
     def delete_item(id):
         try:
-            execute_db(f"DELETE FROM {table_name} WHERE id = ?", (id,))
+            execute_db(f"DELETE FROM {table_name} WHERE id = ? AND user_id = ?", (id, g.user['id']))
             return jsonify({'message': 'Deleted', 'id': id})
         except Exception as e:
-            return jsonify({'error': str(e)}), 500
+            return safe_jsonify_error(e)
 
 
 # --- Define Entities ---
@@ -434,95 +417,8 @@ flights_cols = ['date', 'flight_number', 'airline_id', 'aircraft_model_id', 'ori
 
 # --- Auto-Migration Helper ---
 def migrate_schema():
-    """Ensure database has new columns without losing data."""
-    try:
-        conn = database.get_db()
-        
-        # Cities
-        cur = conn.execute("PRAGMA table_info(cities)")
-        cities_cols_db = [row[1] for row in cur.fetchall()]
-        if 'country_code' not in cities_cols_db:
-             conn.execute("ALTER TABLE cities ADD COLUMN country_code TEXT")
-        if 'timezone' not in cities_cols_db:
-             conn.execute("ALTER TABLE cities ADD COLUMN timezone TEXT")
-        if 'continent' not in cities_cols_db:
-             conn.execute("ALTER TABLE cities ADD COLUMN continent TEXT")
-             print("Migrated: Added continent to cities")
-
-        # Airlines
-        cur = conn.execute("PRAGMA table_info(airlines)")
-        airlines_cols_db = [row[1] for row in cur.fetchall()]
-        if 'alliance' not in airlines_cols_db:
-             conn.execute("ALTER TABLE airlines ADD COLUMN alliance TEXT")
-             print("Migrated: Added alliance to airlines")
-        if 'icao_code' not in airlines_cols_db:
-            conn.execute("ALTER TABLE airlines ADD COLUMN icao_code TEXT")
-        if 'frequent_flyer_id' not in airlines_cols_db:
-            conn.execute("ALTER TABLE airlines ADD COLUMN frequent_flyer_id TEXT")
-            
-        # Airports
-        cur = conn.execute("PRAGMA table_info(airports)")
-        airports_cols_db = [row[1] for row in cur.fetchall()]
-        if 'terminals' not in airports_cols_db:
-            conn.execute("ALTER TABLE airports ADD COLUMN terminals TEXT")
-
-        # Aircraft Models
-        cur = conn.execute("PRAGMA table_info(aircraft_models)")
-        aircraft_cols_db = [row[1] for row in cur.fetchall()]
-        if 'tags_generation' not in aircraft_cols_db:
-             conn.execute("ALTER TABLE aircraft_models ADD COLUMN tags_generation TEXT")
-             conn.execute("ALTER TABLE aircraft_models ADD COLUMN tags_engine TEXT")
-             conn.execute("ALTER TABLE aircraft_models ADD COLUMN tags_winglets TEXT")
-        
-        if 'tags_config' not in aircraft_cols_db:
-             conn.execute("ALTER TABLE aircraft_models ADD COLUMN tags_config TEXT")
-             
-        if 'name' not in aircraft_cols_db:
-             conn.execute("ALTER TABLE aircraft_models ADD COLUMN name TEXT")
-             # Populate existing names: Model-Subtype if exists, else Model-Series
-             # We use a simple SQL update for this
-             conn.execute("""
-                UPDATE aircraft_models 
-                SET name = model || '-' || CASE WHEN subtype IS NOT NULL AND subtype != '' THEN subtype ELSE series END
-             """)
-
-        # Flights
-        cur = conn.execute("PRAGMA table_info(flights)")
-        flights_cols_db = [row[1] for row in cur.fetchall()]
-        if 'origin_terminal' not in flights_cols_db:
-            conn.execute("ALTER TABLE flights ADD COLUMN origin_terminal TEXT")
-            conn.execute("ALTER TABLE flights ADD COLUMN dest_terminal TEXT")
-        
-        if 'tag_generation' not in flights_cols_db:
-            conn.execute("ALTER TABLE flights ADD COLUMN tag_generation TEXT")
-            conn.execute("ALTER TABLE flights ADD COLUMN tag_winglets TEXT")
-            
-        if 'tag_config' not in flights_cols_db:
-            conn.execute("ALTER TABLE flights ADD COLUMN tag_config TEXT")
-
-        # New Flight Columns
-        if 'registration' not in flights_cols_db:
-            conn.execute("ALTER TABLE flights ADD COLUMN registration TEXT")
-            conn.execute("ALTER TABLE flights ADD COLUMN distance INTEGER")
-            conn.execute("ALTER TABLE flights ADD COLUMN duration_scheduled INTEGER")
-            conn.execute("ALTER TABLE flights ADD COLUMN duration_actual INTEGER")
-            conn.execute("ALTER TABLE flights ADD COLUMN std TEXT")
-            conn.execute("ALTER TABLE flights ADD COLUMN atd TEXT")
-            conn.execute("ALTER TABLE flights ADD COLUMN sta TEXT")
-            conn.execute("ALTER TABLE flights ADD COLUMN ata TEXT")
-            print("Migrated: added extended flight details")
-
-        conn.commit()
-
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"Migration warning: {e}")
-
-# Run migration on start
-# Run migration on start
-# with app.app_context():
-#    migrate_schema()
+    """No-op in MySQL mode — schema is fully managed via schema_mysql.sql."""
+    pass
 
 create_crud_routes('cities', 'cities', cities_cols)
 create_crud_routes('airports', 'airports', airports_cols)
@@ -539,7 +435,7 @@ from datetime import datetime
 import pytz
 import airlines_data
 
-def calculate_duration(conn, origin_id, dest_id, dep_str, arr_str):
+def _calc_duration_minutes(conn, origin_id, dest_id, dep_str, arr_str):
     """Calculate duration in minutes considering timezones."""
     if not dep_str or not arr_str: return None
     try:
@@ -548,8 +444,8 @@ def calculate_duration(conn, origin_id, dest_id, dep_str, arr_str):
             cur = conn.execute('''
                 SELECT c.timezone FROM airports a 
                 JOIN cities c ON a.city_id = c.id 
-                WHERE a.id = ?
-            ''', (aid,))
+                WHERE a.id = ? AND a.user_id = ?
+            ''', (aid, g.user['id']))
             row = cur.fetchone()
             return row[0] if row else 'UTC'
         
@@ -627,7 +523,7 @@ def import_csv(table_name):
         
         # Helper for lookups
         def lookup_id(table, col, val):
-            cur = conn.execute(f"SELECT id FROM {table} WHERE {col} = ?", (val,))
+            cur = conn.execute(f"SELECT id FROM {table} WHERE {col} = ? AND user_id = ?", (val, g.user['id']))
             res = cur.fetchone()
             return res[0] if res else None
 
@@ -739,14 +635,14 @@ def import_csv(table_name):
                                 country_code = info.get('country')
                                 if city_name:
                                     # Reuse logic from _update_airport_logic if possible, or just look up
-                                    cur_c = conn.execute("SELECT id FROM cities WHERE name = ? AND country_code = ?", (city_name, country_code))
+                                    cur_c = conn.execute("SELECT id FROM cities WHERE name = ? AND country_code = ? AND user_id = ?", (city_name, country_code, g.user['id']))
                                     res_c = cur_c.fetchone()
                                     if res_c: normalized_row['city_id'] = res_c[0]
                                     else:
                                         # Create basic city
-                                        conn.execute("INSERT INTO cities (name, country, country_code, timezone) VALUES (?, ?, ?, ?)",
-                                                   (city_name, country_code, country_code, info.get('tz')))
-                                        normalized_row['city_id'] = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                                        cur_ins = conn.execute("INSERT INTO cities (user_id, name, country, country_code, timezone) VALUES (?, ?, ?, ?, ?)",
+                                                   (g.user['id'], city_name, country_code, country_code, info.get('tz')))
+                                        normalized_row['city_id'] = cur_ins.lastrowid
 
                 # Manual Autolink City (Fallback if not fetched above)
                 if 'city_id' not in normalized_row:
@@ -882,15 +778,17 @@ def import_csv(table_name):
 
                 if origin_id and dest_id:
                     if std and sta and not normalized_row.get('duration_scheduled'):
-                        normalized_row['duration_scheduled'] = calculate_duration(conn, origin_id, dest_id, std, sta)
+                        normalized_row['duration_scheduled'] = _calc_duration_minutes(conn, origin_id, dest_id, std, sta)
                     if atd and ata and not normalized_row.get('duration_actual'):
-                        normalized_row['duration_actual'] = calculate_duration(conn, origin_id, dest_id, atd, ata)
+                        normalized_row['duration_actual'] = _calc_duration_minutes(conn, origin_id, dest_id, atd, ata)
 
             # 3. Prepare Final Data
             valid_data = {k: v for k, v in normalized_row.items() if k in target_cols}
             
             if not valid_data:
                 continue
+
+            valid_data['user_id'] = g.user['id']
 
             cols = ', '.join(valid_data.keys())
             placeholders = ', '.join(['?'] * len(valid_data))
@@ -908,7 +806,7 @@ def import_csv(table_name):
         return jsonify({'message': f'Imported {success_count} rows', 'errors': errors})
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return safe_jsonify_error(e)
 
 @app.route('/api/clear/<table_name>', methods=['DELETE'])
 @login_required
@@ -919,14 +817,11 @@ def clear_table(table_name):
     
     try:
         conn = database.get_db()
-        conn.execute(f"DELETE FROM {table_name}")
-        # Reset Auto Increment? Optional but cleaner
-        conn.execute(f"DELETE FROM sqlite_sequence WHERE name='{table_name}'")
+        conn.execute(f"DELETE FROM {table_name} WHERE user_id = ?", (g.user['id'],))
         conn.commit()
-        conn.close()
         return jsonify({'message': f'{table_name} cleared'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return safe_jsonify_error(e)
 
 
 # --- Automation Logic ---
@@ -936,12 +831,13 @@ import pycountry
 def _update_airport_logic(id, conn):
     """Helper to update single airport."""
     updated_fields = []
-    # Use row_factory or index carefully. Schema: id=0, name=1, iata=2, icao=3, city_id=4, lat=5, lon=6
-    cur = conn.execute("SELECT * FROM airports WHERE id = ?", (id,))
+    uid = g.user['id']
+    # Explicit column selection so indices are stable regardless of SQL mode
+    cur = conn.execute("SELECT id, name, iata_code, icao_code, city_id FROM airports WHERE id = ? AND user_id = ?", (id, uid))
     row = cur.fetchone()
     if not row: return False, "Not found"
     
-    iata = row[2] 
+    iata = row[2]  # iata_code
     if not iata or len(iata) != 3: return False, "Invalid IATA"
 
     airports = airportsdata.load('IATA')
@@ -953,12 +849,12 @@ def _update_airport_logic(id, conn):
     new_lat = data.get('lat')
     new_lon = data.get('lon')
     
-    conn.execute("UPDATE airports SET icao_code = ?, lat = ?, lon = ? WHERE id = ?", 
-                    (new_icao, new_lat, new_lon, id))
+    conn.execute("UPDATE airports SET icao_code = ?, lat = ?, lon = ? WHERE id = ? AND user_id = ?", 
+                    (new_icao, new_lat, new_lon, id, uid))
     updated_fields.extend(['icao_code', 'lat', 'lon'])
 
     # 2. Match City
-    current_city_id = row[4]
+    current_city_id = row[4]  # city_id
     
     # We update city if missing
     if not current_city_id:
@@ -967,7 +863,7 @@ def _update_airport_logic(id, conn):
         tz = data.get('tz')
 
         # Find City Logic: Strict Match (Name + Code)
-        cur = conn.execute("SELECT id FROM cities WHERE name = ? AND country_code = ?", (city_name, country_code))
+        cur = conn.execute("SELECT id FROM cities WHERE name = ? AND country_code = ? AND user_id = ?", (city_name, country_code, uid))
         res = cur.fetchone()
         
         city_id = None
@@ -975,20 +871,20 @@ def _update_airport_logic(id, conn):
             city_id = res[0]
         else:
             # Fallback: Check Legacy (Name match, Code Null) -> Update it
-            cur = conn.execute("SELECT id, country_code FROM cities WHERE name = ?", (city_name,))
+            cur = conn.execute("SELECT id, country_code FROM cities WHERE name = ? AND user_id = ?", (city_name, uid))
             matches = cur.fetchall()
             if len(matches) == 1 and not matches[0][1]:
                 # Legacy Update
                 city_id = matches[0][0]
-                conn.execute("UPDATE cities SET country_code = ?, timezone = ?, continent = ? WHERE id = ?", 
-                             (country_code, tz, get_continent_from_tz(tz), city_id))
+                conn.execute("UPDATE cities SET country_code = ?, timezone = ?, continent = ? WHERE id = ? AND user_id = ?", 
+                             (country_code, tz, get_continent_from_tz(tz), city_id, uid))
             else:
                 # Create New
-                conn.execute("INSERT INTO cities (name, country, country_code, timezone, continent) VALUES (?, ?, ?, ?, ?)",
-                            (city_name, country_code, country_code, tz, get_continent_from_tz(tz)))
-                city_id = cur.lastrowid
+                cur2 = conn.execute("INSERT INTO cities (user_id, name, country, country_code, timezone, continent) VALUES (?, ?, ?, ?, ?, ?)",
+                            (uid, city_name, country_code, country_code, tz, get_continent_from_tz(tz)))
+                city_id = cur2.lastrowid
         
-        conn.execute("UPDATE airports SET city_id = ? WHERE id = ?", (city_id, id))
+        conn.execute("UPDATE airports SET city_id = ? WHERE id = ? AND user_id = ?", (city_id, id, uid))
         updated_fields.append('city_id')
     
     return True, updated_fields
@@ -1001,18 +897,17 @@ def update_airport(id):
         conn = database.get_db()
         success, res = _update_airport_logic(id, conn)
         conn.commit()
-        conn.close()
         if success: return jsonify({'message': 'Updated', 'fields': res})
         else: return jsonify({'error': res}), 400
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return safe_jsonify_error(e)
 
 @app.route('/api/airports/batch_update', methods=['POST'])
 @login_required
 def batch_update_airports():
     try:
         conn = database.get_db()
-        cur = conn.execute("SELECT id FROM airports WHERE (icao_code IS NULL OR icao_code = '') OR city_id IS NULL")
+        cur = conn.execute("SELECT id FROM airports WHERE ((icao_code IS NULL OR icao_code = '') OR city_id IS NULL) AND user_id = ?", (g.user['id'],))
         ids = [row[0] for row in cur.fetchall()]
         
         count = 0
@@ -1021,21 +916,20 @@ def batch_update_airports():
             if success: count += 1
             
         conn.commit()
-        conn.close()
         return jsonify({'message': f'Processed {len(ids)} airports, Updated {count}.'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return safe_jsonify_error(e)
 
 def _update_airline_logic(id, conn):
     """Helper to update single airline IATA from ICAO if possible."""
-    cur = conn.execute("SELECT icao_code, iata_code FROM airlines WHERE id = ?", (id,))
+    cur = conn.execute("SELECT icao_code, iata_code FROM airlines WHERE id = ? AND user_id = ?", (id, g.user['id']))
     row = cur.fetchone()
     if not row or not row[0]: return False, "No ICAO code"
     icao = row[0].upper()
     
     idata = airlines_data.AIRLINES_ICAO_TO_IATA.get(icao)
     if idata:
-        conn.execute("UPDATE airlines SET iata_code = ? WHERE id = ?", (idata, id))
+        conn.execute("UPDATE airlines SET iata_code = ? WHERE id = ? AND user_id = ?", (idata, id, g.user['id']))
         return True, "Updated"
     
     return False, "ICAO code not found in database"
@@ -1047,11 +941,10 @@ def update_airline(id):
         conn = database.get_db()
         success, res = _update_airline_logic(id, conn)
         conn.commit()
-        conn.close()
         if success: return jsonify({'message': 'Updated'})
         else: return jsonify({'error': res}), 400
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return safe_jsonify_error(e)
 
 @app.route('/api/airlines/batch_update', methods=['POST'])
 @login_required
@@ -1059,7 +952,7 @@ def batch_update_airlines():
     try:
         conn = database.get_db()
         # Select ALL airlines with an ICAO code to allow correcting wrong IATA codes
-        cur = conn.execute("SELECT id FROM airlines WHERE icao_code IS NOT NULL AND icao_code != ''")
+        cur = conn.execute("SELECT id FROM airlines WHERE icao_code IS NOT NULL AND icao_code != '' AND user_id = ?", (g.user['id'],))
         ids = [row[0] for row in cur.fetchall()]
         
         count = 0
@@ -1069,17 +962,16 @@ def batch_update_airlines():
             if success: count += 1
             
         conn.commit()
-        conn.close()
         return jsonify({'message': f'Processed {len(ids)} airlines, Updated {count}.'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return safe_jsonify_error(e)
 
 @app.route('/api/cities/<int:id>/update', methods=['POST'])
 @login_required
 def update_city(id):
     try:
         conn = database.get_db()
-        cur = conn.execute("SELECT name, country FROM cities WHERE id = ?", (id,))
+        cur = conn.execute("SELECT name, country FROM cities WHERE id = ? AND user_id = ?", (id, g.user['id']))
         row = cur.fetchone()
         if not row: return jsonify({'error': 'City not found'}), 404
         
@@ -1090,25 +982,22 @@ def update_city(id):
             countries = pycountry.countries.search_fuzzy(country_name)
             if countries:
                 code = countries[0].alpha_2
-                conn.execute("UPDATE cities SET country_code = ? WHERE id = ?", (code, id))
+                conn.execute("UPDATE cities SET country_code = ? WHERE id = ? AND user_id = ?", (code, id, g.user['id']))
                 conn.commit()
-                conn.close()
                 return jsonify({'message': 'Updated', 'code': code})
             else:
-                 conn.close()
                  return jsonify({'error': 'Country not found'}), 404
         except LookupError:
-             conn.close()
              return jsonify({'error': 'Lookup failed'}), 404
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return safe_jsonify_error(e)
 
 @app.route('/api/cities/batch_update', methods=['POST'])
 @login_required
 def batch_update_cities():
     try:
         conn = database.get_db()
-        cur = conn.execute("SELECT id, country FROM cities WHERE country_code IS NULL OR country_code = ''")
+        cur = conn.execute("SELECT id, country FROM cities WHERE (country_code IS NULL OR country_code = '') AND user_id = ?", (g.user['id'],))
         rows = cur.fetchall()
         
         count = 0
@@ -1118,16 +1007,15 @@ def batch_update_cities():
                 countries = pycountry.countries.search_fuzzy(country_name)
                 if countries:
                     code = countries[0].alpha_2
-                    conn.execute("UPDATE cities SET country_code = ? WHERE id = ?", (code, id))
+                    conn.execute("UPDATE cities SET country_code = ? WHERE id = ? AND user_id = ?", (code, id, g.user['id']))
                     count += 1
             except:
                 continue
                 
         conn.commit()
-        conn.close()
         return jsonify({'message': f'Updated {count} cities.'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return safe_jsonify_error(e)
 
 # --- FlightAware AeroAPI Integration ---
 
@@ -1163,24 +1051,23 @@ def fetch_aeroapi_data(ident, start_str, end_str):
     return data.get('flights', [])
 
 def get_or_create_airport(icao, iata, conn):
+    uid = g.user['id']
     if not iata and not icao: return None
     # Try by ICAO first
     if icao:
-        cur = conn.execute("SELECT id FROM airports WHERE icao_code = ?", (icao,))
+        cur = conn.execute("SELECT id FROM airports WHERE icao_code = ? AND user_id = ?", (icao, uid))
         row = cur.fetchone()
         if row: return row[0]
     
     # Try by IATA
     if iata:
-        cur = conn.execute("SELECT id FROM airports WHERE iata_code = ?", (iata,))
+        cur = conn.execute("SELECT id FROM airports WHERE iata_code = ? AND user_id = ?", (iata, uid))
         row = cur.fetchone()
         if row: return row[0]
         
     print(f"Creating new airport: {icao}/{iata}")
     # Create New Airport using airportsdata
     ad = airportsdata.load('ICAO')
-    # If we only have IATA, airportsdata key is ICAO. Can we find it?
-    # airportsdata can load by IATA too.
     info = None
     if icao:
         info = ad.get(icao)
@@ -1192,24 +1079,14 @@ def get_or_create_airport(icao, iata, conn):
     if info:
         # Check/Create City
         city_name = info['city']
-        cur = conn.execute("SELECT id, timezone, continent FROM cities WHERE name = ?", (city_name,))
+        cur = conn.execute("SELECT id, timezone, continent FROM cities WHERE name = ? AND user_id = ?", (city_name, uid))
         city_row = cur.fetchone()
         
         if city_row:
             city_id = city_row[0]
-            # Backfill timezone/continent if missing
             db_tz = city_row[1]
             db_cont = city_row[2]
             new_tz = info.get('tz')
-            
-            # Ensure new_cont is calculated if not present in info (though airportsdata usually has it, but format check)
-            # Actually airportsdata uses 'continent' key e.g. 'AS', 'EU'.
-            # We want full names or consistent codes? User seems to use 'Asia'. 
-            # Our helper get_continent_from_tz uses timezone split.
-            # Let's rely on timezone for consistency if possible, or mapping.
-            # airportsdata 'continent' is 2-letter. 'AS' -> 'Asia'?
-            # Let's stick to get_continent_from_tz for consistency with other parts of app.
-            
             new_cont_calc = get_continent_from_tz(new_tz)
             
             updates = []
@@ -1222,15 +1099,12 @@ def get_or_create_airport(icao, iata, conn):
                 vals.append(new_cont_calc)
             
             if updates:
-                vals.append(city_id)
-                conn.execute(f"UPDATE cities SET {', '.join(updates)} WHERE id = ?", vals)
+                vals.extend([city_id, uid])
+                conn.execute(f"UPDATE cities SET {', '.join(updates)} WHERE id = ? AND user_id = ?", vals)
         else:
-            # Try to guess timezone
             tz = info.get('tz')
             cont = get_continent_from_tz(tz)
-            
-            # Resolve Country Name
-            country_code = info.get('country') # ISO 2-letter
+            country_code = info.get('country')
             country_name = country_code
             try:
                 import pycountry
@@ -1240,35 +1114,33 @@ def get_or_create_airport(icao, iata, conn):
             except:
                 pass
 
-            cur = conn.execute("INSERT INTO cities (name, country, country_code, timezone, continent) VALUES (?, ?, ?, ?, ?)", 
-                             (city_name, country_name, country_code, tz, cont))
+            cur = conn.execute("INSERT INTO cities (user_id, name, country, country_code, timezone, continent) VALUES (?, ?, ?, ?, ?, ?)", 
+                             (uid, city_name, country_name, country_code, tz, cont))
             city_id = cur.lastrowid
             
         cur = conn.execute('''
-            INSERT INTO airports (city_id, name, iata_code, icao_code, lat, lon, timezone)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (city_id, info['name'], info.get('iata'), info.get('icao'), info['lat'], info['lon'], info.get('tz')))
+            INSERT INTO airports (user_id, city_id, name, iata_code, icao_code, lat, lon, timezone)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (uid, city_id, info['name'], info.get('iata'), info.get('icao'), info['lat'], info['lon'], info.get('tz')))
         return cur.lastrowid
     
     return None
 
 def get_or_create_airline(icao, iata, conn):
+    uid = g.user['id']
     if not icao: return None 
-    cur = conn.execute("SELECT id FROM airlines WHERE icao_code = ?", (icao,))
+    cur = conn.execute("SELECT id FROM airlines WHERE icao_code = ? AND user_id = ?", (icao, uid))
     row = cur.fetchone()
     if row: return row[0]
     
     name = icao # Default
     new_iata = iata
-    
-    # Auto-create with ICAO as name (User request)
-    # We no longer check against AIRLINES_BY_ICAO to avoid crashes if missing
-        
-    cur = conn.execute("INSERT INTO airlines (name, iata_code, icao_code) VALUES (?, ?, ?)", (name, new_iata, icao))
+    cur = conn.execute("INSERT INTO airlines (user_id, name, iata_code, icao_code) VALUES (?, ?, ?, ?)", (uid, name, new_iata, icao))
     return cur.lastrowid
 
 # --- Calculation API ---
 @app.route('/api/calculate_duration', methods=['POST'])
+@login_required
 def calculate_duration():
     data = request.json
     start_str = data.get('start')
@@ -1282,9 +1154,9 @@ def calculate_duration():
     try:
         conn = database.get_db()
         # Fetch timezones
-        cur = conn.execute("SELECT timezone FROM airports WHERE id = ?", (origin_id,))
+        cur = conn.execute("SELECT timezone FROM airports WHERE id = ? AND user_id = ?", (origin_id, g.user['id']))
         origin_row = cur.fetchone()
-        cur = conn.execute("SELECT timezone FROM airports WHERE id = ?", (dest_id,))
+        cur = conn.execute("SELECT timezone FROM airports WHERE id = ? AND user_id = ?", (dest_id, g.user['id']))
         dest_row = cur.fetchone()
 
         if not origin_row or not dest_row:
@@ -1322,221 +1194,242 @@ def calculate_duration():
         return jsonify({'minutes': minutes})
 
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return safe_jsonify_error(e)
 
 # --- Stats API ---
 @app.route('/api/stats', methods=['GET'])
+@login_required
 def get_stats():
     conn = database.get_db()
-    
+    uid = g.user['id']
+
     stats = {
         'totals': {},
         'top': {},
         'breakdowns': {}
     }
-    
+
+    # Visited-cities subquery reused as CTE-style inline (MySQL-compatible, no TEMP TABLE)
+    _vc_subq = """
+        SELECT a.city_id FROM airports a
+        WHERE a.user_id = %s AND a.id IN (
+            SELECT f.origin_airport_id FROM flights f WHERE f.user_id = %s
+            UNION
+            SELECT f.dest_airport_id  FROM flights f WHERE f.user_id = %s
+        )
+    """
+
     # Totals
-    stats['totals']['flights'] = conn.execute("SELECT COUNT(*) FROM flights").fetchone()[0]
-    stats['totals']['airlines'] = conn.execute("SELECT COUNT(DISTINCT airline_id) FROM flights").fetchone()[0]
+    stats['totals']['flights']  = conn.execute("SELECT COUNT(*) FROM flights WHERE user_id = ?", (uid,)).fetchone()[0]
+    stats['totals']['airlines'] = conn.execute("SELECT COUNT(DISTINCT airline_id) FROM flights WHERE user_id = ?", (uid,)).fetchone()[0]
     stats['totals']['aircraft'] = conn.execute("""
-        SELECT COUNT(DISTINCT am.model || ' ' || am.series) 
-        FROM flights f 
+        SELECT COUNT(DISTINCT CONCAT(am.model, ' ', am.series))
+        FROM flights f
         JOIN aircraft_models am ON f.aircraft_model_id = am.id
-    """).fetchone()[0]
-    stats['totals']['routes'] = conn.execute("SELECT COUNT(DISTINCT origin_airport_id || '-' || dest_airport_id) FROM flights").fetchone()[0]
-    
-    # Complex Totals (Countries, Continents)
-    # Get all visited city IDs (origin + dest)
-    conn.execute("CREATE TEMP TABLE visited_cities AS SELECT city_id FROM airports WHERE id IN (SELECT origin_airport_id FROM flights UNION SELECT dest_airport_id FROM flights)")
-    stats['totals']['cities'] = conn.execute("SELECT COUNT(DISTINCT city_id) FROM visited_cities").fetchone()[0]
-    stats['totals']['countries'] = conn.execute("SELECT COUNT(DISTINCT country) FROM cities WHERE id IN (SELECT city_id FROM visited_cities)").fetchone()[0]
-    stats['totals']['continents'] = conn.execute("SELECT COUNT(DISTINCT continent) FROM cities WHERE id IN (SELECT city_id FROM visited_cities) AND continent IS NOT NULL").fetchone()[0]
-    stats['totals']['airports'] = conn.execute("SELECT COUNT(DISTINCT id) FROM airports WHERE id IN (SELECT origin_airport_id FROM flights UNION SELECT dest_airport_id FROM flights)").fetchone()[0]
-    
-    conn.execute("DROP TABLE visited_cities")
-    
+        WHERE f.user_id = ?
+    """, (uid,)).fetchone()[0]
+    stats['totals']['routes'] = conn.execute("SELECT COUNT(DISTINCT CONCAT(origin_airport_id, '-', dest_airport_id)) FROM flights WHERE user_id = ?", (uid,)).fetchone()[0]
+
+    stats['totals']['cities'] = conn.execute(
+        f"SELECT COUNT(DISTINCT city_id) FROM ({_vc_subq}) AS vc", (uid, uid, uid)
+    ).fetchone()[0]
+    stats['totals']['countries'] = conn.execute(
+        f"SELECT COUNT(DISTINCT c.country) FROM cities c WHERE c.user_id = ? AND c.id IN ({_vc_subq})", (uid, uid, uid, uid)
+    ).fetchone()[0]
+    stats['totals']['continents'] = conn.execute(
+        f"SELECT COUNT(DISTINCT c.continent) FROM cities c WHERE c.user_id = ? AND c.continent IS NOT NULL AND c.id IN ({_vc_subq})", (uid, uid, uid, uid)
+    ).fetchone()[0]
+    stats['totals']['airports'] = conn.execute("""
+        SELECT COUNT(DISTINCT a.id) FROM airports a
+        WHERE a.user_id = ? AND a.id IN (
+            SELECT origin_airport_id FROM flights WHERE user_id = ?
+            UNION
+            SELECT dest_airport_id  FROM flights WHERE user_id = ?
+        )
+    """, (uid, uid, uid)).fetchone()[0]
+
     # Top Lists Helper
     def get_top(query, params=()):
-        return [{'name': r[0], 'count': r[1], 'extra': r[2] if len(r)>2 else None} for r in conn.execute(query, params).fetchall()]
+        return [{'name': r[0], 'count': r[1], 'extra': r[2] if len(r) > 2 else None}
+                for r in conn.execute(query, params).fetchall()]
 
-    # Top Continents
-    # Count flights involving continent? Or just distinct visits? User says "sorted from large to small". Usually flight count.
-    # We count a flight as "touching" a continent if origin OR dest is there? Or just Origin?
-    # Simple: Join Origin.
     # Top Continents (Origin + Dest)
     stats['top']['continents'] = get_top("""
         SELECT c.continent, COUNT(*) as cnt
         FROM (
-            SELECT origin_airport_id as aid FROM flights
+            SELECT origin_airport_id as aid FROM flights WHERE user_id = ?
             UNION ALL
-            SELECT dest_airport_id as aid FROM flights
+            SELECT dest_airport_id as aid FROM flights WHERE user_id = ?
         ) t
-        JOIN airports a ON t.aid = a.id
-        JOIN cities c ON a.city_id = c.id
+        JOIN airports a ON t.aid = a.id AND a.user_id = ?
+        JOIN cities c ON a.city_id = c.id AND c.user_id = ?
         WHERE c.continent IS NOT NULL AND c.continent != ''
         GROUP BY c.continent
         ORDER BY cnt DESC
-    """)
-    
+    """, (uid, uid, uid, uid))
+
     # Top Countries (Origin + Dest)
     stats['top']['countries'] = get_top("""
         SELECT c.country, COUNT(*) as cnt, c.country_code
         FROM (
-            SELECT origin_airport_id as aid FROM flights
+            SELECT origin_airport_id as aid FROM flights WHERE user_id = ?
             UNION ALL
-            SELECT dest_airport_id as aid FROM flights
+            SELECT dest_airport_id as aid FROM flights WHERE user_id = ?
         ) t
-        JOIN airports a ON t.aid = a.id
-        JOIN cities c ON a.city_id = c.id
-        GROUP BY c.country 
+        JOIN airports a ON t.aid = a.id AND a.user_id = ?
+        JOIN cities c ON a.city_id = c.id AND c.user_id = ?
+        GROUP BY c.country, c.country_code
         ORDER BY cnt DESC
-    """)
+    """, (uid, uid, uid, uid))
 
     # Top Cities (Origin + Dest)
     stats['top']['cities'] = get_top("""
         SELECT c.name, COUNT(*) as cnt, c.country_code
         FROM (
-            SELECT origin_airport_id as aid FROM flights
+            SELECT origin_airport_id as aid FROM flights WHERE user_id = ?
             UNION ALL
-            SELECT dest_airport_id as aid FROM flights
+            SELECT dest_airport_id as aid FROM flights WHERE user_id = ?
         ) t
-        JOIN airports a ON t.aid = a.id
-        JOIN cities c ON a.city_id = c.id
-        GROUP BY c.id
+        JOIN airports a ON t.aid = a.id AND a.user_id = ?
+        JOIN cities c ON a.city_id = c.id AND c.user_id = ?
+        GROUP BY c.id, c.name, c.country_code
         ORDER BY cnt DESC
-    """)
-    
+    """, (uid, uid, uid, uid))
+
     # Top Airports (Dep + Arr)
     stats['top']['airports'] = get_top("""
         SELECT a.iata_code, COUNT(*) as cnt, a.name
         FROM (
-            SELECT origin_airport_id as aid FROM flights
+            SELECT origin_airport_id as aid FROM flights WHERE user_id = ?
             UNION ALL
-            SELECT dest_airport_id as aid FROM flights
+            SELECT dest_airport_id as aid FROM flights WHERE user_id = ?
         ) t
-        JOIN airports a ON t.aid = a.id
-        GROUP BY a.iata_code
+        JOIN airports a ON t.aid = a.id AND a.user_id = ?
+        GROUP BY a.iata_code, a.name
         ORDER BY cnt DESC
-    """)
-    
+    """, (uid, uid, uid))
+
     # Top Routes
     stats['top']['routes'] = get_top("""
-        SELECT a1.iata_code || '-' || a2.iata_code, COUNT(*) as cnt
+        SELECT CONCAT(a1.iata_code, '-', a2.iata_code), COUNT(*) as cnt
         FROM flights f
-        JOIN airports a1 ON f.origin_airport_id = a1.id
-        JOIN airports a2 ON f.dest_airport_id = a2.id
-        GROUP BY f.origin_airport_id, f.dest_airport_id
+        JOIN airports a1 ON f.origin_airport_id = a1.id AND a1.user_id = ?
+        JOIN airports a2 ON f.dest_airport_id   = a2.id AND a2.user_id = ?
+        WHERE f.user_id = ?
+        GROUP BY f.origin_airport_id, f.dest_airport_id, a1.iata_code, a2.iata_code
         ORDER BY cnt DESC
-    """)
-    
+    """, (uid, uid, uid))
+
     # Top Airlines
     stats['top']['airlines'] = get_top("""
         SELECT al.name, COUNT(*) as cnt, al.frequent_flyer_program
         FROM flights f
-        JOIN airlines al ON f.airline_id = al.id
-        GROUP BY al.id
+        JOIN airlines al ON f.airline_id = al.id AND al.user_id = ?
+        WHERE f.user_id = ?
+        GROUP BY al.id, al.name, al.frequent_flyer_program
         ORDER BY cnt DESC
-    """)
-    
-    # Flights by Year (for Chart)
-    stats['flights_by_year'] = [{'year': r[0], 'count': r[1]} for r in conn.execute("SELECT strftime('%Y', date) as y, COUNT(*) FROM flights WHERE date IS NOT NULL AND date != '' GROUP BY y ORDER BY y ASC").fetchall()]
-    
+    """, (uid, uid))
+
+    # Flights by Year (for Chart) — MySQL YEAR() replaces SQLite strftime
+    stats['flights_by_year'] = [
+        {'year': r[0], 'count': r[1]}
+        for r in conn.execute(
+            "SELECT YEAR(date) as y, COUNT(*) FROM flights WHERE user_id = ? AND date IS NOT NULL AND date != '' GROUP BY y ORDER BY y ASC",
+            (uid,)
+        ).fetchall()
+    ]
+
     # Top Aircraft (Model + Series)
     stats['top']['aircraft'] = get_top("""
-        SELECT am.model || ' ' || am.series, COUNT(*) as cnt, am.manufacturer
+        SELECT CONCAT(am.model, ' ', am.series), COUNT(*) as cnt, am.manufacturer
         FROM flights f
-        JOIN aircraft_models am ON f.aircraft_model_id = am.id
-        GROUP BY am.model, am.series
+        JOIN aircraft_models am ON f.aircraft_model_id = am.id AND am.user_id = ?
+        WHERE f.user_id = ?
+        GROUP BY am.model, am.series, am.manufacturer
         ORDER BY cnt DESC
-    """)
-    
+    """, (uid, uid))
+
     # Breakdowns
-    # Alliance (Use frequent_flyer_program as user requested)
     stats['breakdowns']['alliance'] = {r[0]: r[1] for r in conn.execute("""
-        SELECT al.frequent_flyer_program, COUNT(*) 
-        FROM flights f JOIN airlines al ON f.airline_id = al.id 
-        WHERE al.frequent_flyer_program IS NOT NULL AND al.frequent_flyer_program != ''
+        SELECT al.frequent_flyer_program, COUNT(*)
+        FROM flights f JOIN airlines al ON f.airline_id = al.id AND al.user_id = ?
+        WHERE f.user_id = ? AND al.frequent_flyer_program IS NOT NULL AND al.frequent_flyer_program != ''
         GROUP BY al.frequent_flyer_program
-    """).fetchall()}
-    
-    # Manufacturer
+    """, (uid, uid)).fetchall()}
+
     stats['breakdowns']['manufacturer'] = {r[0]: r[1] for r in conn.execute("""
-        SELECT am.manufacturer, COUNT(*) 
-        FROM flights f JOIN aircraft_models am ON f.aircraft_model_id = am.id 
+        SELECT am.manufacturer, COUNT(*)
+        FROM flights f JOIN aircraft_models am ON f.aircraft_model_id = am.id AND am.user_id = ?
+        WHERE f.user_id = ?
         GROUP BY am.manufacturer
-    """).fetchall()}
+    """, (uid, uid)).fetchall()}
 
     return jsonify(stats)
 
 @app.route('/api/flights/detailed', methods=['GET'])
+@login_required
 def get_detailed_flights():
     conn = database.get_db()
-    # Complex query to satisfy both Flight Log (flat, detailed) and Profile Map (geo-coordinates)
+    uid = g.user['id']
     cursor = conn.execute('''
-        SELECT f.*, 
+        SELECT f.*,
                oa.iata_code as origin_code, oa.name as origin_name, oa.lat as origin_lat, oa.lon as origin_lon, oa.city_id as origin_city_id,
                da.iata_code as dest_code, da.name as dest_name, da.lat as dest_lat, da.lon as dest_lon, da.city_id as dest_city_id,
                al.name as airline_name,
-               am.manufacturer || ' ' || COALESCE(am.name, am.model) as aircraft_model,
+               CONCAT(am.manufacturer, ' ', COALESCE(am.name, am.model)) as aircraft_model,
                am.manufacturer,
-               am.tags_generation as model_tag_generation, 
-               am.tags_winglets as model_tag_winglets, 
+               am.tags_generation as model_tag_generation,
+               am.tags_winglets as model_tag_winglets,
                am.tags_config as model_tag_config
         FROM flights f
         LEFT JOIN airports oa ON f.origin_airport_id = oa.id
         LEFT JOIN airports da ON f.dest_airport_id = da.id
         LEFT JOIN airlines al ON f.airline_id = al.id
         LEFT JOIN aircraft_models am ON f.aircraft_model_id = am.id
+        WHERE f.user_id = ?
         ORDER BY f.date DESC
-    ''')
-    
+    ''', (uid,))
+
     flights = []
     col_names = [d[0] for d in cursor.description]
-    
+
     for row in cursor.fetchall():
         item = dict(zip(col_names, row))
-        
-        # Add nested objects for Profile Map compatibility
         item['origin'] = {
-            'lat': item['origin_lat'], 
-            'lon': item['origin_lon'], 
-            'code': item['origin_code'], 
+            'lat': item['origin_lat'],
+            'lon': item['origin_lon'],
+            'code': item['origin_code'],
             'name': item['origin_name']
         }
         item['dest'] = {
-            'lat': item['dest_lat'], 
-            'lon': item['dest_lon'], 
-            'code': item['dest_code'], 
+            'lat': item['dest_lat'],
+            'lon': item['dest_lon'],
+            'code': item['dest_code'],
             'name': item['dest_name']
         }
-        
         flights.append(item)
-        
-    conn.close()
+
     return jsonify(flights)
 
 def update_single_flight_from_aeroapi(flight_id, force=False):
     conn = database.get_db()
-    # Indices: 0=f_num, 1=date, 2=orig_id, 3=dest_id, 4=std, 5=atd, 6=sta, 7=ata, 8=reg, 9=airline, 10=model, 11=dist, 12=dur_sched, 13=dur_actual, 14=oterm, 15=dterm
-    cur = conn.execute("SELECT flight_number, date, origin_airport_id, dest_airport_id, std, atd, sta, ata, registration, airline_id, aircraft_model_id, distance, duration_scheduled, duration_actual, origin_terminal, dest_terminal FROM flights WHERE id = ?", (flight_id,))
+    uid = g.user['id']
+    cur = conn.execute("SELECT flight_number, date, origin_airport_id, dest_airport_id, std, atd, sta, ata, registration, airline_id, aircraft_model_id, distance, duration_scheduled, duration_actual, origin_terminal, dest_terminal FROM flights WHERE id = ? AND user_id = ?", (flight_id, uid))
     flight = cur.fetchone()
     
     if not flight:
-        conn.close()
         return {'error': 'Flight not found'}
         
     f_num = flight[0]
     f_date = flight[1]
     
     if not f_num or not f_date:
-        conn.close()
         return {'error': 'Missing flight number or date'}
 
-    # Strategy: Always fetch if forced, OR if missing critical data 
+    # Strategy: Always fetch if forced, OR if missing critical data
     is_missing_data = not (flight[4] and flight[5] and flight[8])
     if not force and not is_missing_data:
-         conn.close()
-         return {'message': 'Skipped, data exists'}
+        return {'message': 'Skipped, data exists'}
          
     f_num_clean = f_num.replace(' ', '')
     f_dt = dateutil.parser.parse(f_date)
@@ -1546,14 +1439,11 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
     try:
         raw_flights = fetch_aeroapi_data(f_num_clean, start_window, end_window)
     except ValueError as e:
-        conn.close()
         return {'error': str(e)}
     except Exception as e:
-        conn.close()
         return {'error': 'API unexpected error'}
     
     if not raw_flights:
-        conn.close()
         if force: return {'error': 'No data found in AeroAPI'}
         return {'message': 'No data found'}
 
@@ -1572,7 +1462,6 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
                 best_match = f
             
     if not best_match:
-        conn.close()
         if force: return {'error': 'No matching flight in time window'}
         return {'message': 'No matching flight'}
 
@@ -1671,7 +1560,7 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
     def ensure_terminal_in_db(airport_id, term):
         if not airport_id or not term: return
         try:
-            cur = conn.execute("SELECT terminals FROM airports WHERE id = ?", (airport_id,))
+            cur = conn.execute("SELECT terminals FROM airports WHERE id = ? AND user_id = ?", (airport_id, uid))
             row = cur.fetchone()
             if row:
                 terms_str = row[0] or ""
@@ -1681,7 +1570,7 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
                     terms_list.append(term)
                     terms_list.sort()
                     new_str = ", ".join(terms_list)
-                    conn.execute("UPDATE airports SET terminals = ? WHERE id = ?", (new_str, airport_id))
+                    conn.execute("UPDATE airports SET terminals = ? WHERE id = ? AND user_id = ?", (new_str, airport_id, uid))
         except Exception as e:
             print(f"Error updating airport terminals: {e}")
 
@@ -1716,7 +1605,8 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
         return {'message': 'No new data or data already exists'}
         
     update_values.append(flight_id)
-    sql = f"UPDATE flights SET {', '.join(update_fields)} WHERE id = ?"
+    sql = f"UPDATE flights SET {', '.join(update_fields)} WHERE id = ? AND user_id = ?"
+    update_values.append(uid)
     conn.execute(sql, update_values)
     conn.commit()
     
@@ -1733,7 +1623,7 @@ def update_flight_aeroapi(flight_id):
         return jsonify(result)
     except Exception as e:
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return safe_jsonify_error(e)
 
 @app.route('/api/flights/update_aeroapi_missing', methods=['POST'])
 @login_required
@@ -1743,7 +1633,8 @@ def update_missing_flights_aeroapi():
         SELECT id FROM flights 
         WHERE (std IS NULL OR atd IS NULL OR registration IS NULL OR registration = '')
         AND flight_number IS NOT NULL AND date IS NOT NULL
-    ''')
+        AND user_id = ?
+    ''', (g.user['id'],))
     rows = cur.fetchall()
     
     updated_count = 0
@@ -1761,4 +1652,5 @@ def update_missing_flights_aeroapi():
     return jsonify({'updated': updated_count, 'total_candidates': len(rows)})
 
 if __name__ == '__main__':
-    app.run(debug=False, port=5000)
+    debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    app.run(debug=debug_mode, port=5000)
