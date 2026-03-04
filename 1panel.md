@@ -47,7 +47,7 @@ version: '3.8'
 services:
   flightlog-app:
     build: 
-      context: .
+      context: 代码所在文件夹
       dockerfile: Dockerfile
     container_name: flightlog-app
     restart: always
