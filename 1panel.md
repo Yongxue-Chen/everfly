@@ -54,24 +54,28 @@ services:
     ports:
       - "5000:5000"
     environment:
-      # 数据库配置
-      - MYSQL_HOST=host.docker.internal
+      # 核心密钥
+      - MASTER_SECRET_KEY=你的主密钥
+      - FLASK_SECRET_KEY=你的FlaskSession密钥
+      - INVITATION_CODE=你的邀请码
+      
+      # 调试模式 (生产环境设为 false)
+      - FLASK_DEBUG=false
+      
+      # MySQL 数据库配置
+      # 1Panel 网络下直接填 MySQL 容器的名（例如 1panel-mysql）
+      - MYSQL_HOST=1panel-mysql 
       - MYSQL_PORT=3306
       - MYSQL_USER=flightlog
       - MYSQL_PASSWORD=你的数据库密码
       - MYSQL_DB=flightlog
-      # Flask 安全配置
-      - SECRET_KEY=生成一个随机字符串
-      - FLASK_ENV=production
-    extra_hosts:
-      # 允许容器通过 host.docker.internal 访问宿主机 (1Panel 数据库)
-      - "host.docker.internal:host-gateway"
-    volumes:
-      # 挂载 instance 文件夹 (可选，如果以后有上传文件需求)
-      - ./instance:/app/instance
-```
+    networks:
+      - 1panel-network
 
-> **注意**：`host.docker.internal` 指向宿主机 IP。确保 1Panel 的 MySQL 允许 `127.0.0.1` 或容器网段访问 (通常 1Panel 默认 MySQL 是开放的或是 Docker 部署的，通过宿主机 IP 可达)。如果连接失败，尝试使用服务器的内网 IP。
+networks:
+  1panel-network:
+    external: true
+```
 
 ---
 
