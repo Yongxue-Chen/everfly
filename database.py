@@ -4,6 +4,21 @@ from flask import g
 
 USERS_DB_PATH = 'users.db'
 
+def migrate_users_db():
+    """Add api_key_encrypted column to users table if it doesn't exist."""
+    conn = sqlite3.connect(USERS_DB_PATH)
+    try:
+        cur = conn.execute("PRAGMA table_info(users)")
+        cols = [row[1] for row in cur.fetchall()]
+        if 'api_key_encrypted' not in cols:
+            conn.execute("ALTER TABLE users ADD COLUMN api_key_encrypted TEXT")
+            conn.commit()
+            print("Migrated users table: added api_key_encrypted column")
+    except Exception as e:
+        print(f"migrate_users_db error: {e}")
+    finally:
+        conn.close()
+
 def get_db():
     if 'db' not in g:
         # Default to None or error if not set, but for now fallback to flightlog.db for backward compat if needed? 

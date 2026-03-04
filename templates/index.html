@@ -38,6 +38,12 @@
             <button class="btn btn-primary" onclick="openAddFlightModal()">
                 <i class="fa-solid fa-plus"></i> Add flight
             </button>
+            <div class="user-info" onclick="openEditProfileModal(); toggleDropdown();" title="Edit Profile">
+                <div class="user-avatar-circle">
+                    <span id="user-avatar-initial"></span>
+                </div>
+                <span id="user-display-name" class="user-display-name"></span>
+            </div>
 
             <div class="dropdown" id="settings-dropdown">
                 <button class="btn btn-secondary dropdown-toggle" onclick="toggleDropdown()">

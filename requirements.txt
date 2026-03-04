@@ -5,3 +5,5 @@ airportsdata
 pytz
 pycountry
 Werkzeug
+python-dotenv
+cryptography

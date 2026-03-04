@@ -163,7 +163,17 @@ window.onclick = function (event) {
     }
 }
 
-function openEditProfileModal() {
+async function openEditProfileModal() {
+    // Pre-fetch API key status before opening modal
+    let apiKeyConfigured = false;
+    try {
+        const status = await API.get('profile/api-key');
+        apiKeyConfigured = status.configured;
+    } catch (e) {}
+
+    const statusColor = apiKeyConfigured ? '#4caf50' : '#ff9800';
+    const statusText = apiKeyConfigured ? 'Configured ✓' : 'Not set';
+
     openModal('Edit Profile', () => {
         const div = document.createElement('div');
         div.innerHTML = `
@@ -179,6 +189,11 @@ function openEditProfileModal() {
                 <div class="form-group">
                     <label>Confirm Password</label>
                     <input type="password" name="confirm_password" placeholder="Confirm Password">
+                </div>
+                <hr style="margin: 16px 0; border-color: #444;">
+                <div class="form-group">
+                    <label>FlightAware API Key &nbsp;<span style="font-size:0.8em; color:${statusColor};">${statusText}</span></label>
+                    <input type="password" name="flightaware_api_key" placeholder="Leave blank to keep current">
                 </div>
             </form>
         `;
@@ -202,13 +217,26 @@ function openEditProfileModal() {
         if (res.error) {
             alert(res.error);
             return false;
-        } else {
-            alert(res.message);
-            // Update local state
-            CURRENT_USER.username = data.username;
-            document.getElementById('user-display-name').textContent = data.username;
-            document.getElementById('user-avatar-initial').textContent = data.username[0].toUpperCase();
         }
+
+        // Update local state
+        CURRENT_USER.username = data.username;
+        const _displayName = document.getElementById('user-display-name');
+        const _avatarInitial = document.getElementById('user-avatar-initial');
+        if (_displayName) _displayName.textContent = data.username;
+        if (_avatarInitial) _avatarInitial.textContent = data.username[0].toUpperCase();
+
+        // Save FlightAware API key if provided
+        const newApiKey = (data.flightaware_api_key || '').trim();
+        if (newApiKey) {
+            const keyRes = await API.post('profile/api-key', { api_key: newApiKey });
+            if (keyRes.error) {
+                alert('Profile saved, but API key error: ' + keyRes.error);
+                return false;
+            }
+        }
+
+        alert(res.message + (newApiKey ? '\nFlightAware API key saved.' : ''));
     });
 }
 

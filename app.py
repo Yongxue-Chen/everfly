@@ -1,5 +1,7 @@
 from flask import Flask, render_template, jsonify, request, g, session, redirect, url_for, flash
 import os
+from dotenv import load_dotenv
+from cryptography.fernet import Fernet
 import database
 import sqlite3
 import requests
@@ -10,9 +12,33 @@ import pytz
 import json
 import werkzeug.security
 
+load_dotenv()
+
 app = Flask(__name__)
-app.secret_key = 'dev_secret_key' # In prod this should be secure random
-FLIGHTAWARE_API_KEY = 'REMOVED-REVOKED-API-KEY'
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev_secret_key')
+
+# --- Encryption Setup ---
+_MASTER_KEY = os.environ.get('MASTER_SECRET_KEY')
+if not _MASTER_KEY:
+    raise RuntimeError("MASTER_SECRET_KEY not set. Copy .env.example to .env and fill in the value.")
+_fernet = Fernet(_MASTER_KEY.encode())
+
+def _encrypt_api_key(plain: str) -> str:
+    return _fernet.encrypt(plain.encode()).decode()
+
+def _decrypt_api_key(cipher: str) -> str:
+    return _fernet.decrypt(cipher.encode()).decode()
+
+def _get_user_api_key() -> str:
+    """Return the current user's decrypted FlightAware API key. Raises ValueError if not set."""
+    encrypted = g.user['api_key_encrypted'] if g.user else None
+    if not encrypted:
+        raise ValueError("FlightAware API key not configured. Set it via Edit Profile.")
+    return _decrypt_api_key(encrypted)
+
+# --- Migrate users DB at startup ---
+with app.app_context():
+    database.migrate_users_db()
 
 # --- Auth Middleware ---
 @app.before_request
@@ -208,6 +234,29 @@ def update_profile():
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
+
+@app.route('/api/profile/api-key', methods=['GET'])
+@login_required
+def get_api_key_status():
+    configured = bool(g.user['api_key_encrypted'])
+    return jsonify({'configured': configured})
+
+@app.route('/api/profile/api-key', methods=['POST'])
+@login_required
+def save_api_key():
+    data = request.json
+    api_key = data.get('api_key', '').strip()
+    if not api_key:
+        return jsonify({'error': 'API key is required'}), 400
+    try:
+        encrypted = _encrypt_api_key(api_key)
+        conn = database.get_users_db()
+        conn.execute('UPDATE users SET api_key_encrypted = ? WHERE id = ?', (encrypted, g.user['id']))
+        conn.commit()
+        conn.close()
+        return jsonify({'message': 'API key saved successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/logout')
 def logout():
@@ -1084,7 +1133,7 @@ def batch_update_cities():
 
 def fetch_aeroapi_data(ident, start_str, end_str):
     url = f"https://aeroapi.flightaware.com/aeroapi/flights/{ident}"
-    headers = {"x-apikey": FLIGHTAWARE_API_KEY}
+    headers = {"x-apikey": _get_user_api_key()}
     params = {
         "start": start_str,
         "end": end_str,
@@ -1677,6 +1726,7 @@ import pycountry
 import traceback
 
 @app.route('/api/flights/<int:flight_id>/update_aeroapi', methods=['POST'])
+@login_required
 def update_flight_aeroapi(flight_id):
     try:
         result = update_single_flight_from_aeroapi(flight_id, force=True)
@@ -1686,6 +1736,7 @@ def update_flight_aeroapi(flight_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/flights/update_aeroapi_missing', methods=['POST'])
+@login_required
 def update_missing_flights_aeroapi():
     conn = database.get_db()
     cur = conn.execute('''
