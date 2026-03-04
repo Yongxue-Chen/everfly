@@ -112,4 +112,5 @@ Before going live, make sure the following are set correctly:
    ```bash
    gunicorn -w 4 -b 127.0.0.1:5000 app:app
    ```
+4. 如果开源代码，务必重新构建git，现在的代码历史中包含敏感信息
 
