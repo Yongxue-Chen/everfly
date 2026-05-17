@@ -1,116 +1,323 @@
 # FlightLog
 
-FlightLog is a Python Flask-based web application designed to manage and track flight history. It provides a comprehensive interface for managing cities, airports, airlines, aircraft models, and flight records, with features for automated data fetching and bulk CSV imports.
+FlightLog 是一个用于记录、管理和可视化个人飞行记录的 Flask Web 应用。当前前端页面展示的产品名是 `everfly`。
 
-## Features
+## 项目介绍
 
-- **User Authentication**: Secure multi-user support with isolated databases for each user.
-    - Registration and Login with feedback.
-    - Profile management (change username/password).
-- **Flight Management**: Log details including dates, flight numbers, aircraft, airports, terminals, and times (scheduled vs. actual).
-- **Database Management**: Comprehensive CRUD (Create, Read, Update, Delete) operations for:
-    - Cities (with automatic Timezone and Continent resolution)
-    - Airports (with auto-fetch from IATA codes)
-    - Airlines
-    - Aircraft Models
-- **Automation**:
-    - Automatic duration calculation based on timezones.
-    - Fetch airport details (ICAO, Lat/Lon, City) using `airportsdata`.
-    - Sync timezones and continents for cities and airports.
-- **Bulk Import**: Support for CSV imports for all major entities.
-- **Statistics**: Built-in logic for tracking flight stats.
+这个应用主要提供以下能力：
 
-## Prerequisites
+- 邀请码注册、登录、登出和用户资料管理。
+- 多用户数据隔离：业务数据统一存储在 MySQL 中，并通过 `user_id` 区分不同用户。
+- 航班记录管理：航班号、日期、航司、机型、起降机场、航站楼、计划/实际时间、座位、舱位、备注等。
+- 基础数据管理：城市、机场、航司、飞机型号的增删改查。
+- CSV 批量导入：支持导入城市、机场、航司、机型和航班记录。
+- 自动补全：基于 `airportsdata` 补全机场 ICAO、经纬度、城市和时区等信息。
+- 时区感知的飞行时长计算：根据出发地和到达地时区计算计划/实际飞行时长。
+- 统计和可视化：飞行总数、航司、机型、航线、城市、国家、大洲统计，地图航线展示和年度图表。
+- FlightAware AeroAPI 集成：用户可以在 Profile 页面保存自己的 API Key，应用会用 `MASTER_SECRET_KEY` 加密后保存。
 
-- Python 3.8+
-- pip (Python package manager)
+## 技术栈
 
-## Installation
+- 后端：Python、Flask、Gunicorn
+- 数据库：MySQL、PyMySQL
+- 前端：Jinja 模板、原生 JavaScript、Leaflet、Chart.js
+- 容器：Docker、Docker Compose
+- 可选部署管理：1Panel
 
-1.  **Clone the repository** (or download the source code):
-    ```bash
-    git clone <repository-url>
-    cd FlightLog
-    ```
+主要文件：
 
-2.  **Install Dependencies**:
-    It is recommended to use a virtual environment.
-    ```bash
-    # Create virtual environment (optional)
-    python -m venv venv
-    
-    # Activate virtual environment
-    # Windows:
-    venv\Scripts\activate
-    # macOS/Linux:
-    source venv/bin/activate
+- `app.py`：Flask 主程序，包含路由、API、认证、导入、统计、AeroAPI 逻辑。
+- `database.py`：MySQL 连接封装。
+- `schema_mysql.sql`：MySQL 数据表结构。
+- `templates/`：HTML 模板。
+- `static/`：CSS、JavaScript 和图片资源。
+- `Dockerfile`：生产容器镜像构建文件，使用 Gunicorn 启动应用。
 
-    # Install requirements
-    pip install -r requirements.txt
-    ```
+## 环境变量
 
-## Usage
+本地运行或 Docker 部署都需要配置以下环境变量。可以从 `.env.example` 复制一份 `.env` 后填写，不要把真实密钥提交到 Git。
 
-1.  **Start the Application**:
-    ```bash
-    python app.py
-    ```
-    The application will automatically initialize the SQLite database (`flightlog.db`) using `schema.sql` if it doesn't exist, and run necessary migrations.
+```env
+MASTER_SECRET_KEY=
+FLASK_SECRET_KEY=
+INVITATION_CODE=
+FLASK_DEBUG=false
 
-2.  **Access the Web Interface**:
-    Open your browser and navigate to:
-    ```
-    http://127.0.0.1:5000
-    ```
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_USER=flightlog
+MYSQL_PASSWORD=
+MYSQL_DB=flightlog
+```
 
-3.  **Utility Scripts**:
-    - `sync_timezones_v2.py`: Run this script to synchronize missing timezones for cities and airports based on ICAO/IATA codes.
-      ```bash
-      python sync_timezones_v2.py
-      ```
+生成密钥：
 
-## Project Structure
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+python -c "import secrets; print(secrets.token_hex(32))"
+```
 
-- `app.py`: Main Flask application file containing routes, API endpoints, and business logic.
-- `database.py`: Database connection and initialization handling.
-- `schema.sql`: SQL schema for creating the database tables.
-- `sync_timezones_v2.py`: Utility script to sync timezones and continents.
-- `templates/`: HTML templates for the web interface.
-- `static/`: Static assets (CSS, JS).
-- `requirements.txt`: Python package dependencies.
+注意：`MASTER_SECRET_KEY` 用于加密用户保存的 FlightAware API Key。部署后必须保持稳定；如果更换，旧的 API Key 密文将无法解密，需要用户重新填写。
 
-## Technologies Used
+## 数据库准备
 
-- **Backend**: Python, Flask
-- **Database**: SQLite
-- **Frontend**: HTML, JavaScript (assumed)
-- **External Libraries**: 
-    - `airportsdata` (Airport data lookups)
-    - `pytz` (Timezone handling)
-    - `python-dateutil` (Date parsing)
-    - `pycountry` (Country data)
+创建数据库和用户：
 
-## Notes
+```sql
+CREATE DATABASE flightlog CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'flightlog'@'%' IDENTIFIED BY 'change-this-password';
+GRANT ALL PRIVILEGES ON flightlog.* TO 'flightlog'@'%';
+FLUSH PRIVILEGES;
+```
 
-- The application uses a central `users` table in MySQL for authentication, with all user flight data stored in the same database under separate `user_id` scopes.
-- API Keys: Each user can configure their own FlightAware AeroAPI key via the Profile page. Keys are encrypted at rest using Fernet symmetric encryption (`MASTER_SECRET_KEY`).
+导入表结构：
 
-## ⚠️ Production Deployment Checklist
+```bash
+mysql -h <mysql-host> -u flightlog -p flightlog < schema_mysql.sql
+```
 
-Before going live, make sure the following are set correctly:
+当前应用不会在启动时自动创建完整业务表。`schema_mysql.sql` 是数据库结构的来源。
 
-1. **Disable debug mode** — set `FLASK_DEBUG=false` in `.env`.  
-   Running with `FLASK_DEBUG=true` in production exposes an interactive debugger that allows arbitrary code execution on your server.
+## 本地部署
 
-2. **Enable HTTPS-only cookies** — uncomment the following line in `app.py`:
-   ```python
-   app.config['SESSION_COOKIE_SECURE'] = True
-   ```
-   This ensures session cookies are never transmitted over plain HTTP, preventing them from being intercepted on insecure networks. This requires your server to be behind HTTPS (e.g., via Nginx + Let's Encrypt).
+适用于不使用 Docker、直接在服务器或开发机上运行的情况。
 
-3. **Use a production WSGI server** — do not use `python app.py` in production. Use Gunicorn or uWSGI behind a reverse proxy:
-   ```bash
-   gunicorn -w 4 -b 127.0.0.1:5000 app:app
-   ```
-4. 如果开源代码，务必重新构建git，现在的代码历史中包含敏感信息
+```bash
+cd /home/ubuntu/FlightLog
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
 
+编辑 `.env`，确认 MySQL 可访问，并导入 `schema_mysql.sql` 后启动：
+
+```bash
+python app.py
+```
+
+访问：
+
+```text
+http://127.0.0.1:5000
+```
+
+生产环境不建议直接使用 `python app.py`，可以使用 Gunicorn：
+
+```bash
+gunicorn -w 4 -b 127.0.0.1:5000 app:app
+```
+
+如果用 systemd 管理服务，代码更新或环境变量更新后需要重启对应的 `flightlog` 服务。
+
+## Docker 部署
+
+项目自带 `Dockerfile`，镜像会安装依赖并用 Gunicorn 启动应用。
+
+手动构建和运行：
+
+```bash
+docker build -t flightlog:local .
+docker run -d \
+  --name flightlog-app \
+  --restart unless-stopped \
+  --env-file .env \
+  -p 5000:5000 \
+  flightlog:local
+```
+
+通用 Docker Compose 示例：
+
+```yaml
+services:
+  flightlog-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: flightlog-app
+    restart: always
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+```
+
+启动或重新构建：
+
+```bash
+docker compose up -d --build
+```
+
+## 1Panel 部署
+
+这个项目可以通过 1Panel 的 Docker Compose 编排部署。
+
+当前服务器上的实际部署信息：
+
+- 源代码目录：`/home/ubuntu/FlightLog`
+- 1Panel Compose 文件：`/opt/1panel/docker/compose/flightlog/docker-compose.yml`
+- Compose 项目名：`flightlog`
+- 容器名：`flightlog-app`
+- 端口映射：宿主机 `5000` -> 容器 `5000`
+- 健康检查：`http://127.0.0.1:5000/api/health`
+
+当前 1Panel 编排从本地源码目录构建镜像，核心结构如下。真实密钥和密码应在 1Panel 编排或环境变量中配置，不要写入公开仓库。
+
+```yaml
+services:
+  flightlog-app:
+    build:
+      context: /home/ubuntu/FlightLog
+      dockerfile: Dockerfile
+    container_name: flightlog-app
+    restart: always
+    ports:
+      - "5000:5000"
+    environment:
+      - MASTER_SECRET_KEY=<fernet-key>
+      - FLASK_SECRET_KEY=<session-secret>
+      - INVITATION_CODE=<invitation-code>
+      - FLASK_DEBUG=false
+      - MYSQL_HOST=<mysql-host>
+      - MYSQL_PORT=3306
+      - MYSQL_USER=flightlog
+      - MYSQL_PASSWORD=<mysql-password>
+      - MYSQL_DB=flightlog
+    networks:
+      - 1panel-network
+
+networks:
+  1panel-network:
+    external: true
+```
+
+新建 1Panel 部署时：
+
+1. 把源码放到服务器目录，例如 `/home/ubuntu/FlightLog`。
+2. 创建 MySQL 数据库并导入 `schema_mysql.sql`。
+3. 在 1Panel 中创建 Docker Compose 编排。
+4. 将 `build.context` 指向源码目录。
+5. 配置所有必需环境变量。
+6. 如果 MySQL 容器在 1Panel 网络中，将服务加入 `1panel-network`。
+7. 在 1Panel 中创建反向代理，代理到 `http://127.0.0.1:5000`。
+8. 为反向代理启用 HTTPS。
+
+## 源代码更新后如何更新服务
+
+不同变更需要不同更新方式。更新前建议先确认数据库已有备份。
+
+### 只有源代码变更
+
+本地非容器部署：
+
+```bash
+cd /home/ubuntu/FlightLog
+git pull
+sudo systemctl restart flightlog
+```
+
+如果不是 systemd 管理，而是手动启动的进程，需要停止旧进程后重新启动。
+
+Docker Compose 或 1Panel Compose 部署：
+
+```bash
+cd /opt/1panel/docker/compose/flightlog
+git -C /home/ubuntu/FlightLog pull
+docker compose up -d --build
+```
+
+如果你的 `docker-compose.yml` 就在源码目录中，则进入源码目录执行同样的 `docker compose up -d --build`。
+
+### 依赖文件变更
+
+如果 `requirements.txt` 有变化，本地部署需要重新安装依赖：
+
+```bash
+cd /home/ubuntu/FlightLog
+source venv/bin/activate
+pip install -r requirements.txt
+sudo systemctl restart flightlog
+```
+
+Docker 或 1Panel Compose 部署需要重建镜像：
+
+```bash
+cd /opt/1panel/docker/compose/flightlog
+git -C /home/ubuntu/FlightLog pull
+docker compose build --no-cache
+docker compose up -d
+```
+
+### 环境变量变更
+
+本地部署：
+
+```bash
+sudo systemctl restart flightlog
+```
+
+Docker 或 1Panel Compose 部署：
+
+```bash
+cd /opt/1panel/docker/compose/flightlog
+docker compose up -d
+```
+
+如果容器没有拿到新的环境变量，可以强制重建容器：
+
+```bash
+docker compose up -d --force-recreate
+```
+
+### 数据库结构变更
+
+先备份数据库，再执行迁移。
+
+全新数据库可以直接导入：
+
+```bash
+mysql -h <mysql-host> -u flightlog -p flightlog < schema_mysql.sql
+```
+
+已有数据库不要直接重复导入整份 schema。应根据变更编写明确的 `ALTER TABLE` 迁移语句，再手动执行。
+
+## 运维命令
+
+健康检查：
+
+```bash
+curl -i http://127.0.0.1:5000/api/health
+```
+
+查看容器日志：
+
+```bash
+docker logs --tail 100 flightlog-app
+```
+
+查看 Compose 日志：
+
+```bash
+cd /opt/1panel/docker/compose/flightlog
+docker compose logs -f --tail=100
+```
+
+查看容器状态：
+
+```bash
+docker ps --filter name=flightlog-app
+```
+
+## 安全和维护建议
+
+- 生产环境保持 `FLASK_DEBUG=false`。
+- 生产访问建议走 HTTPS 反向代理。
+- 不要把 `MASTER_SECRET_KEY`、`FLASK_SECRET_KEY`、数据库密码、邀请码提交到 Git。
+- 当前仓库历史中曾包含敏感信息；如果要公开仓库，需先轮换所有相关密钥，并清理或重建 Git 历史。
+- 更新服务前先备份 MySQL 的 `flightlog` 数据库。
+- `MASTER_SECRET_KEY` 丢失或更换后，用户保存过的 FlightAware API Key 需要重新录入。
+- 如果服务始终通过 HTTPS 访问，可以在 `app.py` 中启用安全 Cookie：
+
+```python
+app.config['SESSION_COOKIE_SECURE'] = True
+```
