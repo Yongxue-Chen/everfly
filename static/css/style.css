@@ -843,6 +843,7 @@ tr:hover {
         display: block;
         font-size: 1.15rem;
         overflow-wrap: anywhere;
+        white-space: nowrap;
     }
 
     .ph-stat span {
@@ -913,6 +914,7 @@ tr:hover {
         border-radius: 8px;
         padding: 14px;
         box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+        overflow: hidden;
     }
 
     #flights-table .flight-cell {
@@ -935,7 +937,6 @@ tr:hover {
 
     #flights-table .flight-summary,
     #flights-table .flight-times,
-    #flights-table .flight-aircraft,
     #flights-table .flight-actions,
     #flights-table .flight-note {
         grid-column: 1 / -1;
@@ -958,6 +959,8 @@ tr:hover {
     #flights-table .flight-origin,
     #flights-table .flight-destination,
     #flights-table .flight-times,
+    #flights-table .flight-metrics,
+    #flights-table .flight-airline,
     #flights-table .flight-aircraft {
         background: #f8fafc;
         border-radius: 6px;
@@ -969,26 +972,38 @@ tr:hover {
         gap: 8px 12px;
     }
 
-    #flights-table .flight-metrics,
-    #flights-table .flight-airline,
     #flights-table .flight-seat {
-        border-top: 1px solid #f0f0f0;
-        padding-top: 10px;
+        background: #f8fafc;
+        border-radius: 6px;
+        padding: 10px;
     }
 
     #flights-table .flight-note {
         max-width: none !important;
         white-space: normal !important;
-        border-top: 1px solid #f0f0f0;
-        padding-top: 10px;
+        background: #f8fafc;
+        border-radius: 6px;
+        padding: 10px;
     }
 
     #flights-table .flight-actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: 10px;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
         padding-top: 8px;
         border-top: 1px solid #eee;
+    }
+
+    #flights-table .flight-actions .btn-icon {
+        width: 100%;
+        min-width: 0;
+        min-height: 44px;
+        border-radius: 6px;
+        background: #f8fafc;
+        border: 1px solid #e5e7eb;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
     }
 
     .modal-overlay {
@@ -1002,6 +1017,7 @@ tr:hover {
         height: 100dvh;
         max-height: 100dvh;
         border-radius: 0;
+        overflow-x: hidden;
     }
 
     .modal-body {
@@ -1009,6 +1025,7 @@ tr:hover {
         min-height: 0;
         max-height: none;
         overflow-y: auto;
+        overflow-x: hidden;
     }
 
     .modal-footer {
@@ -1023,5 +1040,14 @@ tr:hover {
     .form-group select,
     .form-group textarea {
         min-height: 42px;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+
+    .modal form,
+    .modal .form-group {
+        min-width: 0;
+        max-width: 100%;
+        overflow-x: hidden;
     }
 }
