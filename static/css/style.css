@@ -1058,4 +1058,96 @@ tr:hover {
         max-width: 100%;
         overflow-x: hidden;
     }
+
+    /* Datasets Mobile Layout */
+    .dataset-content .toolbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+
+    .dataset-content .toolbar > div {
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .dataset-content .toolbar .btn {
+        width: 100%;
+        margin-bottom: 5px;
+    }
+
+    .dataset-content .search-box {
+        width: 100%;
+    }
+
+    .dataset-content .search-box input {
+        width: 100%;
+    }
+
+    .data-table {
+        display: block;
+        min-width: 0;
+    }
+
+    .data-table thead {
+        display: none;
+    }
+
+    .data-table tbody {
+        display: grid;
+        gap: 12px;
+    }
+
+    .data-table .data-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        background: #fff;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 14px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    }
+
+    .data-table .data-cell {
+        display: block;
+        border: 0;
+        padding: 0;
+        min-width: 0;
+    }
+
+    .data-table .data-cell::before {
+        content: attr(data-label);
+        display: block;
+        margin-bottom: 3px;
+        color: #777;
+        font-size: 0.68rem;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+
+    .data-table .data-actions {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+        gap: 8px;
+        padding-top: 10px;
+        border-top: 1px solid #eee;
+    }
+
+    .data-table .data-actions::before {
+        display: none;
+    }
+
+    .data-table .data-actions .btn,
+    .data-table .data-actions .btn-icon {
+        background: #f8fafc;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+    }
 }

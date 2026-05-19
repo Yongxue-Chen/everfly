@@ -434,6 +434,7 @@ function sortDataset(key) {
 
 function renderDatasetTable(config, data) {
     const table = document.getElementById('dataset-table');
+    table.className = 'data-table'; // Ensure class is set
     table.innerHTML = '';
 
     // Process Data (Filter & Sort)
@@ -495,8 +496,11 @@ function renderDatasetTable(config, data) {
     const tbody = document.createElement('tbody');
     processedData.forEach(item => {
         const tr = document.createElement('tr');
+        tr.className = 'data-row';
         config.columns.forEach(col => {
             const td = document.createElement('td');
+            td.className = 'data-cell';
+            td.setAttribute('data-label', col.label);
             let val = item[col.key];
 
             // Handle Lookups
@@ -511,6 +515,8 @@ function renderDatasetTable(config, data) {
 
         // Actions
         const tdAction = document.createElement('td');
+        tdAction.className = 'data-cell data-actions';
+        tdAction.setAttribute('data-label', 'Actions');
 
         // Single Update Buttons
         if (State.currentDataset === 'airports') {
