@@ -345,6 +345,10 @@ table {
     line-height: 1.35;
 }
 
+.flight-metrics small {
+    display: block;
+}
+
 .flight-aircraft a {
     color: var(--primary-color);
     font-weight: 600;
