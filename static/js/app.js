@@ -1710,7 +1710,7 @@ const renderHeaderStats = (flights) => {
                 </div>
             </div>
             <div class="ph-stat"><b>${flights.length}</b><span>Flights</span></div>
-            <div class="ph-stat"><b>${Math.round(totalDist).toLocaleString()}</b><span>km Distance</span></div>
+            <div class="ph-stat"><b>${Math.round(totalDist).toLocaleString()} km</b><span>Distance</span></div>
             <div class="ph-stat"><b>${hours}h ${mins}m</b><span>Duration</span></div>
         `;
     }
