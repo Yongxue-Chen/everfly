@@ -822,19 +822,35 @@ tr:hover {
         grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 12px;
         padding: 14px 12px;
+        align-items: stretch;
     }
 
     #profile-header-stats > div:first-child {
         grid-column: 1 / -1;
+        min-width: 0;
+    }
+
+    #profile-header-stats .ph-stat {
+        background: #fff;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 10px 6px;
+        text-align: center;
+        min-width: 0;
     }
 
     .ph-stat b {
-        font-size: 1.35rem;
+        display: block;
+        font-size: 1.15rem;
+        overflow-wrap: anywhere;
     }
 
     .ph-stat span {
+        display: block;
         font-size: 0.7rem;
         letter-spacing: 0;
+        line-height: 1.2;
+        margin-top: 3px;
     }
 
     .stats-container {
@@ -891,7 +907,7 @@ tr:hover {
     #flights-table .flight-row {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 10px 12px;
+        gap: 12px;
         background: #fff;
         border: 1px solid var(--border-color);
         border-radius: 8px;
@@ -918,27 +934,53 @@ tr:hover {
     }
 
     #flights-table .flight-summary,
-    #flights-table .flight-origin,
-    #flights-table .flight-destination,
+    #flights-table .flight-times,
+    #flights-table .flight-aircraft,
     #flights-table .flight-actions,
     #flights-table .flight-note {
         grid-column: 1 / -1;
     }
 
-    #flights-table .flight-summary::before {
-        margin-bottom: 6px;
+    #flights-table .flight-summary {
+        border-bottom: 1px solid #edf0f2;
+        padding-bottom: 10px;
+    }
+
+    #flights-table .flight-summary::before,
+    #flights-table .flight-actions::before {
+        display: none;
+    }
+
+    #flights-table .flight-summary-number {
+        font-size: 1.25rem;
     }
 
     #flights-table .flight-origin,
-    #flights-table .flight-destination {
+    #flights-table .flight-destination,
+    #flights-table .flight-times,
+    #flights-table .flight-aircraft {
         background: #f8fafc;
         border-radius: 6px;
         padding: 10px;
     }
 
+    #flights-table .flight-times-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px 12px;
+    }
+
+    #flights-table .flight-metrics,
+    #flights-table .flight-airline,
+    #flights-table .flight-seat {
+        border-top: 1px solid #f0f0f0;
+        padding-top: 10px;
+    }
+
     #flights-table .flight-note {
         max-width: none !important;
         white-space: normal !important;
+        border-top: 1px solid #f0f0f0;
+        padding-top: 10px;
     }
 
     #flights-table .flight-actions {
@@ -947,10 +989,6 @@ tr:hover {
         gap: 10px;
         padding-top: 8px;
         border-top: 1px solid #eee;
-    }
-
-    #flights-table .flight-actions::before {
-        display: none;
     }
 
     .modal-overlay {
