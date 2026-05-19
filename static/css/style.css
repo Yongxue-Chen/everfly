@@ -616,9 +616,13 @@ tr:hover {
         display: none;
     }
 
-    .user-display-name,
-    .dropdown-toggle {
+    .user-display-name {
         display: none;
+    }
+
+    .dropdown-toggle {
+        min-width: 42px;
+        padding: 8px 10px;
     }
 
     .dropdown-content {
@@ -859,19 +863,23 @@ tr:hover {
     .modal {
         width: 100%;
         max-width: none;
-        min-height: 100dvh;
+        height: 100dvh;
+        max-height: 100dvh;
         border-radius: 0;
     }
 
     .modal-body {
         flex: 1;
+        min-height: 0;
         max-height: none;
+        overflow-y: auto;
     }
 
     .modal-footer {
         position: sticky;
         bottom: 0;
         background: #fff;
+        flex-shrink: 0;
     }
 
     .btn,

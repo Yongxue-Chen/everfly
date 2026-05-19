@@ -880,41 +880,33 @@ function openImportModal() {
         return div;
     };
 
-    // Custom modal handling because it's multipart/form-data
-    openModal(`Import ${config.label} CSV`, contentFn, null);
-
-    // Override default save handler for this specific modal instance 
-    // (a bit hacky given the simple modal implementation, but efficient)
-    const saveBtn = document.getElementById('modal-save-btn');
-    saveBtn.onclick = async () => {
+    openModal(`Import ${config.label} CSV`, contentFn, async () => {
         const fileInput = document.querySelector('input[type="file"]');
-        if (!fileInput.files[0]) return alert('Please select a file');
+        if (!fileInput.files[0]) {
+            alert('Please select a file');
+            return false;
+        }
 
         const formData = new FormData();
         formData.append('file', fileInput.files[0]);
-
-        saveBtn.disabled = true;
-        saveBtn.textContent = 'Uploading...';
 
         try {
             const res = await API.upload(`import/${config.endpoint}`, formData);
             if (res.error) {
                 alert('Error: ' + res.error);
+                return false;
             } else {
                 alert(res.message);
                 if (res.errors && res.errors.length > 0) {
                     alert('Some rows failed:\n' + res.errors.slice(0, 10).join('\n') + (res.errors.length > 10 ? '\n...' : ''));
                 }
-                closeModal();
                 loadDataset(State.currentDataset);
             }
         } catch (e) {
             alert('Upload failed: ' + e);
-        } finally {
-            saveBtn.disabled = false;
-            saveBtn.textContent = 'Save';
+            return false;
         }
-    };
+    });
 }
 
 
@@ -1143,40 +1135,32 @@ function openImportFlightsModal() {
         const input = div.querySelector('input');
         // No onchange handler needed
         return div;
-    }, null);
+    }, async () => {
+        const fileInput = document.getElementById('csv-file-input');
+        if (!fileInput || !fileInput.files[0]) {
+            alert('Please select a file');
+            return false;
+        }
 
-    // Override default save handler for this specific modal instance
-    const saveBtn = document.getElementById('modal-save-btn');
-    if (saveBtn) {
-        saveBtn.onclick = async () => {
-            const fileInput = document.getElementById('csv-file-input');
-            if (!fileInput || !fileInput.files[0]) return alert('Please select a file');
+        try {
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            const res = await API.upload(`import/flights`, formData);
 
-            saveBtn.disabled = true;
-            saveBtn.textContent = 'Uploading...';
-
-            try {
-                const formData = new FormData();
-                formData.append('file', fileInput.files[0]);
-                const res = await API.upload(`import/flights`, formData);
-
-                if (res.error) {
-                    alert('Import Error: ' + res.error);
-                } else {
-                    const errorMsg = (res.errors && res.errors.length) ? "\nErrors: " + res.errors.join(", ") : "";
-                    alert(res.message + errorMsg);
-                    loadFlights();
-                    closeModal();
-                    State.currentDataset = old;
-                }
-            } catch (e) {
-                alert('Import failed: ' + e);
-            } finally {
-                saveBtn.disabled = false;
-                saveBtn.textContent = 'Save';
+            if (res.error) {
+                alert('Import Error: ' + res.error);
+                return false;
+            } else {
+                const errorMsg = (res.errors && res.errors.length) ? "\nErrors: " + res.errors.join(", ") : "";
+                alert(res.message + errorMsg);
+                loadFlights();
+                State.currentDataset = old;
             }
-        };
-    }
+        } catch (e) {
+            alert('Import failed: ' + e);
+            return false;
+        }
+    });
 }
 
 async function deleteFlight(id) {
