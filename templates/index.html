@@ -91,9 +91,10 @@
         <!-- Flights View -->
         <section id="view-flights" class="view" style="display: none;">
             <div class="container">
-                <div class="view-header flights-header">
+                <div class="view-header flights-header"
+                    style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                     <h2>Flight History</h2>
-                    <div class="view-actions flights-actions">
+                    <div class="view-actions flights-actions" style="display: flex; gap: 10px;">
                         <button class="btn btn-sm btn-secondary" onclick="openImportFlightsModal()">
                             <i class="fa-solid fa-file-upload"></i> Import CSV
                         </button>
@@ -207,7 +208,7 @@
 
     </main>
 
-    <nav class="mobile-bottom-nav" aria-label="Mobile primary navigation">
+    <nav class="mobile-bottom-nav" aria-label="Mobile primary navigation" style="display: none;">
         <button class="mobile-nav-item active" data-mobile-view="profile" onclick="navigateTo('profile')">
             <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
             <span>Profile</span>
