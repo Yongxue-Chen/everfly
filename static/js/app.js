@@ -1027,43 +1027,47 @@ function renderFlights() {
     const tbody = document.querySelector('#flights-table tbody');
     tbody.innerHTML = '';
 
+    const escapeAttr = (value) => String(value || '').replace(/"/g, '&quot;');
+    const safe = (value) => value || '-';
+
     data.forEach(f => {
         const tr = document.createElement('tr');
         const formatTime = (iso) => iso ? iso.replace('T', ' ').substring(0, 16) : '-';
         // Extract plain date for display (handle T or space separator)
         const displayDate = f.date ? f.date.split(/[ T]/)[0] : '-';
 
+        tr.className = 'flight-row';
         tr.innerHTML = `
-            <td style="white-space:nowrap; font-weight:500;">${displayDate}</td>
-            <td>
+            <td class="flight-cell flight-date" data-label="Date" style="white-space:nowrap; font-weight:500;">${displayDate}</td>
+            <td class="flight-cell flight-times" data-label="Times">
                 <div style="font-size:0.75rem; color:#666">STD: ${formatTime(f.std)}</div>
                 <div style="font-size:0.75rem; color:#333; margin-bottom:4px;">ATD: ${formatTime(f.atd)}</div>
                 <div style="font-size:0.75rem; color:#666">STA: ${formatTime(f.sta)}</div>
                 <div style="font-size:0.75rem; color:#333">ATA: ${formatTime(f.ata)}</div>
             </td>
-            <td>${f.flight_number}</td>
-            <td>
+            <td class="flight-cell flight-number" data-label="Flight">${safe(f.flight_number)}</td>
+            <td class="flight-cell flight-registration" data-label="Reg">
                 ${f.registration ?
-                `<a href="https://www.flightera.net/en/planes/${f.registration}" target="_blank" style="color:var(--primary-color); text-decoration:none; font-weight:500;">${f.registration}</a>`
+                `<a href="https://www.flightera.net/en/planes/${f.registration}" target="_blank" rel="noopener" style="color:var(--primary-color); text-decoration:none; font-weight:500;">${f.registration}</a>`
                 : '-'}
             </td>
-            <td>
+            <td class="flight-cell flight-origin" data-label="From">
                 <div style="font-weight:500">${f.origin_name || f.origin_code || '-'}</div>
                 <div style="font-size:0.75rem; color:#666">${f.origin_code || '-'} ${f.origin_terminal ? `(${f.origin_terminal})` : ''}</div>
             </td>
-            <td>
+            <td class="flight-cell flight-destination" data-label="To">
                 <div style="font-weight:500">${f.dest_name || f.dest_code || '-'}</div>
                 <div style="font-size:0.75rem; color:#666">${f.dest_code || '-'} ${f.dest_terminal ? `(${f.dest_terminal})` : ''}</div>
             </td>
-            <td>${f.distance || '-'}</td>
-            <td>${f.duration_scheduled || '-'}<br>${f.duration_actual || '-'}</td>
-            <td>${f.airline_name || '-'}</td>
-            <td>${f.aircraft_model}</td>
-            <td><small>${f.tag_generation || '-'}<br>${f.tag_winglets || '-'}<br>${f.tag_config || '-'}</small></td>
-            <td>${f.seat_number || '-'}<br><small>${f.seat_type || '-'}</small></td>
-            <td>${f.flight_class || '-'}</td>
-            <td style="max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${f.note || ''}">${f.note || ''}</td>
-            <td>
+            <td class="flight-cell flight-distance" data-label="Dist">${safe(f.distance)}</td>
+            <td class="flight-cell flight-duration" data-label="Dur">${safe(f.duration_scheduled)}<br>${safe(f.duration_actual)}</td>
+            <td class="flight-cell flight-airline" data-label="Airline">${safe(f.airline_name)}</td>
+            <td class="flight-cell flight-aircraft" data-label="Aircraft">${safe(f.aircraft_model)}</td>
+            <td class="flight-cell flight-variants" data-label="Variants"><small>${safe(f.tag_generation)}<br>${safe(f.tag_winglets)}<br>${safe(f.tag_config)}</small></td>
+            <td class="flight-cell flight-seat" data-label="Seat/Type">${safe(f.seat_number)}<br><small>${safe(f.seat_type)}</small></td>
+            <td class="flight-cell flight-class" data-label="Class">${safe(f.flight_class)}</td>
+            <td class="flight-cell flight-note" data-label="Note" style="max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeAttr(f.note)}">${f.note || ''}</td>
+            <td class="flight-cell flight-actions" data-label="Actions">
                 <button class="btn btn-sm btn-icon" style="color:var(--accent-blue)" title="Update from AeroAPI" onclick="updateFlightFromAeroAPI(${f.id})"><i class="fa-solid fa-cloud-arrow-down"></i></button>
                 <button class="btn btn-sm btn-icon" onclick="openEditFlightModal(${JSON.stringify(f).replace(/"/g, '&quot;')})"><i class="fa-solid fa-pen"></i></button>
                 <button class="btn btn-sm btn-icon" style="color:var(--danger)" onclick="deleteFlight(${f.id})"><i class="fa-solid fa-trash"></i></button>
