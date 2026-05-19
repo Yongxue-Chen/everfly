@@ -91,6 +91,10 @@ body {
     /* Push to right */
 }
 
+.mobile-bottom-nav {
+    display: none;
+}
+
 .user-info {
     display: flex;
     align-items: center;
