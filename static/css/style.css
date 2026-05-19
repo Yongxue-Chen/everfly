@@ -95,6 +95,20 @@ body {
     display: none;
 }
 
+.view-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.view-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
 .user-info {
     display: flex;
     align-items: center;
@@ -571,4 +585,299 @@ tr:hover {
     color: var(--error-text);
     border: 1px solid #ffcdd2;
     /* lighter red */
+}
+
+@media (max-width: 768px) {
+    body {
+        padding-bottom: 78px;
+    }
+
+    .navbar {
+        height: auto;
+        min-height: 56px;
+        padding: 8px 12px;
+        gap: 8px;
+    }
+
+    .navbar-brand {
+        font-size: 1.2rem;
+    }
+
+    .navbar-brand img {
+        height: 28px;
+    }
+
+    .navbar-right {
+        gap: 8px;
+    }
+
+    .navbar-right > .nav-item,
+    .navbar-right > .btn-primary {
+        display: none;
+    }
+
+    .user-display-name,
+    .dropdown-toggle {
+        display: none;
+    }
+
+    .dropdown-content {
+        position: fixed;
+        right: 12px;
+        top: 58px;
+    }
+
+    .mobile-bottom-nav {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 1500;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        background: #fff;
+        border-top: 1px solid var(--border-color);
+        box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.12);
+        padding: 6px max(8px, env(safe-area-inset-left)) max(6px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-right));
+    }
+
+    .mobile-nav-item {
+        border: 0;
+        background: transparent;
+        color: #666;
+        min-height: 54px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        font: inherit;
+        font-size: 0.75rem;
+    }
+
+    .mobile-nav-item i {
+        font-size: 1.05rem;
+    }
+
+    .mobile-nav-item.active {
+        color: var(--primary-color);
+        font-weight: 700;
+    }
+
+    .mobile-nav-primary i {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background: var(--primary-color);
+        color: #fff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-top: -12px;
+        box-shadow: 0 4px 10px rgba(0, 86, 179, 0.28);
+    }
+
+    .container {
+        max-width: 100%;
+        margin: 12px auto;
+        padding: 0 12px;
+    }
+
+    .map-container {
+        height: 42vh;
+        min-height: 300px;
+    }
+
+    .map-controls {
+        left: 8px;
+        right: 8px;
+        top: 8px;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .map-controls select,
+    .map-controls button {
+        min-height: 34px;
+    }
+
+    #profile-header-stats {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        padding: 14px 12px;
+    }
+
+    #profile-header-stats > div:first-child {
+        grid-column: 1 / -1;
+    }
+
+    .ph-stat b {
+        font-size: 1.35rem;
+    }
+
+    .ph-stat span {
+        font-size: 0.7rem;
+        letter-spacing: 0;
+    }
+
+    .stats-container {
+        grid-template-columns: 1fr;
+        gap: 12px;
+        margin: 12px;
+    }
+
+    .stats-card {
+        padding: 14px;
+    }
+
+    .stats-total {
+        font-size: 2rem;
+    }
+
+    .view-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .view-header h2 {
+        margin: 0;
+        font-size: 1.35rem;
+    }
+
+    .view-actions {
+        width: 100%;
+        overflow-x: auto;
+        padding-bottom: 2px;
+    }
+
+    .table-responsive {
+        overflow: visible;
+        background: transparent;
+        box-shadow: none;
+    }
+
+    #flights-table {
+        display: block;
+        font-size: 0.9rem;
+    }
+
+    #flights-table thead {
+        display: none;
+    }
+
+    #flights-table tbody {
+        display: grid;
+        gap: 12px;
+    }
+
+    #flights-table .flight-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px 12px;
+        background: #fff;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 14px;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    }
+
+    #flights-table .flight-cell {
+        display: block;
+        border: 0;
+        padding: 0;
+        min-width: 0;
+    }
+
+    #flights-table .flight-cell::before {
+        content: attr(data-label);
+        display: block;
+        margin-bottom: 3px;
+        color: #777;
+        font-size: 0.68rem;
+        font-weight: 700;
+        letter-spacing: 0;
+        text-transform: uppercase;
+    }
+
+    #flights-table .flight-date,
+    #flights-table .flight-number,
+    #flights-table .flight-origin,
+    #flights-table .flight-destination,
+    #flights-table .flight-actions,
+    #flights-table .flight-note {
+        grid-column: 1 / -1;
+    }
+
+    #flights-table .flight-date::before,
+    #flights-table .flight-number::before {
+        display: none;
+    }
+
+    #flights-table .flight-date {
+        color: #666;
+        font-size: 0.82rem;
+    }
+
+    #flights-table .flight-number {
+        margin-top: -4px;
+        color: var(--primary-color);
+        font-size: 1.25rem;
+        font-weight: 800;
+    }
+
+    #flights-table .flight-origin,
+    #flights-table .flight-destination {
+        background: #f8fafc;
+        border-radius: 6px;
+        padding: 10px;
+    }
+
+    #flights-table .flight-note {
+        max-width: none !important;
+        white-space: normal !important;
+    }
+
+    #flights-table .flight-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        padding-top: 8px;
+        border-top: 1px solid #eee;
+    }
+
+    #flights-table .flight-actions::before {
+        display: none;
+    }
+
+    .modal-overlay {
+        align-items: stretch;
+        padding: 0;
+    }
+
+    .modal {
+        width: 100%;
+        max-width: none;
+        min-height: 100dvh;
+        border-radius: 0;
+    }
+
+    .modal-body {
+        flex: 1;
+        max-height: none;
+    }
+
+    .modal-footer {
+        position: sticky;
+        bottom: 0;
+        background: #fff;
+    }
+
+    .btn,
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        min-height: 42px;
+    }
 }
