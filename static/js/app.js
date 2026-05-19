@@ -1065,7 +1065,8 @@ function renderFlights() {
             </td>
             <td class="flight-cell flight-metrics" data-label="Dist / Dur">
                 <div>${distanceText}</div>
-                <small>Sched ${scheduledDuration} / Actual ${actualDuration}</small>
+                <small>Sched ${scheduledDuration}</small>
+                <small>Actual ${actualDuration}</small>
             </td>
             <td class="flight-cell flight-airline" data-label="Airline">${safe(f.airline_name)}</td>
             <td class="flight-cell flight-aircraft" data-label="Aircraft / Reg">
