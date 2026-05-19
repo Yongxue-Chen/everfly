@@ -244,6 +244,113 @@ table {
     font-size: 0.9rem;
 }
 
+.flight-table {
+    min-width: 1310px;
+    table-layout: fixed;
+}
+
+.flight-table th:nth-child(1),
+.flight-table td:nth-child(1) {
+    width: 120px;
+}
+
+.flight-table th:nth-child(2),
+.flight-table td:nth-child(2) {
+    width: 240px;
+}
+
+.flight-table th:nth-child(3),
+.flight-table td:nth-child(3),
+.flight-table th:nth-child(4),
+.flight-table td:nth-child(4) {
+    width: 130px;
+}
+
+.flight-table th:nth-child(5),
+.flight-table td:nth-child(5) {
+    width: 110px;
+}
+
+.flight-table th:nth-child(6),
+.flight-table td:nth-child(6) {
+    width: 120px;
+}
+
+.flight-table th:nth-child(7),
+.flight-table td:nth-child(7) {
+    width: 140px;
+}
+
+.flight-table th:nth-child(8),
+.flight-table td:nth-child(8) {
+    width: 100px;
+}
+
+.flight-table th:nth-child(9),
+.flight-table td:nth-child(9) {
+    width: 125px;
+}
+
+.flight-table th:nth-child(10),
+.flight-table td:nth-child(10) {
+    width: 85px;
+}
+
+.flight-table .filter-row input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.flight-summary-date {
+    color: #666;
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
+.flight-summary-number {
+    color: var(--primary-color);
+    font-size: 1rem;
+    font-weight: 800;
+    margin-top: 3px;
+    white-space: nowrap;
+}
+
+.flight-times-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 10px;
+}
+
+.flight-times-grid span {
+    display: block;
+    color: #777;
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1.1;
+}
+
+.flight-times-grid strong {
+    display: block;
+    color: #222;
+    font-size: 0.78rem;
+    line-height: 1.25;
+    white-space: nowrap;
+}
+
+.flight-metrics small,
+.flight-aircraft small,
+.flight-seat small {
+    color: #666;
+    font-size: 0.75rem;
+    line-height: 1.35;
+}
+
+.flight-aircraft a {
+    color: var(--primary-color);
+    font-weight: 600;
+    text-decoration: none;
+}
+
 th,
 td {
     padding: 12px 15px;
@@ -765,6 +872,7 @@ tr:hover {
     #flights-table {
         display: block;
         font-size: 0.9rem;
+        min-width: 0;
     }
 
     #flights-table thead {
@@ -805,8 +913,7 @@ tr:hover {
         text-transform: uppercase;
     }
 
-    #flights-table .flight-date,
-    #flights-table .flight-number,
+    #flights-table .flight-summary,
     #flights-table .flight-origin,
     #flights-table .flight-destination,
     #flights-table .flight-actions,
@@ -814,21 +921,8 @@ tr:hover {
         grid-column: 1 / -1;
     }
 
-    #flights-table .flight-date::before,
-    #flights-table .flight-number::before {
-        display: none;
-    }
-
-    #flights-table .flight-date {
-        color: #666;
-        font-size: 0.82rem;
-    }
-
-    #flights-table .flight-number {
-        margin-top: -4px;
-        color: var(--primary-color);
-        font-size: 1.25rem;
-        font-weight: 800;
+    #flights-table .flight-summary::before {
+        margin-bottom: 6px;
     }
 
     #flights-table .flight-origin,

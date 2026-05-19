@@ -108,53 +108,36 @@
                     <table class="flight-table" id="flights-table">
                         <thead>
                             <tr>
-                                <th onclick="sortFlights('date')" style="cursor:pointer">Date <i
+                                <th onclick="sortFlights('date')" style="cursor:pointer">Date / Flight <i
                                         class="fas fa-sort"></i></th>
                                 <th onclick="sortFlights('std')" style="cursor:pointer">Times <i
-                                        class="fas fa-sort"></i></th>
-                                <th onclick="sortFlights('flight_number')" style="cursor:pointer">Flight <i
-                                        class="fas fa-sort"></i></th>
-                                <th onclick="sortFlights('registration')" style="cursor:pointer">Reg <i
                                         class="fas fa-sort"></i></th>
                                 <th onclick="sortFlights('origin_name')" style="cursor:pointer">From <i
                                         class="fas fa-sort"></i></th>
                                 <th onclick="sortFlights('dest_name')" style="cursor:pointer">To <i
                                         class="fas fa-sort"></i></th>
-                                <th onclick="sortFlights('distance')" style="cursor:pointer">Dist <i
-                                        class="fas fa-sort"></i></th>
-                                <th onclick="sortFlights('duration_actual')" style="cursor:pointer">Dur <i
+                                <th onclick="sortFlights('distance')" style="cursor:pointer">Dist / Dur <i
                                         class="fas fa-sort"></i></th>
                                 <th onclick="sortFlights('airline_name')" style="cursor:pointer">Airline <i
                                         class="fas fa-sort"></i></th>
-                                <th onclick="sortFlights('aircraft_model')" style="cursor:pointer">Aircraft <i
+                                <th onclick="sortFlights('aircraft_model')" style="cursor:pointer">Aircraft / Reg <i
                                         class="fas fa-sort"></i></th>
-                                <th>Variants</th>
-                                <th onclick="sortFlights('seat_number')" style="cursor:pointer">Seat/Type <i
-                                        class="fas fa-sort"></i></th>
-                                <th onclick="sortFlights('flight_class')" style="cursor:pointer">Class <i
+                                <th onclick="sortFlights('seat_number')" style="cursor:pointer">Seat / Class <i
                                         class="fas fa-sort"></i></th>
                                 <th>Note</th>
                                 <th>Actions</th>
                             </tr>
                             <tr class="filter-row">
-                                <th><input type="text" onkeyup="filterFlights()" placeholder="Date" style="width:80px">
+                                <th><input type="text" onkeyup="filterFlights()" placeholder="Date / No.">
                                 </th>
                                 <th></th>
-                                <th><input type="text" onkeyup="filterFlights()" placeholder="No." style="width:60px">
+                                <th><input type="text" onkeyup="filterFlights()" placeholder="From">
                                 </th>
-                                <th><input type="text" onkeyup="filterFlights()" placeholder="Reg" style="width:50px">
-                                </th>
-                                <th><input type="text" onkeyup="filterFlights()" placeholder="Dep" style="width:40px">
-                                </th>
-                                <th><input type="text" onkeyup="filterFlights()" placeholder="Arr" style="width:40px">
-                                </th>
-                                <th></th>
+                                <th><input type="text" onkeyup="filterFlights()" placeholder="To"></th>
                                 <th></th>
                                 <th><input type="text" onkeyup="filterFlights()" placeholder="Airline"></th>
-                                <th><input type="text" onkeyup="filterFlights()" placeholder="Model"></th>
-                                <th></th>
-                                <th><input type="text" onkeyup="filterFlights()" placeholder="Seat"></th>
-                                <th><input type="text" onkeyup="filterFlights()" placeholder="Class" style="width:50px">
+                                <th><input type="text" onkeyup="filterFlights()" placeholder="Aircraft / Reg"></th>
+                                <th><input type="text" onkeyup="filterFlights()" placeholder="Seat / Class">
                                 </th>
                                 <th><input type="text" onkeyup="filterFlights()" placeholder="Note"></th>
                                 <th></th>
