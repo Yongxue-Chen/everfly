@@ -91,9 +91,9 @@
         <!-- Flights View -->
         <section id="view-flights" class="view" style="display: none;">
             <div class="container">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <div class="view-header flights-header">
                     <h2>Flight History</h2>
-                    <div style="display: flex; gap: 10px;">
+                    <div class="view-actions flights-actions">
                         <button class="btn btn-sm btn-secondary" onclick="openImportFlightsModal()">
                             <i class="fa-solid fa-file-upload"></i> Import CSV
                         </button>
@@ -206,6 +206,25 @@
         </section>
 
     </main>
+
+    <nav class="mobile-bottom-nav" aria-label="Mobile primary navigation">
+        <button class="mobile-nav-item active" data-mobile-view="profile" onclick="navigateTo('profile')">
+            <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
+            <span>Profile</span>
+        </button>
+        <button class="mobile-nav-item" data-mobile-view="flights" onclick="navigateTo('flights')">
+            <i class="fa-solid fa-plane-departure" aria-hidden="true"></i>
+            <span>Flights</span>
+        </button>
+        <button class="mobile-nav-item mobile-nav-primary" onclick="openAddFlightModal()">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i>
+            <span>Add</span>
+        </button>
+        <button class="mobile-nav-item" data-mobile-view="datasets" onclick="navigateTo('datasets')">
+            <i class="fa-solid fa-database" aria-hidden="true"></i>
+            <span>Data</span>
+        </button>
+    </nav>
 
     <!-- Modals -->
     <div id="modal-container" class="modal-overlay" style="display: none;">
