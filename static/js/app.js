@@ -261,6 +261,9 @@ function navigateTo(viewName) {
     if (viewName === 'profile') document.querySelector('.nav-item:nth-child(1)')?.classList.add('active');
     if (viewName === 'flights') document.querySelector('.nav-item:nth-child(2)')?.classList.add('active');
     // Datasets is now in dropdown, no top-level nav item to highlight
+    document.querySelectorAll('.mobile-nav-item[data-mobile-view]').forEach(el => {
+        el.classList.toggle('active', el.dataset.mobileView === viewName);
+    });
 
     // Update View Visibility
     document.querySelectorAll('.view').forEach(el => el.style.display = 'none');
