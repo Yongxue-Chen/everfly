@@ -909,6 +909,7 @@ tr:hover {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 12px;
+        align-items: stretch;
         background: #fff;
         border: 1px solid var(--border-color);
         border-radius: 8px;
@@ -922,6 +923,8 @@ tr:hover {
         border: 0;
         padding: 0;
         min-width: 0;
+        width: 100%;
+        box-sizing: border-box;
     }
 
     #flights-table .flight-cell::before {
@@ -965,6 +968,7 @@ tr:hover {
         background: #f8fafc;
         border-radius: 6px;
         padding: 10px;
+        justify-self: stretch;
     }
 
     #flights-table .flight-times-grid {
@@ -976,6 +980,7 @@ tr:hover {
         background: #f8fafc;
         border-radius: 6px;
         padding: 10px;
+        justify-self: stretch;
     }
 
     #flights-table .flight-note {
@@ -984,26 +989,29 @@ tr:hover {
         background: #f8fafc;
         border-radius: 6px;
         padding: 10px;
+        justify-self: stretch;
     }
 
     #flights-table .flight-actions {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 8px;
-        padding-top: 8px;
+        gap: 6px;
+        padding-top: 10px;
         border-top: 1px solid #eee;
     }
 
     #flights-table .flight-actions .btn-icon {
         width: 100%;
         min-width: 0;
-        min-height: 44px;
+        min-height: 48px;
         border-radius: 6px;
         background: #f8fafc;
         border: 1px solid #e5e7eb;
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        font-size: 1.2rem;
+        padding: 8px 0;
     }
 
     .modal-overlay {
