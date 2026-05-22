@@ -254,6 +254,7 @@ def index():
     return render_template('index.html', user=user_info)
 
 @app.route('/api/health')
+@limiter.exempt
 def health():
     return jsonify({"status": "ok"})
 

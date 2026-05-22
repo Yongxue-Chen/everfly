@@ -1497,6 +1497,10 @@ const renderStatsDashboard = (stats, container) => {
         row.innerHTML = `<span style="color:#555">${label}</span><strong style="color:#333">${count !== undefined ? count : 0}</strong>`;
         if (key && stats.top[key]) {
             row.style.cursor = 'pointer';
+            row.style.padding = '8px 4px';
+            row.style.borderRadius = '4px';
+            row.onmouseenter = () => row.style.background = '#f0f0f0';
+            row.onmouseleave = () => row.style.background = 'transparent';
             row.onclick = (e) => { e.stopPropagation(); showStatsModal(title, stats.top[key]); };
         }
         locList.appendChild(row);
