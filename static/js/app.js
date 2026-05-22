@@ -109,7 +109,11 @@ const State = {
         flights: []
     },
     flightSort: { key: 'date', dir: 'desc' },
-    flightFilters: {}
+    flightFilters: {},
+    profileLayers: [],
+    profileMapFlights: null,
+    profileMapSelectedYear: 'all',
+    profileMapMoveHandlerBound: false
 };
 
 // --- API Client ---
@@ -303,6 +307,61 @@ function setMapLayer(type) {
     } else {
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(State.map);
     }
+}
+
+function getVisibleWorldLongitudeOffsets(map, bufferCopies = 1) {
+    if (!map || !map.getBounds) return [0];
+
+    const bounds = map.getBounds();
+    const west = bounds.getWest();
+    const east = bounds.getEast();
+    if (!Number.isFinite(west) || !Number.isFinite(east)) return [0];
+
+    const startWorld = Math.floor((west + 180) / 360) - bufferCopies;
+    const endWorld = Math.floor((east + 180 - 0.000001) / 360) + bufferCopies;
+    const offsets = [];
+
+    for (let world = startWorld; world <= endWorld; world++) {
+        offsets.push(world * 360);
+    }
+
+    return [...new Set(offsets)].sort((a, b) => a - b);
+}
+
+function shiftPathLongitude(points, offset) {
+    return points.map(([lat, lon]) => [lat, lon + offset]);
+}
+
+// Helper for Great Circle Path (Geodesic)
+function getGeodesicPath(lat1, lon1, lat2, lon2, numPoints = 100) {
+    if (lat1 === lat2 && lon1 === lon2) return [[lat1, lon1]];
+    const toRad = x => x * Math.PI / 180;
+    const toDeg = x => x * 180 / Math.PI;
+    const phi1 = toRad(lat1), lambda1 = toRad(lon1);
+    const phi2 = toRad(lat2), lambda2 = toRad(lon2);
+    const d = 2 * Math.asin(Math.sqrt(Math.pow(Math.sin((phi1 - phi2) / 2), 2) +
+        Math.cos(phi1) * Math.cos(phi2) * Math.pow(Math.sin((lambda1 - lambda2) / 2), 2)));
+    if (d === 0) return [[lat1, lon1]];
+    let points = [];
+    for (let i = 0; i <= numPoints; i++) {
+        const f = i / numPoints;
+        const A = Math.sin((1 - f) * d) / Math.sin(d);
+        const B = Math.sin(f * d) / Math.sin(d);
+        const x = A * Math.cos(phi1) * Math.cos(lambda1) + B * Math.cos(phi2) * Math.cos(lambda2);
+        const y = A * Math.cos(phi1) * Math.sin(lambda1) + B * Math.cos(phi2) * Math.sin(lambda2);
+        const z = A * Math.sin(phi1) + B * Math.sin(phi2);
+        points.push([toDeg(Math.atan2(z, Math.sqrt(x * x + y * y))), toDeg(Math.atan2(y, x))]);
+    }
+    return points;
+}
+
+function bindProfileMapMoveHandler() {
+    if (!State.map || State.profileMapMoveHandlerBound) return;
+
+    State.map.on('moveend zoomend', () => {
+        if (State.profileMapFlights) refreshProfileMapLayers({ fitBounds: false });
+    });
+    State.profileMapMoveHandlerBound = true;
 }
 
 // --- Data Loading & Rendering ---
@@ -1787,7 +1846,19 @@ function renderProfileMap(flights, selectedYear) {
     if (!State.map) initMap();
     if (!State.map) return;
 
+    State.profileMapFlights = flights;
+    State.profileMapSelectedYear = selectedYear;
+    bindProfileMapMoveHandler();
+    refreshProfileMapLayers({ fitBounds: true });
+}
+
+function refreshProfileMapLayers({ fitBounds = false } = {}) {
+    if (!State.map || !State.profileMapFlights) return;
+
+    const selectedYear = State.profileMapSelectedYear;
+    const flights = State.profileMapFlights;
     const filtered = selectedYear === 'all' ? flights : flights.filter(f => f.date && f.date.startsWith(selectedYear));
+    const longitudeOffsets = getVisibleWorldLongitudeOffsets(State.map, 1);
 
     // Clear Layers
     if (State.profileLayers) {
@@ -1795,35 +1866,12 @@ function renderProfileMap(flights, selectedYear) {
     }
     State.profileLayers = [];
 
-    // Helper for Great Circle Path (Geodesic)
-    const getGeodesicPath = (lat1, lon1, lat2, lon2, numPoints = 100) => {
-        if (lat1 === lat2 && lon1 === lon2) return [[lat1, lon1]];
-        const toRad = x => x * Math.PI / 180;
-        const toDeg = x => x * 180 / Math.PI;
-        const phi1 = toRad(lat1), lambda1 = toRad(lon1);
-        const phi2 = toRad(lat2), lambda2 = toRad(lon2);
-        const d = 2 * Math.asin(Math.sqrt(Math.pow(Math.sin((phi1 - phi2) / 2), 2) +
-            Math.cos(phi1) * Math.cos(phi2) * Math.pow(Math.sin((lambda1 - lambda2) / 2), 2)));
-        if (d === 0) return [[lat1, lon1]];
-        let points = [];
-        for (let i = 0; i <= numPoints; i++) {
-            const f = i / numPoints;
-            const A = Math.sin((1 - f) * d) / Math.sin(d);
-            const B = Math.sin(f * d) / Math.sin(d);
-            const x = A * Math.cos(phi1) * Math.cos(lambda1) + B * Math.cos(phi2) * Math.cos(lambda2);
-            const y = A * Math.cos(phi1) * Math.sin(lambda1) + B * Math.cos(phi2) * Math.sin(lambda2);
-            const z = A * Math.sin(phi1) + B * Math.sin(phi2);
-            points.push([toDeg(Math.atan2(z, Math.sqrt(x * x + y * y))), toDeg(Math.atan2(y, x))]);
-        }
-        return points;
-    };
-
     const airports = {};
+    const fitLayers = [];
     let drawnCount = 0;
 
     console.log("renderProfileMap: filtered flights =", filtered.length);
     filtered.forEach(f => {
-        console.log("Flight:", f);
         if (!f.origin || !f.dest) {
             console.log("Missing origin or dest");
             return;
@@ -1835,11 +1883,13 @@ function renderProfileMap(flights, selectedYear) {
 
         // Draw Geodesic Line
         const curvePoints = getGeodesicPath(lat1, lon1, lat2, lon2);
-        const line = L.polyline(curvePoints, { color: '#ffb800', weight: 2, opacity: 0.6 });
-        // Popup info
-        line.bindPopup(`${f.flight_number}<br>${f.date}<br>${f.origin.code} -> ${f.dest.code}`);
-        line.addTo(State.map);
-        State.profileLayers.push(line);
+        longitudeOffsets.forEach(offset => {
+            const line = L.polyline(shiftPathLongitude(curvePoints, offset), { color: '#ffb800', weight: 2, opacity: 0.6 });
+            line.bindPopup(`${f.flight_number}<br>${f.date}<br>${f.origin.code} -> ${f.dest.code}`);
+            line.addTo(State.map);
+            State.profileLayers.push(line);
+        });
+        if (fitBounds) fitLayers.push(L.polyline(curvePoints));
         drawnCount++;
 
         airports[f.origin.code] = { loc: [lat1, lon1], name: f.origin.name };
@@ -1848,18 +1898,22 @@ function renderProfileMap(flights, selectedYear) {
 
     // Draw Markers
     Object.entries(airports).forEach(([code, data]) => {
-        const m = L.circleMarker(data.loc, { radius: 4, color: '#00b0ff', fillColor: '#00b0ff', fillOpacity: 0.8 });
-        m.bindPopup(`<b>${code}</b><br>${data.name}`);
-        m.addTo(State.map);
-        State.profileLayers.push(m);
+        longitudeOffsets.forEach(offset => {
+            const loc = [data.loc[0], data.loc[1] + offset];
+            const m = L.circleMarker(loc, { radius: 4, color: '#00b0ff', fillColor: '#00b0ff', fillOpacity: 0.8 });
+            m.bindPopup(`<b>${code}</b><br>${data.name}`);
+            m.addTo(State.map);
+            State.profileLayers.push(m);
+        });
+        if (fitBounds) fitLayers.push(L.circleMarker(data.loc));
     });
 
     // Fit Bounds
-    if (State.profileLayers.length > 0) {
-        const group = new L.featureGroup(State.profileLayers);
+    if (fitBounds && fitLayers.length > 0) {
+        const group = new L.featureGroup(fitLayers);
         State.map.fitBounds(group.getBounds(), { padding: [50, 50] });
     }
-    console.log(`Map rendering complete: ${drawnCount} lines drawn, ${Object.keys(airports).length} airports`);
+    console.log(`Map rendering complete: ${drawnCount} routes drawn across ${longitudeOffsets.length} world copies, ${Object.keys(airports).length} airports`);
 }
 
 // --- Initialization ---
