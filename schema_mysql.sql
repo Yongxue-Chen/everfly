@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS airlines (
     logo_url                TEXT,
     frequent_flyer_program  VARCHAR(100),
     frequent_flyer_id       VARCHAR(100),
+    website_url             TEXT,
     alliance                VARCHAR(100),
     INDEX idx_airlines_user (user_id)
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

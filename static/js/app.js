@@ -66,7 +66,8 @@ const DATASETS = {
             { key: 'iata_code', label: 'IATA Code', type: 'text', required: false },
             { key: 'icao_code', label: 'ICAO Code', type: 'text', required: false },
             { key: 'frequent_flyer_program', label: 'FF Program', type: 'text', required: false },
-            { key: 'frequent_flyer_id', label: 'FF ID (Member No.)', type: 'text', required: false }
+            { key: 'frequent_flyer_id', label: 'FF ID (Member No.)', type: 'text', required: false },
+            { key: 'website_url', label: 'Website URL', type: 'text', required: false, placeholder: 'https://example.com' }
         ]
     },
     aircraft_models: {
@@ -161,6 +162,13 @@ const API = {
         return res.json();
     }
 };
+
+function normalizeWebsiteUrl(url) {
+    const trimmed = (url || '').trim();
+    if (!trimmed) return '';
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    return `https://${trimmed}`;
+}
 
 function toggleDropdown() {
     const dropdown = document.getElementById('settings-dropdown');
@@ -551,7 +559,16 @@ function renderDatasetTable(config, data) {
                 val = lookupItem ? lookupItem[col.display] : val;
             }
 
-            td.textContent = val;
+            if (State.currentDataset === 'airlines' && col.key === 'name' && item.website_url) {
+                const link = document.createElement('a');
+                link.href = normalizeWebsiteUrl(item.website_url);
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                link.textContent = val || '';
+                td.appendChild(link);
+            } else {
+                td.textContent = val;
+            }
             tr.appendChild(td);
         });
 

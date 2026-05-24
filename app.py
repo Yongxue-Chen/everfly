@@ -147,9 +147,30 @@ def _get_user_api_key() -> str:
         raise ValueError("FlightAware API key not configured. Set it via Edit Profile.")
     return _decrypt_api_key(encrypted)
 
+def migrate_airlines_website_url():
+    try:
+        raw_conn = database._raw_connect()
+        cur = raw_conn.cursor()
+        cur.execute("""
+            SELECT COLUMN_NAME
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'airlines'
+              AND COLUMN_NAME = 'website_url'
+        """)
+        if not cur.fetchone():
+            cur.execute("ALTER TABLE airlines ADD COLUMN website_url TEXT")
+            raw_conn.commit()
+            print("Migrated airlines table: added website_url column")
+        raw_conn.close()
+    except Exception as e:
+        if getattr(e, 'args', [None])[0] != 1060:
+            print(f"migrate_airlines_website_url error: {e}")
+
 # --- Migrate users DB at startup ---
 with app.app_context():
     database.migrate_users_db()
+    migrate_airlines_website_url()
 
 # --- Auth Middleware ---
 @app.before_request
@@ -489,7 +510,7 @@ def create_crud_routes(endpoint, table_name, columns):
 # Schema columns for validation (excluding id)
 cities_cols = ['name', 'country', 'country_code', 'timezone', 'continent']
 airports_cols = ['name', 'iata_code', 'icao_code', 'city_id', 'lat', 'lon', 'terminals', 'timezone']
-airlines_cols = ['name', 'iata_code', 'icao_code', 'frequent_flyer_program', 'frequent_flyer_id']
+airlines_cols = ['name', 'iata_code', 'icao_code', 'frequent_flyer_program', 'frequent_flyer_id', 'website_url']
 aircraft_cols = ['manufacturer', 'model', 'series', 'subtype', 'tags_generation', 'tags_engine', 'tags_winglets', 'tags_config', 'name']
 flights_cols = ['date', 'flight_number', 'airline_id', 'aircraft_model_id', 'origin_airport_id', 'dest_airport_id',
                 'dep_time_scheduled', 'arr_time_scheduled', 'seat_number', 'seat_type', 'flight_class', 'note',
