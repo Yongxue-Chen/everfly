@@ -34,8 +34,9 @@
             </a>
         </div>
         <div class="navbar-right">
-            <div class="nav-item active" onclick="navigateTo('profile')">Profile</div>
-            <div class="nav-item" onclick="navigateTo('flights')">Flights</div>
+            <div class="nav-item active" data-view-nav="profile" onclick="navigateTo('profile')">Profile</div>
+            <div class="nav-item" data-view-nav="flights" onclick="navigateTo('flights')">Flights</div>
+            <div class="nav-item" data-view-nav="datasets" onclick="navigateTo('datasets')">Data</div>
             <button class="btn btn-primary" onclick="openAddFlightModal()">
                 <i class="fa-solid fa-plus"></i> Add flight
             </button>

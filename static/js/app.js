@@ -114,7 +114,8 @@ const State = {
     profileLayers: [],
     profileMapFlights: null,
     profileMapSelectedYear: 'all',
-    profileMapMoveHandlerBound: false
+    profileMapMoveHandlerBound: false,
+    profileMapResizeObserverBound: false
 };
 
 // --- API Client ---
@@ -168,6 +169,26 @@ function normalizeWebsiteUrl(url) {
     if (!trimmed) return '';
     if (/^https?:\/\//i.test(trimmed)) return trimmed;
     return `https://${trimmed}`;
+}
+
+function invalidateProfileMapSize() {
+    if (!State.map) return;
+    const invalidate = () => State.map.invalidateSize({ pan: false });
+    invalidate();
+    requestAnimationFrame(invalidate);
+    setTimeout(invalidate, 100);
+    setTimeout(invalidate, 350);
+    setTimeout(invalidate, 900);
+}
+
+function bindProfileMapResizeObserver() {
+    if (State.profileMapResizeObserverBound || typeof ResizeObserver === 'undefined') return;
+    const container = document.querySelector('#view-profile .map-container');
+    if (!container) return;
+
+    const observer = new ResizeObserver(() => invalidateProfileMapSize());
+    observer.observe(container);
+    State.profileMapResizeObserverBound = true;
 }
 
 function toggleDropdown() {
@@ -269,10 +290,9 @@ function navigateTo(viewName) {
 
     // Update Navbar
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-    // Simple logic to find the nav item based on text content or index (assumed order)
-    if (viewName === 'profile') document.querySelector('.nav-item:nth-child(1)')?.classList.add('active');
-    if (viewName === 'flights') document.querySelector('.nav-item:nth-child(2)')?.classList.add('active');
-    // Datasets is now in dropdown, no top-level nav item to highlight
+    if (viewName === 'profile' || viewName === 'flights' || viewName === 'datasets') {
+        document.querySelector(`.nav-item[data-view-nav="${viewName}"]`)?.classList.add('active');
+    }
     document.querySelectorAll('.mobile-nav-item[data-mobile-view]').forEach(el => {
         el.classList.toggle('active', el.dataset.mobileView === viewName);
     });
@@ -283,7 +303,7 @@ function navigateTo(viewName) {
     // Show active view
     if (viewName === 'profile') {
         document.getElementById('view-profile').style.display = 'block';
-        if (State.map) State.map.invalidateSize();
+        invalidateProfileMapSize();
         loadProfile();
     } else if (viewName === 'flights') {
         document.getElementById('view-flights').style.display = 'block';
@@ -297,10 +317,13 @@ function navigateTo(viewName) {
 // --- Map Logic ---
 function initMap() {
     if (document.getElementById('flight-map')) {
-        State.map = L.map('flight-map').setView([20, 0], 2);
+        State.map = L.map('flight-map', {
+            minZoom: 1
+        }).setView([20, 0], 2);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap contributors'
         }).addTo(State.map);
+        bindProfileMapResizeObserver();
     }
 }
 
@@ -1923,6 +1946,7 @@ async function loadProfile() {
                 const filtered = val === 'all' ? flights : flights.filter(f => f.date && f.date.startsWith(val));
                 renderHeaderStats(filtered);
                 renderProfileMap(flights, val);
+                invalidateProfileMapSize();
             };
         }
 
@@ -1940,6 +1964,7 @@ function renderProfileMap(flights, selectedYear) {
     State.profileMapSelectedYear = selectedYear;
     bindProfileMapMoveHandler();
     refreshProfileMapLayers({ fitBounds: true });
+    invalidateProfileMapSize();
 }
 
 function refreshProfileMapLayers({ fitBounds = false } = {}) {
