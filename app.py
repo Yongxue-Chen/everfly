@@ -6,9 +6,10 @@ import database
 import requests
 import dateutil.parser
 import airportsdata
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 import pytz
 import json
+import re
 import werkzeug.security
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -49,6 +50,72 @@ def safe_jsonify_error(e):
         return safe_jsonify_error(e)
     print(f"Internal Error: {e}") # Log it
     return jsonify({'error': 'An internal error occurred.'}), 500
+
+FLIGHT_NULLABLE_NUMERIC_FIELDS = {
+    'airline_id',
+    'aircraft_model_id',
+    'origin_airport_id',
+    'dest_airport_id',
+    'distance',
+    'duration_scheduled',
+    'duration_actual',
+}
+
+def normalize_flight_payload(data):
+    normalized = dict(data)
+    for field in FLIGHT_NULLABLE_NUMERIC_FIELDS:
+        if normalized.get(field) == '':
+            normalized[field] = None
+    return normalized
+
+AEROAPI_CONFIRM_FIELDS = [
+    ('std', 'Scheduled Departure'),
+    ('atd', 'Actual Departure'),
+    ('sta', 'Scheduled Arrival'),
+    ('ata', 'Actual Arrival'),
+    ('registration', 'Aircraft Registration'),
+    ('distance', 'Distance'),
+    ('duration_scheduled', 'Scheduled Duration'),
+    ('duration_actual', 'Actual Duration'),
+    ('origin_terminal', 'Origin Terminal'),
+    ('dest_terminal', 'Destination Terminal'),
+]
+
+AEROAPI_CONFIRM_FIELD_NAMES = {field for field, _ in AEROAPI_CONFIRM_FIELDS}
+
+def _is_empty_value(value):
+    return value is None or value == ''
+
+def _values_equal(local_value, remote_value):
+    return str(local_value).strip() == str(remote_value).strip()
+
+def build_aeroapi_field_diffs(local_values, remote_values):
+    diffs = []
+    for field, label in AEROAPI_CONFIRM_FIELDS:
+        remote_value = remote_values.get(field)
+        if remote_value is None:
+            continue
+
+        local_value = local_values.get(field)
+        if _is_empty_value(local_value):
+            status = 'missing'
+            default_selected = True
+        elif _values_equal(local_value, remote_value):
+            status = 'same'
+            default_selected = False
+        else:
+            status = 'conflict'
+            default_selected = False
+
+        diffs.append({
+            'field': field,
+            'label': label,
+            'local': local_value,
+            'remote': remote_value,
+            'status': status,
+            'default_selected': default_selected
+        })
+    return diffs
 
 _secret_key = os.environ.get('FLASK_SECRET_KEY')
 if not _secret_key:
@@ -304,10 +371,17 @@ def create_crud_routes(endpoint, table_name, columns):
     def create_item():
         data = request.json
         valid_data = {k: v for k, v in data.items() if k in columns}
+        
+        # Normalize empty strings to None only for numeric/decimal fields in airports
+        if table_name == 'airports':
+            for field in ['lat', 'lon', 'city_id']:
+                if valid_data.get(field) == '':
+                    valid_data[field] = None
 
         # Special logic for flights duration
         # Special logic for flights duration
         if table_name == 'flights':
+            valid_data = normalize_flight_payload(valid_data)
             conn = database.get_db()
             try:
                 origin_id = valid_data.get('origin_airport_id')
@@ -348,9 +422,16 @@ def create_crud_routes(endpoint, table_name, columns):
     def update_item(id):
         data = request.json
         valid_data = {k: v for k, v in data.items() if k in columns}
+        
+        # Normalize empty strings to None only for numeric/decimal fields in airports
+        if table_name == 'airports':
+            for field in ['lat', 'lon', 'city_id']:
+                if valid_data.get(field) == '':
+                    valid_data[field] = None
 
         # Special logic for flights duration
         if table_name == 'flights':
+            valid_data = normalize_flight_payload(valid_data)
             conn = database.get_db()
             try:
                 # Fetch existing to compare or fill
@@ -829,66 +910,221 @@ def clear_table(table_name):
 import airportsdata
 import pycountry
 
-def _update_airport_logic(id, conn):
-    """Helper to update single airport."""
-    updated_fields = []
-    uid = g.user['id']
-    # Explicit column selection so indices are stable regardless of SQL mode
-    cur = conn.execute("SELECT id, name, iata_code, icao_code, city_id FROM airports WHERE id = ? AND user_id = ?", (id, uid))
+def _update_city_fields_logic(city_id, conn, uid, info_country_code=None, info_timezone=None):
+    """Helper to fill in missing fields for a city."""
+    import pycountry
+    import airportsdata
+
+    cur = conn.execute("SELECT name, country, country_code, timezone, continent FROM cities WHERE id = ? AND user_id = ?", (city_id, uid))
     row = cur.fetchone()
-    if not row: return False, "Not found"
-    
-    iata = row[2]  # iata_code
-    if not iata or len(iata) != 3: return False, "Invalid IATA"
-
-    airports = airportsdata.load('IATA')
-    data = airports.get(iata)
-    if not data: return False, "No data found for IATA"
-
-    # 1. Update ICAO, Lat, Lon
-    new_icao = data.get('icao', '')
-    new_lat = data.get('lat')
-    new_lon = data.get('lon')
-    
-    conn.execute("UPDATE airports SET icao_code = ?, lat = ?, lon = ? WHERE id = ? AND user_id = ?", 
-                    (new_icao, new_lat, new_lon, id, uid))
-    updated_fields.extend(['icao_code', 'lat', 'lon'])
-
-    # 2. Match City
-    current_city_id = row[4]  # city_id
-    
-    # We update city if missing
-    if not current_city_id:
-        city_name = data.get('city')
-        country_code = data.get('country') 
-        tz = data.get('tz')
-
-        # Find City Logic: Strict Match (Name + Code)
-        cur = conn.execute("SELECT id FROM cities WHERE name = ? AND country_code = ? AND user_id = ?", (city_name, country_code, uid))
-        res = cur.fetchone()
+    if not row:
+        return False, "City not found"
         
-        city_id = None
-        if res:
-            city_id = res[0]
+    city_name, country, country_code, timezone, continent = row
+    
+    new_country = country
+    new_country_code = country_code
+    new_timezone = timezone
+    new_continent = continent
+    
+    # 1. Resolve country and country_code if one is missing
+    if not new_country_code and new_country:
+        try:
+            countries = pycountry.countries.search_fuzzy(new_country)
+            if countries:
+                new_country_code = countries[0].alpha_2
+                new_country = countries[0].name
+        except Exception:
+            pass
+    elif not new_country and new_country_code:
+        try:
+            c_obj = pycountry.countries.get(alpha_2=new_country_code.upper())
+            if not c_obj:
+                c_obj = pycountry.countries.get(alpha_3=new_country_code.upper())
+            if c_obj:
+                new_country = c_obj.name
+                new_country_code = c_obj.alpha_2
+        except Exception:
+            pass
+            
+    # Fallback to info_country_code if still missing country_code
+    if not new_country_code and info_country_code:
+        new_country_code = info_country_code
+        try:
+            c_obj = pycountry.countries.get(alpha_2=new_country_code.upper())
+            if c_obj:
+                new_country = c_obj.name
+        except Exception:
+            pass
+
+    # 2. Resolve timezone if missing
+    if not new_timezone:
+        if info_timezone:
+            new_timezone = info_timezone
+        elif city_name and new_country_code:
+            try:
+                ad = airportsdata.load('ICAO')
+                for ap in ad.values():
+                    if ap.get('city', '').lower() == city_name.lower() and ap.get('country', '').lower() == new_country_code.lower():
+                        if ap.get('tz'):
+                            new_timezone = ap.get('tz')
+                            break
+                if not new_timezone:
+                    ad_iata = airportsdata.load('IATA')
+                    for ap in ad_iata.values():
+                        if ap.get('city', '').lower() == city_name.lower() and ap.get('country', '').lower() == new_country_code.lower():
+                            if ap.get('tz'):
+                                new_timezone = ap.get('tz')
+                                break
+            except Exception:
+                pass
+                
+    # 3. Resolve continent if missing
+    if not new_continent and new_timezone:
+        new_continent = get_continent_from_tz(new_timezone)
+        
+    # Write back any empty fields
+    updates = []
+    params = []
+    
+    if (not country or country.strip() == "") and new_country:
+        updates.append("country = ?")
+        params.append(new_country)
+    if (not country_code or country_code.strip() == "") and new_country_code:
+        updates.append("country_code = ?")
+        params.append(new_country_code)
+    if (not timezone or timezone.strip() == "") and new_timezone:
+        updates.append("timezone = ?")
+        params.append(new_timezone)
+    if (not continent or continent.strip() == "") and new_continent:
+        updates.append("continent = ?")
+        params.append(new_continent)
+        
+    if updates:
+        params.extend([city_id, uid])
+        conn.execute(f"UPDATE cities SET {', '.join(updates)} WHERE id = ? AND user_id = ?", params)
+        return True, f"Updated fields: {', '.join([u.split(' =')[0] for u in updates])}"
+        
+    return True, "No empty fields need updating"
+
+
+def _update_airport_logic(id, conn):
+    """Helper to update single airport with robust matching and cross-validation."""
+    import airportsdata
+    import pycountry
+
+    uid = g.user['id']
+    cur = conn.execute("SELECT id, name, iata_code, icao_code, city_id, lat, lon, timezone FROM airports WHERE id = ? AND user_id = ?", (id, uid))
+    row = cur.fetchone()
+    if not row:
+        return False, "Airport not found"
+        
+    db_name, db_iata, db_icao, db_city_id, db_lat, db_lon, db_tz = row[1], row[2], row[3], row[4], row[5], row[6], row[7]
+    
+    info = None
+    
+    # 1. Look up standard airport data and cross-validate if both IATA and ICAO are present
+    if db_icao and db_iata:
+        ad_icao = airportsdata.load('ICAO')
+        ad_iata = airportsdata.load('IATA')
+        
+        info_icao = ad_icao.get(db_icao.upper())
+        info_iata = ad_iata.get(db_iata.upper())
+        
+        if info_icao and info_iata:
+            # Check for mismatch
+            if info_icao.get('iata', '').upper() != db_iata.upper() or info_iata.get('icao', '').upper() != db_icao.upper():
+                return False, f"IATA与ICAO不匹配: 数据库中为 IATA={db_iata}/ICAO={db_icao}，而标准库中 ICAO={db_icao} 对应 IATA={info_icao.get('iata')}，IATA={db_iata} 对应 ICAO={info_iata.get('icao')}"
+            info = info_icao
+        elif info_icao:
+            if info_icao.get('iata', '').upper() != db_iata.upper():
+                return False, f"IATA与ICAO不匹配: 数据库中为 IATA={db_iata}/ICAO={db_icao}，而标准库中 ICAO={db_icao} 对应 IATA={info_icao.get('iata')}"
+            info = info_icao
+        elif info_iata:
+            if info_iata.get('icao', '').upper() != db_icao.upper():
+                return False, f"IATA与ICAO不匹配: 数据库中为 IATA={db_iata}/ICAO={db_icao}，而标准库中 IATA={db_iata} 对应 ICAO={info_iata.get('icao')}"
+            info = info_iata
         else:
-            # Fallback: Check Legacy (Name match, Code Null) -> Update it
-            cur = conn.execute("SELECT id, country_code FROM cities WHERE name = ? AND user_id = ?", (city_name, uid))
-            matches = cur.fetchall()
-            if len(matches) == 1 and not matches[0][1]:
-                # Legacy Update
-                city_id = matches[0][0]
-                conn.execute("UPDATE cities SET country_code = ?, timezone = ?, continent = ? WHERE id = ? AND user_id = ?", 
-                             (country_code, tz, get_continent_from_tz(tz), city_id, uid))
-            else:
-                # Create New
-                cur2 = conn.execute("INSERT INTO cities (user_id, name, country, country_code, timezone, continent) VALUES (?, ?, ?, ?, ?, ?)",
-                            (uid, city_name, country_code, country_code, tz, get_continent_from_tz(tz)))
-                city_id = cur2.lastrowid
-        
-        conn.execute("UPDATE airports SET city_id = ? WHERE id = ? AND user_id = ?", (city_id, id, uid))
-        updated_fields.append('city_id')
+            return False, "标准库中未找到对应的IATA或ICAO机场数据"
+    elif db_icao:
+        ad_icao = airportsdata.load('ICAO')
+        info = ad_icao.get(db_icao.upper())
+        if not info:
+            return False, f"标准库中找不到 ICAO={db_icao} 的机场数据"
+    elif db_iata:
+        ad_iata = airportsdata.load('IATA')
+        info = ad_iata.get(db_iata.upper())
+        if not info:
+            return False, f"标准库中找不到 IATA={db_iata} 的机场数据"
+    else:
+        return False, "IATA与ICAO代码皆为空，无法查询"
+
+    # 2. Process City mapping and cascading updates
+    city_name = info.get('city')
+    country_code = info.get('country') # 2-letter country code
+    tz = info.get('tz')
     
-    return True, updated_fields
+    city_id = db_city_id
+    
+    if city_name:
+        # Match city by name and user_id
+        cur = conn.execute("SELECT id FROM cities WHERE name = ? AND user_id = ?", (city_name, uid))
+        city_row = cur.fetchone()
+        
+        if city_row:
+            city_id = city_row[0]
+        else:
+            # Create new city
+            country_name = country_code
+            try:
+                c_obj = pycountry.countries.get(alpha_2=country_code.upper())
+                if c_obj:
+                    country_name = c_obj.name
+            except Exception:
+                pass
+                
+            cur_insert = conn.execute(
+                "INSERT INTO cities (user_id, name, country, country_code, timezone, continent) VALUES (?, ?, ?, ?, ?, ?)",
+                (uid, city_name, country_name, country_code, tz, get_continent_from_tz(tz))
+            )
+            city_id = cur_insert.lastrowid
+            
+        # Update any empty fields in the city record (cascading update)
+        _update_city_fields_logic(city_id, conn, uid, info_country_code=country_code, info_timezone=tz)
+
+    # 3. Update empty fields in the airport record
+    updates = []
+    params = []
+    
+    if (not db_name or db_name.strip() == "") and info.get('name'):
+        updates.append("name = ?")
+        params.append(clean_airport_name(info['name']))
+    if (not db_iata or db_iata.strip() == "") and info.get('iata'):
+        updates.append("iata_code = ?")
+        params.append(info['iata'])
+    if (not db_icao or db_icao.strip() == "") and info.get('icao'):
+        updates.append("icao_code = ?")
+        params.append(info['icao'])
+    if db_lat is None and info.get('lat') is not None:
+        updates.append("lat = ?")
+        params.append(info['lat'])
+    if db_lon is None and info.get('lon') is not None:
+        updates.append("lon = ?")
+        params.append(info['lon'])
+    if (not db_tz or db_tz.strip() == "") and info.get('tz'):
+        updates.append("timezone = ?")
+        params.append(info['tz'])
+    if not db_city_id and city_id:
+        updates.append("city_id = ?")
+        params.append(city_id)
+        
+    if updates:
+        params.extend([id, uid])
+        conn.execute(f"UPDATE airports SET {', '.join(updates)} WHERE id = ? AND user_id = ?", params)
+        return True, [u.split(" =")[0].strip() for u in updates]
+        
+    return True, []
+
 
 # --- API Routes for Automation ---
 @app.route('/api/airports/<int:id>/update', methods=['POST'])
@@ -923,14 +1159,21 @@ def batch_update_airports():
 
 def _update_airline_logic(id, conn):
     """Helper to update single airline IATA from ICAO if possible."""
-    cur = conn.execute("SELECT icao_code, iata_code FROM airlines WHERE id = ? AND user_id = ?", (id, g.user['id']))
+    import airlines_data
+    uid = g.user['id']
+    cur = conn.execute("SELECT icao_code, iata_code FROM airlines WHERE id = ? AND user_id = ?", (id, uid))
     row = cur.fetchone()
     if not row or not row[0]: return False, "No ICAO code"
-    icao = row[0].upper()
+    icao, iata = row
     
+    # Only complete if IATA code is empty/missing
+    if iata and iata.strip():
+        return True, "IATA already exists"
+        
+    icao = icao.upper()
     idata = airlines_data.AIRLINES_ICAO_TO_IATA.get(icao)
     if idata:
-        conn.execute("UPDATE airlines SET iata_code = ? WHERE id = ? AND user_id = ?", (idata, id, g.user['id']))
+        conn.execute("UPDATE airlines SET iata_code = ? WHERE id = ? AND user_id = ?", (idata, id, uid))
         return True, "Updated"
     
     return False, "ICAO code not found in database"
@@ -942,7 +1185,7 @@ def update_airline(id):
         conn = database.get_db()
         success, res = _update_airline_logic(id, conn)
         conn.commit()
-        if success: return jsonify({'message': 'Updated'})
+        if success: return jsonify({'message': res})
         else: return jsonify({'error': res}), 400
     except Exception as e:
         return safe_jsonify_error(e)
@@ -972,24 +1215,10 @@ def batch_update_airlines():
 def update_city(id):
     try:
         conn = database.get_db()
-        cur = conn.execute("SELECT name, country FROM cities WHERE id = ? AND user_id = ?", (id, g.user['id']))
-        row = cur.fetchone()
-        if not row: return jsonify({'error': 'City not found'}), 404
-        
-        city_name, country_name = row
-        if not country_name: return jsonify({'error': 'Country name missing'}), 400
-
-        try:
-            countries = pycountry.countries.search_fuzzy(country_name)
-            if countries:
-                code = countries[0].alpha_2
-                conn.execute("UPDATE cities SET country_code = ? WHERE id = ? AND user_id = ?", (code, id, g.user['id']))
-                conn.commit()
-                return jsonify({'message': 'Updated', 'code': code})
-            else:
-                 return jsonify({'error': 'Country not found'}), 404
-        except LookupError:
-             return jsonify({'error': 'Lookup failed'}), 404
+        success, res = _update_city_fields_logic(id, conn, g.user['id'])
+        conn.commit()
+        if success: return jsonify({'message': res})
+        else: return jsonify({'error': res}), 400
     except Exception as e:
         return safe_jsonify_error(e)
 
@@ -998,23 +1227,17 @@ def update_city(id):
 def batch_update_cities():
     try:
         conn = database.get_db()
-        cur = conn.execute("SELECT id, country FROM cities WHERE (country_code IS NULL OR country_code = '') AND user_id = ?", (g.user['id'],))
-        rows = cur.fetchall()
+        # Find cities that have at least one empty metadata field
+        cur = conn.execute("SELECT id FROM cities WHERE (country_code IS NULL OR country_code = '' OR country IS NULL OR country = '' OR timezone IS NULL OR timezone = '' OR continent IS NULL OR continent = '') AND user_id = ?", (g.user['id'],))
+        ids = [row[0] for row in cur.fetchall()]
         
         count = 0
-        for id, country_name in rows:
-            if not country_name: continue
-            try:
-                countries = pycountry.countries.search_fuzzy(country_name)
-                if countries:
-                    code = countries[0].alpha_2
-                    conn.execute("UPDATE cities SET country_code = ? WHERE id = ? AND user_id = ?", (code, id, g.user['id']))
-                    count += 1
-            except:
-                continue
+        for cid in ids:
+            success, _ = _update_city_fields_logic(cid, conn, g.user['id'])
+            if success: count += 1
                 
         conn.commit()
-        return jsonify({'message': f'Updated {count} cities.'})
+        return jsonify({'message': f'Processed {len(ids)} cities, Updated {count}.'})
     except Exception as e:
         return safe_jsonify_error(e)
 
@@ -1050,6 +1273,82 @@ def fetch_aeroapi_data(ident, start_str, end_str):
 
     data = response.json()
     return data.get('flights', [])
+
+def _timezone_or_utc(tz_name):
+    try:
+        return pytz.timezone(tz_name) if tz_name else pytz.utc
+    except pytz.UnknownTimeZoneError:
+        return pytz.utc
+
+def _as_utc(dt):
+    if dt.tzinfo is None:
+        return pytz.utc.localize(dt)
+    return dt.astimezone(pytz.utc)
+
+def build_aeroapi_departure_day_window(f_date, origin_tz_name, now_utc=None):
+    origin_tz = _timezone_or_utc(origin_tz_name)
+    departure_date = dateutil.parser.parse(f_date).date()
+    local_start = origin_tz.localize(datetime.combine(departure_date, time.min))
+    local_end = local_start + timedelta(days=1)
+
+    start_utc = local_start.astimezone(pytz.utc)
+    end_utc = local_end.astimezone(pytz.utc)
+
+    now_utc = _as_utc(now_utc or datetime.utcnow())
+    future_limit = now_utc + timedelta(days=2)
+    if end_utc > future_limit:
+        end_utc = future_limit
+    if end_utc <= start_utc:
+        raise ValueError("Flight date exceeds AeroAPI future limit")
+
+    return (
+        start_utc.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        end_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+    )
+
+def flight_matches_departure_local_date(api_flight, target_date_str, origin_tz_name):
+    t_str = api_flight.get('scheduled_out') or api_flight.get('actual_out')
+    if not t_str:
+        return False
+
+    origin_tz = _timezone_or_utc(origin_tz_name)
+    target_date = dateutil.parser.parse(target_date_str).date()
+    departure_utc = _as_utc(dateutil.parser.parse(t_str))
+    return departure_utc.astimezone(origin_tz).date() == target_date
+
+def _get_airport_timezone(conn, airport_id, uid):
+    if not airport_id:
+        return None
+    row = conn.execute(
+        "SELECT timezone FROM airports WHERE id = ? AND user_id = ?",
+        (airport_id, uid)
+    ).fetchone()
+    return row[0] if row and row[0] else None
+
+def clean_airport_name(name):
+    if not name:
+        return name
+
+    cleaned = re.sub(r'\s+', ' ', str(name)).strip()
+    suffixes = [
+        r'\bInternational\s+Airport\b',
+        r'\bIntl\.?\s+Airport\b',
+        r'\bRegional\s+Airport\b',
+        r'\bMunicipal\s+Airport\b',
+        r'\bDomestic\s+Airport\b',
+        r'\bAirport\b',
+        r'\bAirfield\b',
+        r'\bAerodrome\b',
+    ]
+
+    for suffix in suffixes:
+        updated = re.sub(rf'\s*{suffix}\s*$', '', cleaned, flags=re.IGNORECASE).strip()
+        if updated != cleaned:
+            cleaned = updated
+            break
+
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip(' ,-')
+    return cleaned or name
 
 def get_or_create_airport(icao, iata, conn):
     uid = g.user['id']
@@ -1122,7 +1421,7 @@ def get_or_create_airport(icao, iata, conn):
         cur = conn.execute('''
             INSERT INTO airports (user_id, city_id, name, iata_code, icao_code, lat, lon, timezone)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (uid, city_id, info['name'], info.get('iata'), info.get('icao'), info['lat'], info['lon'], info.get('tz')))
+        ''', (uid, city_id, clean_airport_name(info['name']), info.get('iata'), info.get('icao'), info['lat'], info['lon'], info.get('tz')))
         return cur.lastrowid
     
     return None
@@ -1433,9 +1732,12 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
         return {'message': 'Skipped, data exists'}
          
     f_num_clean = f_num.replace(' ', '')
-    f_dt = dateutil.parser.parse(f_date)
-    start_window = (f_dt - timedelta(days=1)).strftime('%Y-%m-%dT%H:%M:%SZ')
-    end_window = (f_dt + timedelta(days=2)).strftime('%Y-%m-%dT%H:%M:%SZ') 
+    origin_tz_name = _get_airport_timezone(conn, flight[2], uid)
+
+    try:
+        start_window, end_window = build_aeroapi_departure_day_window(f_date, origin_tz_name)
+    except ValueError as e:
+        return {'error': str(e)}
     
     try:
         raw_flights = fetch_aeroapi_data(f_num_clean, start_window, end_window)
@@ -1451,16 +1753,26 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
     best_match = None
     closest_diff = float('inf')
     
+    existing_std = flight[4]
+    if existing_std:
+        reference_local_time = dateutil.parser.parse(existing_std).time()
+    else:
+        reference_local_time = time(12, 0)
+
     for f in raw_flights:
+        if not flight_matches_departure_local_date(f, f_date, origin_tz_name):
+            continue
+
         t_str = f.get('scheduled_out') or f.get('actual_out')
-        if not t_str: continue
-        
-        t = dateutil.parser.parse(t_str).replace(tzinfo=None) 
-        diff = abs((t - f_dt).total_seconds())
-        if diff < 36 * 3600:
-            if diff < closest_diff:
-                closest_diff = diff
-                best_match = f
+        t_utc = _as_utc(dateutil.parser.parse(t_str))
+        t_local = t_utc.astimezone(_timezone_or_utc(origin_tz_name))
+        reference_local = _timezone_or_utc(origin_tz_name).localize(
+            datetime.combine(t_local.date(), reference_local_time)
+        )
+        diff = abs((t_local - reference_local).total_seconds())
+        if diff < closest_diff:
+            closest_diff = diff
+            best_match = f
             
     if not best_match:
         if force: return {'error': 'No matching flight in time window'}
@@ -1613,6 +1925,160 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
     
     return {'success': True, 'fields_updated': len(update_fields), 'debug_match': best_match.get('ident')}
 
+def _load_flight_for_aeroapi(conn, uid, flight_id):
+    cur = conn.execute("SELECT flight_number, date, origin_airport_id, dest_airport_id, std, atd, sta, ata, registration, airline_id, aircraft_model_id, distance, duration_scheduled, duration_actual, origin_terminal, dest_terminal FROM flights WHERE id = ? AND user_id = ?", (flight_id, uid))
+    return cur.fetchone()
+
+def _local_aeroapi_values(flight):
+    return {
+        'std': flight[4],
+        'atd': flight[5],
+        'sta': flight[6],
+        'ata': flight[7],
+        'registration': flight[8],
+        'distance': flight[11],
+        'duration_scheduled': flight[12],
+        'duration_actual': flight[13],
+        'origin_terminal': flight[14],
+        'dest_terminal': flight[15],
+    }
+
+def _format_aeroapi_terminal(t):
+    if t and str(t).isdigit():
+        return f"T{t}"
+    return t
+
+def _find_aeroapi_match_for_flight(flight, conn, uid):
+    f_num = flight[0]
+    f_date = flight[1]
+
+    if not f_num or not f_date:
+        raise ValueError('Missing flight number or date')
+
+    origin_tz_name = _get_airport_timezone(conn, flight[2], uid)
+    start_window, end_window = build_aeroapi_departure_day_window(f_date, origin_tz_name)
+    raw_flights = fetch_aeroapi_data(f_num.replace(' ', ''), start_window, end_window)
+    if not raw_flights:
+        raise ValueError('No data found in AeroAPI')
+
+    existing_std = flight[4]
+    reference_local_time = dateutil.parser.parse(existing_std).time() if existing_std else time(12, 0)
+    origin_tz = _timezone_or_utc(origin_tz_name)
+
+    best_match = None
+    closest_diff = float('inf')
+    for f in raw_flights:
+        if not flight_matches_departure_local_date(f, f_date, origin_tz_name):
+            continue
+
+        t_str = f.get('scheduled_out') or f.get('actual_out')
+        if not t_str:
+            continue
+        t_utc = _as_utc(dateutil.parser.parse(t_str))
+        t_local = t_utc.astimezone(origin_tz)
+        reference_local = origin_tz.localize(datetime.combine(t_local.date(), reference_local_time))
+        diff = abs((t_local - reference_local).total_seconds())
+        if diff < closest_diff:
+            closest_diff = diff
+            best_match = f
+
+    if not best_match:
+        raise ValueError('No matching flight in time window')
+    return best_match
+
+def _aeroapi_remote_values(best_match):
+    api_std = best_match.get('scheduled_out')
+    api_atd = best_match.get('actual_out')
+    api_sta = best_match.get('scheduled_in')
+    api_ata = best_match.get('actual_in')
+    api_origin_tz = best_match.get('origin', {}).get('timezone')
+    api_dest_tz = best_match.get('destination', {}).get('timezone')
+
+    def to_local_str(utc_str, tz_name):
+        if not utc_str:
+            return None
+        try:
+            dt_utc = dateutil.parser.parse(utc_str)
+            if tz_name:
+                try:
+                    return dt_utc.astimezone(pytz.timezone(tz_name)).strftime('%Y-%m-%d %H:%M:%S')
+                except Exception:
+                    return dt_utc.strftime('%Y-%m-%d %H:%M:%S')
+            return dt_utc.strftime('%Y-%m-%d %H:%M:%S')
+        except Exception:
+            return utc_str
+
+    dur_sched = None
+    if api_std and api_sta:
+        try:
+            dur_sched = int((dateutil.parser.parse(api_sta) - dateutil.parser.parse(api_std)).total_seconds() / 60)
+        except Exception:
+            pass
+
+    dur_actual = None
+    if api_atd and api_ata:
+        try:
+            dur_actual = int((dateutil.parser.parse(api_ata) - dateutil.parser.parse(api_atd)).total_seconds() / 60)
+        except Exception:
+            pass
+
+    api_dist = best_match.get('route_distance')
+    if api_dist is not None:
+        try:
+            api_dist = int(api_dist * 1.60934)
+        except Exception:
+            pass
+
+    return {
+        'std': to_local_str(api_std, api_origin_tz),
+        'atd': to_local_str(api_atd, api_origin_tz),
+        'sta': to_local_str(api_sta, api_dest_tz),
+        'ata': to_local_str(api_ata, api_dest_tz),
+        'registration': best_match.get('registration'),
+        'distance': api_dist,
+        'duration_scheduled': dur_sched,
+        'duration_actual': dur_actual,
+        'origin_terminal': _format_aeroapi_terminal(best_match.get('terminal_origin')),
+        'dest_terminal': _format_aeroapi_terminal(best_match.get('terminal_destination')),
+    }
+
+def _ensure_terminal_in_db(conn, uid, airport_id, term):
+    if not airport_id or not term:
+        return
+    cur = conn.execute("SELECT terminals FROM airports WHERE id = ? AND user_id = ?", (airport_id, uid))
+    row = cur.fetchone()
+    if not row:
+        return
+    terms_list = [t.strip() for t in (row[0] or '').split(',') if t.strip()]
+    if term not in terms_list:
+        terms_list.append(term)
+        terms_list.sort()
+        conn.execute("UPDATE airports SET terminals = ? WHERE id = ? AND user_id = ?", (", ".join(terms_list), airport_id, uid))
+
+def _build_aeroapi_preview(flight_id):
+    conn = database.get_db()
+    uid = g.user['id']
+    flight = _load_flight_for_aeroapi(conn, uid, flight_id)
+    if not flight:
+        return {'error': 'Flight not found'}
+
+    try:
+        best_match = _find_aeroapi_match_for_flight(flight, conn, uid)
+    except ValueError as e:
+        return {'error': str(e)}
+
+    local_values = _local_aeroapi_values(flight)
+    remote_values = _aeroapi_remote_values(best_match)
+    return {
+        'success': True,
+        'debug_match': best_match.get('ident'),
+        'local': local_values,
+        'remote': remote_values,
+        'diffs': build_aeroapi_field_diffs(local_values, remote_values),
+        'origin_airport_id': flight[2],
+        'dest_airport_id': flight[3],
+    }
+
 import pycountry
 import traceback
 
@@ -1622,6 +2088,58 @@ def update_flight_aeroapi(flight_id):
     try:
         result = update_single_flight_from_aeroapi(flight_id, force=True)
         return jsonify(result)
+    except Exception as e:
+        traceback.print_exc()
+        return safe_jsonify_error(e)
+
+@app.route('/api/flights/<int:flight_id>/aeroapi_preview', methods=['POST'])
+@login_required
+def preview_flight_aeroapi(flight_id):
+    try:
+        return jsonify(_build_aeroapi_preview(flight_id))
+    except Exception as e:
+        traceback.print_exc()
+        return safe_jsonify_error(e)
+
+@app.route('/api/flights/<int:flight_id>/aeroapi_apply', methods=['POST'])
+@login_required
+def apply_flight_aeroapi(flight_id):
+    try:
+        data = request.json or {}
+        selected_fields = [
+            field for field in data.get('fields', [])
+            if field in AEROAPI_CONFIRM_FIELD_NAMES
+        ]
+        if not selected_fields:
+            return jsonify({'message': 'No fields selected', 'fields_updated': 0})
+
+        preview = _build_aeroapi_preview(flight_id)
+        if preview.get('error'):
+            return jsonify(preview)
+
+        remote_values = preview['remote']
+        update_fields = []
+        update_values = []
+        for field in selected_fields:
+            value = remote_values.get(field)
+            if value is not None:
+                update_fields.append(f"{field} = ?")
+                update_values.append(value)
+
+        if not update_fields:
+            return jsonify({'message': 'No selected AeroAPI values available', 'fields_updated': 0})
+
+        conn = database.get_db()
+        uid = g.user['id']
+        if 'origin_terminal' in selected_fields:
+            _ensure_terminal_in_db(conn, uid, preview.get('origin_airport_id'), remote_values.get('origin_terminal'))
+        if 'dest_terminal' in selected_fields:
+            _ensure_terminal_in_db(conn, uid, preview.get('dest_airport_id'), remote_values.get('dest_terminal'))
+
+        update_values.extend([flight_id, uid])
+        conn.execute(f"UPDATE flights SET {', '.join(update_fields)} WHERE id = ? AND user_id = ?", update_values)
+        conn.commit()
+        return jsonify({'success': True, 'fields_updated': len(update_fields), 'fields': selected_fields})
     except Exception as e:
         traceback.print_exc()
         return safe_jsonify_error(e)

@@ -94,7 +94,9 @@
                 <div class="view-header flights-header">
                     <h2>Flight History</h2>
                     <div class="view-actions flights-actions">
-                        <button class="btn btn-sm btn-secondary" onclick="openImportFlightsModal()">
+                        <button class="btn btn-sm btn-secondary" disabled
+                            title="CSV import is currently disabled"
+                            style="opacity: 0.5; cursor: not-allowed;">
                             <i class="fa-solid fa-file-upload"></i> Import CSV
                         </button>
                         <button class="btn btn-sm btn-secondary" onclick="updateMissingFlights()"
@@ -166,12 +168,14 @@
                         style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center; justify-content: space-between;">
                         <div style="display:flex; gap:10px;">
                             <button class="btn btn-sm btn-secondary" onclick="openAddDatasetModal()">Add New</button>
-                            <button class="btn btn-sm btn-secondary" onclick="openImportModal()">
+                            <button class="btn btn-sm btn-secondary" disabled
+                                title="CSV import is currently disabled"
+                                style="opacity: 0.5; cursor: not-allowed;">
                                 <i class="fa-solid fa-file-upload"></i> Import CSV
                             </button>
-                            <button class="btn btn-sm btn-secondary"
-                                style="color: var(--danger); border-color: var(--danger);"
-                                onclick="clearCurrentDataset()">
+                            <button class="btn btn-sm btn-secondary" disabled
+                                title="Clear is currently disabled"
+                                style="color: var(--danger); border-color: var(--danger); opacity: 0.5; cursor: not-allowed;">
                                 <i class="fa-solid fa-trash-can"></i> Clear
                             </button>
                             <div id="dataset-dynamic-actions" style="display:inline-block;"></div>

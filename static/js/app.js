@@ -404,41 +404,24 @@ async function loadDataset(datasetKey) {
     const dynamicContainer = document.getElementById('dataset-dynamic-actions');
     if (dynamicContainer) {
         dynamicContainer.innerHTML = '';
-        if (datasetKey === 'airports') {
+        const addDisabledAutoFillButton = (html) => {
             const btn = document.createElement('button');
             btn.className = 'btn btn-sm btn-info';
-            btn.innerHTML = '<i class="fas fa-magic"></i> Auto-Fill';
-            btn.onclick = async () => {
-                if (!confirm('Auto-fill missing ICAO/City data for airports?')) return;
-                const res = await API.post('airports/batch_update', {});
-                alert(res.message || res.error);
-                loadDataset('airports');
-            };
+            btn.innerHTML = html;
+            btn.disabled = true;
+            btn.title = 'Auto-fill is currently disabled';
+            btn.style.opacity = '0.5';
+            btn.style.cursor = 'not-allowed';
             dynamicContainer.appendChild(btn);
+        };
+        if (datasetKey === 'airports') {
+            addDisabledAutoFillButton('<i class="fas fa-magic"></i> Auto-Fill');
         }
         if (datasetKey === 'cities') {
-            const btn = document.createElement('button');
-            btn.className = 'btn btn-sm btn-info';
-            btn.innerHTML = '<i class="fas fa-magic"></i> Auto-Fill Codes';
-            btn.onclick = async () => {
-                if (!confirm('Auto-fill missing Country Codes?')) return;
-                const res = await API.post('cities/batch_update', {});
-                alert(res.message || res.error);
-                loadDataset('cities');
-            };
-            dynamicContainer.appendChild(btn);
+            addDisabledAutoFillButton('<i class="fas fa-magic"></i> Auto-Fill Codes');
         }
         if (datasetKey === 'airlines') {
-            const btn = document.createElement('button');
-            btn.className = 'btn btn-sm btn-info';
-            btn.innerHTML = '<i class="fas fa-magic"></i> Auto-Fill IATA';
-            btn.onclick = async () => {
-                if (!confirm('Auto-fill missing IATA codes from ICAO?')) return;
-                const res = await API.post('airlines/batch_update', {});
-                alert(res.message || res.error);
-                loadDataset('airlines');
-            };
-            dynamicContainer.appendChild(btn);
+            addDisabledAutoFillButton('<i class="fas fa-magic"></i> Auto-Fill IATA');
         }
     }
 
@@ -1167,16 +1150,102 @@ function renderFlights() {
 }
 
 async function updateFlightFromAeroAPI(id) {
-    if (!confirm('Fill in missing flight details from AeroAPI?')) return;
     try {
-        const res = await API.post(`flights/${id}/update_aeroapi`, {});
-        if (res.success) {
-            alert(`Updated ${res.fields_updated} fields.`);
-            loadFlights();
-        } else {
-            alert('Update failed: ' + (res.error || res.message));
+        const preview = await API.post(`flights/${id}/aeroapi_preview`, {});
+        if (preview.error) {
+            alert('Update failed: ' + preview.error);
+            return;
         }
+
+        openAeroApiDiffModal(id, preview);
     } catch (e) { alert('Error: ' + e); }
+}
+
+function openAeroApiDiffModal(id, preview) {
+    const diffs = preview.diffs || [];
+    const selectable = diffs.filter(d => d.status !== 'same');
+    if (diffs.length === 0 || selectable.length === 0) {
+        alert('No AeroAPI differences found.');
+        return;
+    }
+
+    openModal('Review AeroAPI Updates', () => {
+        const div = document.createElement('div');
+        const summary = document.createElement('p');
+        summary.style.marginTop = '0';
+        summary.textContent = `Matched flight: ${preview.debug_match || 'Unknown'}`;
+        div.appendChild(summary);
+
+        const table = document.createElement('table');
+        table.className = 'data-table';
+        table.style.fontSize = '0.85rem';
+        table.innerHTML = `
+            <thead>
+                <tr>
+                    <th>Field</th>
+                    <th>Local</th>
+                    <th>AeroAPI</th>
+                    <th>Replace</th>
+                </tr>
+            </thead>
+        `;
+        const tbody = document.createElement('tbody');
+
+        const valueText = (value) => {
+            if (value === null || value === undefined || value === '') return '—';
+            return String(value);
+        };
+
+        diffs.forEach(diff => {
+            const tr = document.createElement('tr');
+            const fieldTd = document.createElement('td');
+            const localTd = document.createElement('td');
+            const remoteTd = document.createElement('td');
+            const actionTd = document.createElement('td');
+
+            fieldTd.textContent = diff.label || diff.field;
+            localTd.textContent = valueText(diff.local);
+            remoteTd.textContent = valueText(diff.remote);
+
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.name = 'aeroapi-field';
+            cb.value = diff.field;
+            cb.checked = !!diff.default_selected;
+            if (diff.status === 'same') cb.disabled = true;
+            actionTd.appendChild(cb);
+
+            if (diff.status === 'conflict') {
+                tr.style.backgroundColor = '#fff8e1';
+            } else if (diff.status === 'missing') {
+                tr.style.backgroundColor = '#eef7ee';
+            }
+
+            tr.appendChild(fieldTd);
+            tr.appendChild(localTd);
+            tr.appendChild(remoteTd);
+            tr.appendChild(actionTd);
+            tbody.appendChild(tr);
+        });
+
+        table.appendChild(tbody);
+        div.appendChild(table);
+        return div;
+    }, async (data) => {
+        const checked = Array.from(document.querySelectorAll('input[name="aeroapi-field"]:checked')).map(cb => cb.value);
+        if (checked.length === 0) {
+            alert('No fields selected.');
+            return false;
+        }
+
+        const res = await API.post(`flights/${id}/aeroapi_apply`, { fields: checked });
+        if (res.error) {
+            alert('Update failed: ' + res.error);
+            return false;
+        }
+        alert(`Updated ${res.fields_updated || 0} fields.`);
+        loadFlights();
+    });
 }
 
 async function updateMissingFlights() {
@@ -1490,7 +1559,11 @@ async function openEditFlightModal(item) {
 
         return form;
     }, async (data) => {
-        await API.put('flights', item.id, data);
+        const res = await API.put('flights', item.id, data);
+        if (res.error) {
+            alert('Save failed: ' + res.error);
+            return false;
+        }
         loadFlights();
     });
 }
