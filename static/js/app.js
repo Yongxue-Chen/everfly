@@ -1196,15 +1196,118 @@ async function updateFlightFromAeroAPI(id) {
             alert('Update failed: ' + preview.error);
             return;
         }
+        if (preview.ambiguous) {
+            openAeroApiCandidateModal(id, preview.candidates || []);
+            return;
+        }
 
         openAeroApiDiffModal(id, preview);
     } catch (e) { alert('Error: ' + e); }
 }
 
+function openAeroApiCandidateModal(id, candidates) {
+    if (!candidates.length) {
+        alert('No AeroAPI candidates found.');
+        return;
+    }
+
+    openModal('Select AeroAPI Flight', () => {
+        const div = document.createElement('div');
+        const table = document.createElement('table');
+        table.className = 'data-table';
+        table.style.fontSize = '0.85rem';
+        table.innerHTML = `
+            <thead>
+                <tr>
+                    <th></th>
+                    <th>Flight</th>
+                    <th>Route</th>
+                    <th>Departure</th>
+                    <th>Arrival</th>
+                    <th>Reg</th>
+                </tr>
+            </thead>
+        `;
+        const tbody = document.createElement('tbody');
+
+        const valueText = (value) => {
+            if (value === null || value === undefined || value === '') return '-';
+            return String(value);
+        };
+        const routeText = (candidate) => {
+            const origin = candidate.origin_iata || candidate.origin_code || '?';
+            const dest = candidate.destination_iata || candidate.destination_code || '?';
+            return `${origin} → ${dest}`;
+        };
+        const timeText = (scheduled, actual) => {
+            if (scheduled && actual && scheduled !== actual) return `${scheduled} / ${actual}`;
+            return scheduled || actual || '-';
+        };
+
+        candidates.forEach((candidate, position) => {
+            const tr = document.createElement('tr');
+            const radioTd = document.createElement('td');
+            const radio = document.createElement('input');
+            radio.type = 'radio';
+            radio.name = 'aeroapi-candidate';
+            radio.value = candidate.index;
+            radio.required = true;
+            if (position === 0) radio.checked = true;
+            radioTd.appendChild(radio);
+
+            const flightTd = document.createElement('td');
+            flightTd.textContent = candidate.ident_iata || candidate.ident || candidate.ident_icao || 'Unknown';
+            const routeTd = document.createElement('td');
+            routeTd.textContent = routeText(candidate);
+            const depTd = document.createElement('td');
+            depTd.textContent = timeText(candidate.scheduled_out, candidate.actual_out);
+            const arrTd = document.createElement('td');
+            arrTd.textContent = timeText(candidate.scheduled_in, candidate.actual_in);
+            const regTd = document.createElement('td');
+            regTd.textContent = valueText(candidate.registration);
+
+            tr.onclick = () => { radio.checked = true; };
+            tr.appendChild(radioTd);
+            tr.appendChild(flightTd);
+            tr.appendChild(routeTd);
+            tr.appendChild(depTd);
+            tr.appendChild(arrTd);
+            tr.appendChild(regTd);
+            tbody.appendChild(tr);
+        });
+
+        table.appendChild(tbody);
+        div.appendChild(table);
+        return div;
+    }, async () => {
+        const selected = document.querySelector('input[name="aeroapi-candidate"]:checked');
+        if (!selected) {
+            alert('Select a flight candidate.');
+            return false;
+        }
+
+        const candidateIndex = Number(selected.value);
+        const preview = await API.post(`flights/${id}/aeroapi_preview`, { candidate_index: candidateIndex });
+        if (preview.error) {
+            alert('Update failed: ' + preview.error);
+            return false;
+        }
+        if (preview.ambiguous) {
+            alert('Select one AeroAPI flight before reviewing fields.');
+            return false;
+        }
+
+        closeModal();
+        openAeroApiDiffModal(id, preview);
+        return false;
+    });
+}
+
 function openAeroApiDiffModal(id, preview) {
     const diffs = preview.diffs || [];
+    const relatedDiffs = preview.related_diffs || [];
     const selectable = diffs.filter(d => d.status !== 'same');
-    if (diffs.length === 0 || selectable.length === 0) {
+    if ((diffs.length === 0 || selectable.length === 0) && relatedDiffs.length === 0) {
         alert('No AeroAPI differences found.');
         return;
     }
@@ -1268,17 +1371,40 @@ function openAeroApiDiffModal(id, preview) {
             tbody.appendChild(tr);
         });
 
+        relatedDiffs.forEach(diff => {
+            const tr = document.createElement('tr');
+            const fieldTd = document.createElement('td');
+            const localTd = document.createElement('td');
+            const remoteTd = document.createElement('td');
+            const actionTd = document.createElement('td');
+
+            fieldTd.textContent = diff.label || diff.field;
+            localTd.textContent = '—';
+            remoteTd.textContent = valueText(diff.remote);
+            actionTd.textContent = 'Auto';
+            tr.style.backgroundColor = '#eef7ee';
+
+            tr.appendChild(fieldTd);
+            tr.appendChild(localTd);
+            tr.appendChild(remoteTd);
+            tr.appendChild(actionTd);
+            tbody.appendChild(tr);
+        });
+
         table.appendChild(tbody);
         div.appendChild(table);
         return div;
     }, async (data) => {
         const checked = Array.from(document.querySelectorAll('input[name="aeroapi-field"]:checked')).map(cb => cb.value);
-        if (checked.length === 0) {
+        if (checked.length === 0 && relatedDiffs.length === 0) {
             alert('No fields selected.');
             return false;
         }
 
-        const res = await API.post(`flights/${id}/aeroapi_apply`, { fields: checked });
+        const res = await API.post(`flights/${id}/aeroapi_apply`, {
+            fields: checked,
+            candidate_index: preview.candidate_index
+        });
         if (res.error) {
             alert('Update failed: ' + res.error);
             return false;
@@ -1401,7 +1527,7 @@ async function openEditFlightModal(item) {
         { key: 'tag_config', label: 'Config', type: 'select', options: [] },
         { key: 'seat_number', label: 'Seat', type: 'text' },
         { key: 'seat_type', label: 'Seat Type', type: 'select', options: ['Window', 'Aisle', 'Middle'] },
-        { key: 'flight_class', label: 'Class', type: 'text' },
+        { key: 'flight_class', label: 'Class', type: 'select', options: ['Economy', 'Premium Economy', 'Business', 'First'] },
         { key: 'note', label: 'Note', type: 'textarea' }
     ];
 

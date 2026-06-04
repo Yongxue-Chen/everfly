@@ -1337,6 +1337,114 @@ def flight_matches_departure_local_date(api_flight, target_date_str, origin_tz_n
     departure_utc = _as_utc(dateutil.parser.parse(t_str))
     return departure_utc.astimezone(origin_tz).date() == target_date
 
+def _airport_code_set(airport):
+    if not airport:
+        return set()
+
+    codes = set()
+    for key in ('code', 'code_iata', 'code_icao', 'iata_code', 'icao_code'):
+        value = airport.get(key)
+        if value:
+            codes.add(str(value).upper())
+    return codes
+
+def _candidate_matches_route(api_flight, origin_codes, dest_codes):
+    if not origin_codes or not dest_codes:
+        return False
+
+    candidate_origin = _airport_code_set(api_flight.get('origin'))
+    candidate_dest = _airport_code_set(api_flight.get('destination'))
+    return bool(candidate_origin & origin_codes) and bool(candidate_dest & dest_codes)
+
+def summarize_aeroapi_candidate(index, api_flight):
+    origin = api_flight.get('origin') or {}
+    dest = api_flight.get('destination') or {}
+    return {
+        'index': index,
+        'ident': api_flight.get('ident'),
+        'ident_iata': api_flight.get('ident_iata'),
+        'ident_icao': api_flight.get('ident_icao'),
+        'operator': api_flight.get('operator'),
+        'scheduled_out': api_flight.get('scheduled_out'),
+        'actual_out': api_flight.get('actual_out'),
+        'scheduled_in': api_flight.get('scheduled_in'),
+        'actual_in': api_flight.get('actual_in'),
+        'origin_code': origin.get('code'),
+        'origin_iata': origin.get('code_iata'),
+        'destination_code': dest.get('code'),
+        'destination_iata': dest.get('code_iata'),
+        'registration': api_flight.get('registration'),
+        'route_distance': api_flight.get('route_distance'),
+        'terminal_origin': _format_aeroapi_terminal(api_flight.get('terminal_origin')),
+        'terminal_destination': _format_aeroapi_terminal(api_flight.get('terminal_destination')),
+    }
+
+def select_aeroapi_candidate(raw_flights, f_date, origin_tz_name, existing_std=None,
+                             origin_codes=None, dest_codes=None, selected_candidate_index=None):
+    origin_codes = {str(c).upper() for c in (origin_codes or set()) if c}
+    dest_codes = {str(c).upper() for c in (dest_codes or set()) if c}
+
+    usable = []
+    for index, api_flight in enumerate(raw_flights):
+        if flight_matches_departure_local_date(api_flight, f_date, origin_tz_name):
+            usable.append((index, api_flight))
+
+    if selected_candidate_index is not None:
+        try:
+            selected_candidate_index = int(selected_candidate_index)
+        except (TypeError, ValueError):
+            raise ValueError('Invalid AeroAPI candidate selection')
+        for index, api_flight in usable:
+            if index == selected_candidate_index:
+                return {
+                    'ambiguous': False,
+                    'match': api_flight,
+                    'candidate_index': index,
+                    'candidates': [summarize_aeroapi_candidate(i, f) for i, f in usable],
+                }
+        raise ValueError('Invalid AeroAPI candidate selection')
+
+    route_matches = [
+        (index, api_flight)
+        for index, api_flight in usable
+        if _candidate_matches_route(api_flight, origin_codes, dest_codes)
+    ]
+    if len(route_matches) == 1:
+        index, api_flight = route_matches[0]
+        return {
+            'ambiguous': False,
+            'match': api_flight,
+            'candidate_index': index,
+            'candidates': [summarize_aeroapi_candidate(i, f) for i, f in usable],
+        }
+
+    if len(usable) == 1:
+        index, api_flight = usable[0]
+        return {
+            'ambiguous': False,
+            'match': api_flight,
+            'candidate_index': index,
+            'candidates': [summarize_aeroapi_candidate(i, f) for i, f in usable],
+        }
+
+    return {
+        'ambiguous': len(usable) > 1,
+        'match': None,
+        'candidate_index': None,
+        'candidates': [summarize_aeroapi_candidate(i, f) for i, f in usable],
+    }
+
+def _get_airport_codes(conn, airport_id, uid):
+    if not airport_id:
+        return set()
+    row = conn.execute(
+        "SELECT iata_code, icao_code FROM airports WHERE id = ? AND user_id = ?",
+        (airport_id, uid)
+    ).fetchone()
+    if not row:
+        return set()
+    return {str(code).upper() for code in row if code}
+
 def _get_airport_timezone(conn, airport_id, uid):
     if not airport_id:
         return None
@@ -1771,30 +1879,22 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
         if force: return {'error': 'No data found in AeroAPI'}
         return {'message': 'No data found'}
 
-    best_match = None
-    closest_diff = float('inf')
-    
-    existing_std = flight[4]
-    if existing_std:
-        reference_local_time = dateutil.parser.parse(existing_std).time()
-    else:
-        reference_local_time = time(12, 0)
+    selection = select_aeroapi_candidate(
+        raw_flights,
+        f_date,
+        origin_tz_name,
+        existing_std=flight[4],
+        origin_codes=_get_airport_codes(conn, flight[2], uid),
+        dest_codes=_get_airport_codes(conn, flight[3], uid),
+    )
+    if selection.get('ambiguous'):
+        return {
+            'ambiguous': True,
+            'message': 'Multiple AeroAPI candidates require manual selection',
+            'candidates': selection.get('candidates', []),
+        }
+    best_match = selection.get('match')
 
-    for f in raw_flights:
-        if not flight_matches_departure_local_date(f, f_date, origin_tz_name):
-            continue
-
-        t_str = f.get('scheduled_out') or f.get('actual_out')
-        t_utc = _as_utc(dateutil.parser.parse(t_str))
-        t_local = t_utc.astimezone(_timezone_or_utc(origin_tz_name))
-        reference_local = _timezone_or_utc(origin_tz_name).localize(
-            datetime.combine(t_local.date(), reference_local_time)
-        )
-        diff = abs((t_local - reference_local).total_seconds())
-        if diff < closest_diff:
-            closest_diff = diff
-            best_match = f
-            
     if not best_match:
         if force: return {'error': 'No matching flight in time window'}
         return {'message': 'No matching flight'}
@@ -1890,50 +1990,9 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
     add_update('dest_terminal', api_dest_term, flight[15])
 
     
-    # helper for airport terminals update
-    def ensure_terminal_in_db(airport_id, term):
-        if not airport_id or not term: return
-        try:
-            cur = conn.execute("SELECT terminals FROM airports WHERE id = ? AND user_id = ?", (airport_id, uid))
-            row = cur.fetchone()
-            if row:
-                terms_str = row[0] or ""
-                terms_list = [t.strip() for t in terms_str.split(',') if t.strip()]
-                if term not in terms_list:
-                    print(f"Adding terminal {term} to airport {airport_id}")
-                    terms_list.append(term)
-                    terms_list.sort()
-                    new_str = ", ".join(terms_list)
-                    conn.execute("UPDATE airports SET terminals = ? WHERE id = ? AND user_id = ?", (new_str, airport_id, uid))
-        except Exception as e:
-            print(f"Error updating airport terminals: {e}")
-
-    # Origin/Dest Airports
-    if api_origin_code:
-        aid = get_or_create_airport(api_origin_code, None, conn)
-        if aid:
-            if not flight[2]: # Only update airport if missing
-                 update_fields.append("origin_airport_id = ?")
-                 update_values.append(aid)
-            target_aid = flight[2] if flight[2] else aid
-            ensure_terminal_in_db(target_aid, api_origin_term)
-
-    if api_dest_code:
-        aid = get_or_create_airport(api_dest_code, None, conn)
-        if aid:
-            if not flight[3]:
-                 update_fields.append("dest_airport_id = ?")
-                 update_values.append(aid)
-            target_aid = flight[3] if flight[3] else aid
-            ensure_terminal_in_db(target_aid, api_dest_term)
-             
-    # Airline
-    api_airline = best_match.get('operator')
-    if api_airline and not flight[9]: # Only if missing
-         al_id = get_or_create_airline(api_airline, None, conn)
-         if al_id:
-              update_fields.append("airline_id = ?")
-              update_values.append(al_id)
+    related_fields, related_values = collect_aeroapi_related_updates(best_match, flight, conn, uid)
+    update_fields.extend(related_fields)
+    update_values.extend(related_values)
 
     if not update_fields:
         return {'message': 'No new data or data already exists'}
@@ -1969,7 +2028,7 @@ def _format_aeroapi_terminal(t):
         return f"T{t}"
     return t
 
-def _find_aeroapi_match_for_flight(flight, conn, uid):
+def _resolve_aeroapi_selection_for_flight(flight, conn, uid, selected_candidate_index=None):
     f_num = flight[0]
     f_date = flight[1]
 
@@ -1982,30 +2041,26 @@ def _find_aeroapi_match_for_flight(flight, conn, uid):
     if not raw_flights:
         raise ValueError('No data found in AeroAPI')
 
-    existing_std = flight[4]
-    reference_local_time = dateutil.parser.parse(existing_std).time() if existing_std else time(12, 0)
-    origin_tz = _timezone_or_utc(origin_tz_name)
-
-    best_match = None
-    closest_diff = float('inf')
-    for f in raw_flights:
-        if not flight_matches_departure_local_date(f, f_date, origin_tz_name):
-            continue
-
-        t_str = f.get('scheduled_out') or f.get('actual_out')
-        if not t_str:
-            continue
-        t_utc = _as_utc(dateutil.parser.parse(t_str))
-        t_local = t_utc.astimezone(origin_tz)
-        reference_local = origin_tz.localize(datetime.combine(t_local.date(), reference_local_time))
-        diff = abs((t_local - reference_local).total_seconds())
-        if diff < closest_diff:
-            closest_diff = diff
-            best_match = f
-
-    if not best_match:
+    selection = select_aeroapi_candidate(
+        raw_flights,
+        f_date,
+        origin_tz_name,
+        existing_std=flight[4],
+        origin_codes=_get_airport_codes(conn, flight[2], uid),
+        dest_codes=_get_airport_codes(conn, flight[3], uid),
+        selected_candidate_index=selected_candidate_index,
+    )
+    if selection.get('ambiguous'):
+        return selection
+    if not selection.get('match'):
         raise ValueError('No matching flight in time window')
-    return best_match
+    return selection
+
+def _find_aeroapi_match_for_flight(flight, conn, uid, selected_candidate_index=None):
+    selection = _resolve_aeroapi_selection_for_flight(flight, conn, uid, selected_candidate_index)
+    if selection.get('ambiguous'):
+        raise ValueError('Multiple AeroAPI candidates require manual selection')
+    return selection['match']
 
 def _aeroapi_remote_values(best_match):
     api_std = best_match.get('scheduled_out')
@@ -2076,7 +2131,76 @@ def _ensure_terminal_in_db(conn, uid, airport_id, term):
         terms_list.sort()
         conn.execute("UPDATE airports SET terminals = ? WHERE id = ? AND user_id = ?", (", ".join(terms_list), airport_id, uid))
 
-def _build_aeroapi_preview(flight_id):
+def collect_aeroapi_related_updates(best_match, flight, conn, uid):
+    update_fields = []
+    update_values = []
+
+    api_origin_code = best_match.get('origin', {}).get('code')
+    api_dest_code = best_match.get('destination', {}).get('code')
+    api_origin_term = _format_aeroapi_terminal(best_match.get('terminal_origin'))
+    api_dest_term = _format_aeroapi_terminal(best_match.get('terminal_destination'))
+
+    if api_origin_code:
+        aid = get_or_create_airport(api_origin_code, None, conn)
+        if aid:
+            if not flight[2]:
+                update_fields.append("origin_airport_id = ?")
+                update_values.append(aid)
+            _ensure_terminal_in_db(conn, uid, flight[2] if flight[2] else aid, api_origin_term)
+
+    if api_dest_code:
+        aid = get_or_create_airport(api_dest_code, None, conn)
+        if aid:
+            if not flight[3]:
+                update_fields.append("dest_airport_id = ?")
+                update_values.append(aid)
+            _ensure_terminal_in_db(conn, uid, flight[3] if flight[3] else aid, api_dest_term)
+
+    api_airline = best_match.get('operator')
+    if api_airline and not flight[9]:
+        al_id = get_or_create_airline(api_airline, None, conn)
+        if al_id:
+            update_fields.append("airline_id = ?")
+            update_values.append(al_id)
+
+    return update_fields, update_values
+
+def build_aeroapi_related_diffs(best_match, flight):
+    diffs = []
+    origin = best_match.get('origin') or {}
+    dest = best_match.get('destination') or {}
+
+    if not flight[2]:
+        origin_label = origin.get('code_iata') or origin.get('code')
+        if origin_label:
+            diffs.append({
+                'field': 'origin_airport_id',
+                'label': 'Origin Airport',
+                'remote': origin_label,
+                'status': 'missing',
+            })
+
+    if not flight[3]:
+        dest_label = dest.get('code_iata') or dest.get('code')
+        if dest_label:
+            diffs.append({
+                'field': 'dest_airport_id',
+                'label': 'Destination Airport',
+                'remote': dest_label,
+                'status': 'missing',
+            })
+
+    if not flight[9] and best_match.get('operator'):
+        diffs.append({
+            'field': 'airline_id',
+            'label': 'Airline',
+            'remote': best_match.get('operator'),
+            'status': 'missing',
+        })
+
+    return diffs
+
+def _build_aeroapi_preview(flight_id, selected_candidate_index=None):
     conn = database.get_db()
     uid = g.user['id']
     flight = _load_flight_for_aeroapi(conn, uid, flight_id)
@@ -2084,18 +2208,27 @@ def _build_aeroapi_preview(flight_id):
         return {'error': 'Flight not found'}
 
     try:
-        best_match = _find_aeroapi_match_for_flight(flight, conn, uid)
+        selection = _resolve_aeroapi_selection_for_flight(flight, conn, uid, selected_candidate_index)
     except ValueError as e:
         return {'error': str(e)}
+    if selection.get('ambiguous'):
+        return {
+            'ambiguous': True,
+            'message': 'Multiple AeroAPI candidates require manual selection',
+            'candidates': selection.get('candidates', []),
+        }
 
+    best_match = selection['match']
     local_values = _local_aeroapi_values(flight)
     remote_values = _aeroapi_remote_values(best_match)
     return {
         'success': True,
         'debug_match': best_match.get('ident'),
+        'candidate_index': selection.get('candidate_index'),
         'local': local_values,
         'remote': remote_values,
         'diffs': build_aeroapi_field_diffs(local_values, remote_values),
+        'related_diffs': build_aeroapi_related_diffs(best_match, flight),
         'origin_airport_id': flight[2],
         'dest_airport_id': flight[3],
     }
@@ -2117,7 +2250,8 @@ def update_flight_aeroapi(flight_id):
 @login_required
 def preview_flight_aeroapi(flight_id):
     try:
-        return jsonify(_build_aeroapi_preview(flight_id))
+        data = request.json or {}
+        return jsonify(_build_aeroapi_preview(flight_id, data.get('candidate_index')))
     except Exception as e:
         traceback.print_exc()
         return safe_jsonify_error(e)
@@ -2131,10 +2265,8 @@ def apply_flight_aeroapi(flight_id):
             field for field in data.get('fields', [])
             if field in AEROAPI_CONFIRM_FIELD_NAMES
         ]
-        if not selected_fields:
-            return jsonify({'message': 'No fields selected', 'fields_updated': 0})
 
-        preview = _build_aeroapi_preview(flight_id)
+        preview = _build_aeroapi_preview(flight_id, data.get('candidate_index'))
         if preview.get('error'):
             return jsonify(preview)
 
@@ -2147,15 +2279,30 @@ def apply_flight_aeroapi(flight_id):
                 update_fields.append(f"{field} = ?")
                 update_values.append(value)
 
-        if not update_fields:
-            return jsonify({'message': 'No selected AeroAPI values available', 'fields_updated': 0})
-
         conn = database.get_db()
         uid = g.user['id']
         if 'origin_terminal' in selected_fields:
             _ensure_terminal_in_db(conn, uid, preview.get('origin_airport_id'), remote_values.get('origin_terminal'))
         if 'dest_terminal' in selected_fields:
             _ensure_terminal_in_db(conn, uid, preview.get('dest_airport_id'), remote_values.get('dest_terminal'))
+
+        flight = _load_flight_for_aeroapi(conn, uid, flight_id)
+        try:
+            selection = _resolve_aeroapi_selection_for_flight(flight, conn, uid, data.get('candidate_index'))
+        except ValueError as e:
+            return {'error': str(e)}
+        if selection.get('ambiguous'):
+            return {
+                'ambiguous': True,
+                'message': 'Multiple AeroAPI candidates require manual selection',
+                'candidates': selection.get('candidates', []),
+            }
+        related_fields, related_values = collect_aeroapi_related_updates(selection['match'], flight, conn, uid)
+        update_fields.extend(related_fields)
+        update_values.extend(related_values)
+
+        if not update_fields:
+            return jsonify({'message': 'No selected AeroAPI values available', 'fields_updated': 0})
 
         update_values.extend([flight_id, uid])
         conn.execute(f"UPDATE flights SET {', '.join(update_fields)} WHERE id = ? AND user_id = ?", update_values)
