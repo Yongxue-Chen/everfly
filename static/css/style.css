@@ -1272,3 +1272,88 @@ tr:hover { background: #f5f9ff; }
     .map-container { border-radius: 0; }
     #profile-header-stats { margin: 0; border-radius: 0; }
 }
+
+/* Complete Cloud Premium experience */
+#app-container { min-height: calc(100vh - 64px); }
+.journey-shell { width: min(1480px, calc(100% - 40px)); margin: 28px auto 48px; display: grid; gap: 22px; }
+.journey-hero { position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(360px, .75fr); gap: 32px; padding: 42px; border-radius: 24px; color: #fff; background: radial-gradient(circle at 88% 12%, rgba(80, 173, 255, .5), transparent 32%), linear-gradient(135deg, #082a53 0%, #075fae 58%, #1688d4 100%); box-shadow: 0 24px 60px rgba(8, 61, 116, .24); }
+.journey-hero::after { content: ''; position: absolute; width: 420px; height: 420px; right: -180px; bottom: -270px; border: 1px solid rgba(255,255,255,.22); border-radius: 50%; box-shadow: 0 0 0 58px rgba(255,255,255,.035), 0 0 0 120px rgba(255,255,255,.025); }
+.journey-hero-copy, .journey-metrics { position: relative; z-index: 1; }
+.journey-eyebrow { display: block; margin-bottom: 7px; color: #6f8299; font-size: .69rem; font-weight: 800; letter-spacing: .15em; text-transform: uppercase; }
+.journey-hero .journey-eyebrow { color: rgba(255,255,255,.7); }
+.journey-hero h1 { margin: 0; font-size: clamp(2.35rem, 5vw, 4.8rem); line-height: .98; letter-spacing: -.055em; }
+.journey-hero p { margin: 14px 0 0; color: rgba(255,255,255,.72); font-size: 1rem; }
+.journey-route { display: flex; align-items: center; gap: 12px; max-width: 460px; margin-top: 34px; font-size: clamp(1.25rem, 2.5vw, 2rem); font-weight: 800; letter-spacing: -.03em; }
+.journey-route span { height: 1px; flex: 1; background: rgba(255,255,255,.38); }
+.journey-route i { font-size: .85rem; transform: rotate(8deg); }
+.journey-metrics { align-self: end; display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; }
+.journey-metric { min-width: 0; padding: 18px 16px; border: 1px solid rgba(255,255,255,.18); border-radius: 16px; background: rgba(255,255,255,.1); backdrop-filter: blur(12px); }
+.journey-metric span, .journey-metric strong { display: block; }
+.journey-metric span { color: rgba(255,255,255,.7); font-size: .72rem; }
+.journey-metric strong { margin-top: 6px; font-size: 1.45rem; letter-spacing: -.04em; }
+.journey-map-panel, .journey-insights { padding: 22px; border: 1px solid var(--surface-border); border-radius: 20px; background: #fff; box-shadow: var(--shadow-soft); }
+.journey-section-heading, .library-heading { display: flex; align-items: end; justify-content: space-between; margin-bottom: 16px; }
+.journey-section-heading h2, .library-heading h2, .view-header h2 { margin: 0; color: #142943; font-size: 1.42rem; letter-spacing: -.035em; }
+.view-subtitle { margin: 5px 0 0; color: var(--text-muted); font-size: .86rem; }
+.journey-map-panel .map-container { max-width: none; margin: 0; border-radius: 16px; box-shadow: none; }
+.journey-insights .stats-container { max-width: none; margin: 0; grid-template-columns: repeat(3, minmax(0,1fr)); }
+.journey-insights .stats-card { min-height: 160px; border-radius: 16px; cursor: pointer; }
+.journey-insights .stats-card[style*="grid-column"] { grid-column: 1 / -1 !important; }
+#profile-header-stats { display: none !important; }
+
+.flights-header, .library-heading { margin-bottom: 18px; }
+#view-flights .container, #view-datasets .container { width: min(1480px, calc(100% - 40px)); max-width: none; margin: 28px auto 48px; padding: 0; }
+#view-flights .table-responsive, .dataset-content { overflow: hidden; border: 1px solid var(--surface-border); border-radius: 18px; background: #fff; box-shadow: var(--shadow-soft); }
+#view-flights .table-responsive { overflow-x: auto; }
+.dataset-content { padding: 18px; }
+.flight-table th, .data-table th { height: 44px; background: #f5f8fc; color: #6c7e94; font-size: .68rem; letter-spacing: .08em; }
+.flight-table td, .data-table td { padding-top: 15px; padding-bottom: 15px; }
+.flight-row { transition: background .18s ease, transform .18s ease; }
+.flight-route-strip { display: none; }
+.flight-aircraft-model, .flight-aircraft-registration, .flight-aircraft-tags { display: block; width: 100%; }
+.flight-aircraft-model { font-weight: 700; }
+.flight-aircraft-registration { margin-top: 6px; color: #5d7189; font-size: .76rem; line-height: 1.35; }
+.flight-aircraft-registration a { color: #5d7189; font-weight: 600; }
+.flight-aircraft-tags { margin-top: 5px; color: #8290a2; font-size: .7rem; line-height: 1.35; }
+.data-table .data-row:hover, .flight-table .flight-row:hover { background: #f6faff; }
+
+@media (max-width: 1100px) {
+    .journey-hero { grid-template-columns: 1fr; }
+    .journey-metrics { max-width: 620px; }
+    .journey-insights .stats-container { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 768px) {
+    body { background: #eef4fa; }
+    .navbar { min-height: 58px; border-bottom: 0; box-shadow: 0 8px 24px rgba(17,54,91,.08); }
+    .journey-shell { width: 100%; margin: 0 0 26px; gap: 12px; }
+    .journey-hero { grid-template-columns: 1fr; gap: 24px; padding: 26px 18px 20px; border-radius: 0 0 24px 24px; box-shadow: 0 14px 34px rgba(8,61,116,.2); }
+    .journey-hero h1 { font-size: 2.55rem; }
+    .journey-route { margin-top: 24px; font-size: 1.35rem; }
+    .journey-metrics { grid-template-columns: repeat(3,minmax(0,1fr)); gap: 7px; }
+    .journey-metric { padding: 12px 9px; border-radius: 12px; }
+    .journey-metric span { font-size: .62rem; }
+    .journey-metric strong { font-size: 1.05rem; }
+    .journey-map-panel, .journey-insights { margin: 0 10px; padding: 14px; border-radius: 18px; }
+    .journey-map-panel .map-container { border-radius: 14px; }
+    .journey-insights .stats-container { grid-template-columns: 1fr; margin: 0; }
+    .journey-insights .stats-card { border-radius: 14px; }
+    #view-flights .container, #view-datasets .container { width: auto; margin: 16px 10px 28px; padding: 0; }
+    #view-flights .table-responsive { border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+    #flights-table tbody { gap: 14px; }
+    #flights-table .flight-row { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; padding: 15px; border-color: #dce7f2; border-radius: 18px; box-shadow: 0 8px 24px rgba(27,61,98,.08); }
+    #flights-table .flight-summary { position: relative; padding: 0 0 13px; }
+    #flights-table .flight-summary-date { color: #73849a; }
+    #flights-table .flight-summary-number { margin-top: 7px; font-size: 1rem; }
+    #flights-table .flight-route-strip { display: flex; align-items: center; gap: 9px; color: #0b5faa; font-size: 1.45rem; font-weight: 800; letter-spacing: -.04em; }
+    #flights-table .flight-route-strip i { margin-left: auto; color: #8db4dc; font-size: .8rem; transform: rotate(8deg); }
+    #flights-table .flight-origin, #flights-table .flight-destination { display: none; }
+    #flights-table .flight-times, #flights-table .flight-metrics, #flights-table .flight-airline, #flights-table .flight-aircraft, #flights-table .flight-seat, #flights-table .flight-note { padding: 11px; border: 1px solid #e4ebf3; border-radius: 12px; background: #f8fbfe; }
+    #flights-table .flight-airline, #flights-table .flight-aircraft, #flights-table .flight-times, #flights-table .flight-note, #flights-table .flight-actions { grid-column: 1 / -1; }
+    #flights-table .flight-aircraft-model, #flights-table .flight-aircraft-registration, #flights-table .flight-aircraft-tags { display: block; width: 100%; }
+    #flights-table .flight-actions { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; padding-top: 4px; }
+    #flights-table .flight-actions .btn { min-height: 42px; border: 1px solid #dce7f2; border-radius: 11px; background: #fff; }
+    .dataset-content { padding: 12px; border-radius: 18px; }
+    .data-table .data-row { border-radius: 16px; box-shadow: 0 8px 24px rgba(27,61,98,.07); }
+    .mobile-bottom-nav { border-top: 1px solid #dce7f2; box-shadow: 0 -10px 26px rgba(22,54,89,.1); }
+}

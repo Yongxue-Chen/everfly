@@ -1303,6 +1303,7 @@ function renderFlights() {
         tr.innerHTML = `
             <td class="flight-cell flight-summary" data-label="Date / Flight">
                 <div class="flight-summary-date">${displayDate}</div>
+                <div class="flight-route-strip"><span>${safe(f.origin_code)}</span><i class="fa-solid fa-plane"></i><span>${safe(f.dest_code)}</span></div>
                 <div class="flight-summary-number">${safe(f.flight_number)}</div>
             </td>
             <td class="flight-cell flight-times" data-label="Times">
@@ -1320,7 +1321,9 @@ function renderFlights() {
             </td>
             <td class="flight-cell flight-airline" data-label="Airline"><div class="flight-airline-content">${airlineLogoMarkup(f.airline_logo_url, f.airline_logo_source_url, f.airline_iata_code || f.airline_icao_code || f.airline_name)}${entityLinkButton('airlines', f.airline_id, f.airline_name)}</div></td>
             <td class="flight-cell flight-aircraft" data-label="Aircraft / Reg">
-                ${entityLinkButton('aircraft_models', f.aircraft_model_id, f.aircraft_model)}<small>${registrationLink}${tags ? `<br>${tags}` : ''}</small>
+                <div class="flight-aircraft-model">${entityLinkButton('aircraft_models', f.aircraft_model_id, f.aircraft_model)}</div>
+                <div class="flight-aircraft-registration">${registrationLink}</div>
+                ${tags ? `<div class="flight-aircraft-tags">${tags}</div>` : ''}
             </td>
             <td class="flight-cell flight-seat" data-label="Seat / Class">
                 <div>${safe(f.seat_number)} <small>${safe(f.seat_type)}</small></div><small>${safe(f.flight_class)}</small>
@@ -2138,41 +2141,28 @@ const showStatsModal = (title, data) => {
     });
 };
 
+function renderJourneyHero(flights) {
+    const totalDist = flights.reduce((sum, f) => sum + (parseFloat(f.distance) || 0), 0);
+    const totalMin = flights.reduce((sum, f) => sum + (f.duration_actual || f.duration_scheduled || 0), 0);
+    const airportIds = new Set(flights.flatMap(f => [f.origin_airport_id, f.dest_airport_id]).filter(Boolean));
+    const airlineIds = new Set(flights.map(f => f.airline_id).filter(Boolean));
+    const latest = flights[0] || {};
+    const count = document.getElementById('journey-flight-count');
+    const summary = document.getElementById('journey-summary');
+    const route = document.getElementById('journey-route');
+    const metrics = document.getElementById('journey-metrics');
+    if (count) count.textContent = `${flights.length.toLocaleString()} flights`;
+    if (summary) summary.textContent = `${Math.round(totalDist).toLocaleString()} km across ${airportIds.size} airports`;
+    if (route) route.innerHTML = latest.origin_code && latest.dest_code ? `<strong>${escapeHtml(latest.origin_code)}</strong><span></span><i class="fa-solid fa-plane"></i><span></span><strong>${escapeHtml(latest.dest_code)}</strong>` : '<strong>Ready for your next journey</strong>';
+    if (metrics) metrics.innerHTML = `
+        <div class="journey-metric"><span>Airports</span><strong>${airportIds.size}</strong></div>
+        <div class="journey-metric"><span>Airlines</span><strong>${airlineIds.size}</strong></div>
+        <div class="journey-metric"><span>In the air</span><strong>${Math.floor(totalMin / 60).toLocaleString()}h</strong></div>`;
+}
+
 // Calculate & Render Header Stats
 const renderHeaderStats = (flights) => {
-    let totalDist = flights.reduce((sum, f) => sum + (parseFloat(f.distance) || 0), 0);
-    let totalMin = flights.reduce((sum, f) => sum + (f.duration_actual || f.duration_scheduled || 0), 0);
-    const hours = Math.floor(totalMin / 60);
-    const mins = totalMin % 60;
-
-    // Inject Container if missing
-    const view = document.getElementById('view-profile');
-    let header = document.getElementById('profile-header-stats');
-    if (!header && view) {
-        header = document.createElement('div');
-        header.id = 'profile-header-stats';
-        // Insert before map container (not flight-map itself which is nested)
-        const mapContainer = document.querySelector('#view-profile .map-container');
-        if (mapContainer) view.insertBefore(header, mapContainer);
-        else view.prepend(header);
-    }
-
-    if (header) {
-        header.innerHTML = `
-            <div style="display:flex; align-items:center; gap:15px;">
-                <div style="width:40px; height:40px; border-radius:50%; background:var(--primary-color); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:1.2rem;">
-                    <span>${escapeHtml(CURRENT_USER.username[0].toUpperCase())}</span>
-                </div>
-                <div>
-                    <div style="font-weight:bold; font-size:1.1rem; color: #2c3e50;">${escapeHtml(CURRENT_USER.username)}</div>
-                    <div style="font-size:0.85rem; color:#7f8c8d; font-weight:500;">everfly User</div>
-                </div>
-            </div>
-            <div class="ph-stat"><b>${flights.length}</b><span>Flights</span></div>
-            <div class="ph-stat"><b>${Math.round(totalDist).toLocaleString()} km</b><span>Distance</span></div>
-            <div class="ph-stat"><b>${hours}h ${mins}m</b><span>Duration</span></div>
-        `;
-    }
+    renderJourneyHero(flights);
 };
 
 async function loadProfile() {

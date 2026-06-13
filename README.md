@@ -329,3 +329,15 @@ docker ps --filter name=flightlog-app
 ```python
 app.config['SESSION_COOKIE_SECURE'] = True
 ```
+
+### Production Compose and airline logos
+
+Use `docker-compose.example.yml` as a portable starting point and keep real credentials in a deployment-only `.env` outside the Git working tree. ImageKit is optional for core functionality, but enables uploaded and synchronized airline logos.
+
+After configuring `IMAGEKIT_PRIVATE_KEY` and `IMAGEKIT_URL_ENDPOINT`, rebuild the service so the environment is loaded, then synchronize missing airline logos:
+
+```bash
+docker exec flightlog-app python scripts/sync_airline_logos.py
+```
+
+The synchronization is idempotent and skips airlines that already have a `logo_url`. Use `--force` only when intentionally replacing all logo references.

@@ -20,7 +20,7 @@
         const CURRENT_USER = {{ user| tojson | safe }};
         const CSRF_TOKEN = "{{ csrf_token() }}";
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=table6">
+    <link rel="stylesheet" href="/static/css/style.css?v=cloud-premium-3">
 </head>
 
 <body>
@@ -72,28 +72,39 @@
 
         <!-- Profile View -->
         <section id="view-profile" class="view active">
-            <!-- User Profile Card -->
-            <!-- User Card moved to Header Stats -->
-
-            <div class="map-container">
-                <div id="flight-map"></div>
-                <div class="map-controls">
-                    <select id="year-filter" style="padding: 5px; margin-right: 5px;">
-                        <option value="all">All Years</option>
-                    </select>
-                    <button onclick="setMapLayer('map')">Map</button>
-                    <button onclick="setMapLayer('satellite')">Satellite</button>
-                </div>
+            <div class="journey-shell">
+                <section id="journey-hero" class="journey-hero" aria-label="Flight journey overview">
+                    <div class="journey-hero-copy">
+                        <span class="journey-eyebrow">Your flying life</span>
+                        <h1 id="journey-flight-count">Flight journey</h1>
+                        <p id="journey-summary">Loading your aviation archive...</p>
+                        <div id="journey-route" class="journey-route" aria-label="Latest route"></div>
+                    </div>
+                    <div id="journey-metrics" class="journey-metrics"></div>
+                </section>
+                <section class="journey-map-panel">
+                    <div class="journey-section-heading"><div><span class="journey-eyebrow">Explore</span><h2>Your flight map</h2></div></div>
+                    <div class="map-container">
+                        <div id="flight-map"></div>
+                        <div class="map-controls">
+                            <select id="year-filter" style="padding: 5px; margin-right: 5px;"><option value="all">All Years</option></select>
+                            <button onclick="setMapLayer('map')">Map</button>
+                            <button onclick="setMapLayer('satellite')">Satellite</button>
+                        </div>
+                    </div>
+                </section>
+                <section class="journey-insights">
+                    <div class="journey-section-heading"><div><span class="journey-eyebrow">Library insights</span><h2>Your aviation world</h2></div></div>
+                    <div id="profile-stats-dashboard" class="stats-container"></div>
+                </section>
             </div>
-            <!-- Stats Dashboard will be injected here -->
-            <div id="profile-stats-dashboard" class="stats-container"></div>
         </section>
 
         <!-- Flights View -->
         <section id="view-flights" class="view" style="display: none;">
             <div class="container">
                 <div class="view-header flights-header">
-                    <h2>Flight History</h2>
+                    <div><span class="journey-eyebrow">Personal archive</span><h2>Flight History</h2><p class="view-subtitle">Every route, aircraft and memory in one place.</p></div>
                     <div class="view-actions flights-actions">
                         <button class="btn btn-sm btn-secondary" disabled
                             title="CSV import is currently disabled"
@@ -157,6 +168,7 @@
         <!-- Datasets View -->
         <section id="view-datasets" class="view" style="display: none;">
             <div class="container">
+                <div class="library-heading"><div><span class="journey-eyebrow">Reference data</span><h2>Library</h2><p class="view-subtitle">Manage the places, airlines and aircraft behind your journeys.</p></div></div>
                 <div class="tabs">
                     <button class="tab-btn active" onclick="switchDatasetTab('cities')">Cities</button>
                     <button class="tab-btn" onclick="switchDatasetTab('airports')">Airports</button>
@@ -241,7 +253,7 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js?v=flight-class-select-1"></script>
+    <script src="/static/js/app.js?v=cloud-premium-3"></script>
 </body>
 
 </html>
