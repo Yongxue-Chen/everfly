@@ -65,6 +65,9 @@ const DATASETS = {
             { key: 'name', label: 'Name', type: 'text', required: true },
             { key: 'iata_code', label: 'IATA Code', type: 'text', required: false },
             { key: 'icao_code', label: 'ICAO Code', type: 'text', required: false },
+            { key: 'callsign', label: 'Callsign', type: 'text', required: false },
+            { key: 'country', label: 'Country', type: 'text', required: false },
+            { key: 'alliance', label: 'Alliance', type: 'text', required: false },
             { key: 'frequent_flyer_program', label: 'FF Program', type: 'text', required: false },
             { key: 'frequent_flyer_id', label: 'FF ID (Member No.)', type: 'text', required: false },
             { key: 'website_url', label: 'Website URL', type: 'text', required: false, placeholder: 'https://example.com' }
@@ -115,7 +118,8 @@ const State = {
     profileMapFlights: null,
     profileMapSelectedYear: 'all',
     profileMapMoveHandlerBound: false,
-    profileMapResizeObserverBound: false
+    profileMapResizeObserverBound: false,
+    entityPanelHistory: []
 };
 
 // --- API Client ---
@@ -171,6 +175,77 @@ function normalizeWebsiteUrl(url) {
     return `https://${trimmed}`;
 }
 
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function airlineLogoMarkup(logoUrl, logoSourceUrl, code, size = 'list') {
+    const primary = logoUrl || logoSourceUrl || '';
+    const fallbackSource = logoUrl && logoSourceUrl ? logoSourceUrl : '';
+    const initials = (code || '?').slice(0, 3).toUpperCase();
+    if (!primary) return `<span class="airline-logo airline-logo-${size} airline-logo-fallback">${escapeHtml(initials)}</span>`;
+    return `<span class="airline-logo airline-logo-${size}"><img loading="lazy" src="${escapeHtml(primary)}" data-fallback-src="${escapeHtml(fallbackSource)}" alt="" onerror="handleAirlineLogoError(this)"><span class="airline-logo-fallback">${escapeHtml(initials)}</span></span>`;
+}
+
+function handleAirlineLogoError(image) {
+    const fallback = image.dataset.fallbackSrc;
+    if (fallback && image.src !== fallback) {
+        image.dataset.fallbackSrc = '';
+        image.src = fallback;
+        return;
+    }
+    image.style.display = 'none';
+}
+
+async function manageAirlineLogo(id) {
+    openModal('Manage airline logo', () => {
+        const container = document.createElement('div');
+        container.innerHTML = `
+            <form class="form-grid">
+                <div class="form-group full-width">
+                    <label>Public logo URL</label>
+                    <input name="source_url" type="url" placeholder="https://example.com/airline-logo.svg">
+                    <small>Recommended for the free plan. The original URL remains as a fallback.</small>
+                </div>
+                <div class="form-group full-width">
+                    <label>Or upload a logo</label>
+                    <input name="file" type="file" accept=".png,.jpg,.jpeg,.webp,.svg,image/png,image/jpeg,image/webp,image/svg+xml">
+                    <small>PNG, JPEG, WebP, or SVG, up to 1 MB. Uploads require ImageKit configuration.</small>
+                </div>
+            </form>`;
+        return container;
+    }, async data => {
+        const overlay = modalStack[modalStack.length - 1];
+        const file = overlay?.querySelector('input[name="file"]')?.files?.[0];
+        let result;
+        if (file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            result = await API.upload(`airlines/${id}/logo`, formData);
+        } else {
+            const sourceUrl = (data.source_url || '').trim();
+            if (!sourceUrl) {
+                alert('Enter a public logo URL or choose a file.');
+                return false;
+            }
+            result = await API.post(`airlines/${id}/logo`, { source_url: sourceUrl });
+        }
+        if (result.error) {
+            alert(result.error);
+            return false;
+        }
+        openEntityPanel('airlines', id, false);
+        if (State.currentView === 'flights') loadFlights();
+        if (State.currentView === 'datasets' && State.currentDataset === 'airlines') loadDataset('airlines');
+        return true;
+    });
+}
+
 function invalidateProfileMapSize() {
     if (!State.map) return;
     const invalidate = () => State.map.invalidateSize({ pan: false });
@@ -223,7 +298,7 @@ async function openEditProfileModal() {
             <form id="edit-profile-form">
                 <div class="form-group">
                     <label>Username</label>
-                    <input type="text" name="username" value="${CURRENT_USER.username}" required>
+                    <input type="text" name="username" value="${escapeHtml(CURRENT_USER.username)}" required>
                 </div>
                 <div class="form-group">
                     <label>New Password (leave blank to keep current)</label>
@@ -281,6 +356,117 @@ async function openEditProfileModal() {
 
         alert(res.message + (newApiKey ? '\nFlightAware API key saved.' : ''));
     });
+}
+
+// --- Entity Detail Panel ---
+const ENTITY_LABELS = {
+    flights: 'Flight', airlines: 'Airline', airports: 'Airport', cities: 'City', aircraft_models: 'Aircraft'
+};
+
+function entityDisplayName(type, entity) {
+    if (type === 'flights') return entity.flight_number || 'Flight';
+    if (type === 'aircraft_models') return [entity.manufacturer, entity.name || entity.model, entity.series].filter(Boolean).join(' ');
+    return entity.name || ENTITY_LABELS[type] || 'Details';
+}
+
+function entityLinkButton(type, id, label, extraClass = '') {
+    if (!id) return `<span>${escapeHtml(label || '-')}</span>`;
+    return `<button class="entity-link ${extraClass}" onclick="event.stopPropagation(); openEntityPanel('${type}', ${Number(id)})">${escapeHtml(label || '-')}</button>`;
+}
+
+async function openEntityPanel(type, id, pushHistory = true) {
+    if (!type || !id) return;
+    if (pushHistory) State.entityPanelHistory.push({ type, id: Number(id) });
+    const panel = document.getElementById('entity-panel');
+    const overlay = document.getElementById('entity-panel-overlay');
+    const body = document.getElementById('entity-panel-body');
+    panel.hidden = false;
+    overlay.hidden = false;
+    document.body.classList.add('entity-panel-open');
+    body.innerHTML = '<div class="entity-panel-state"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading details...</div>';
+    try {
+        const payload = await API.get(`entities/${type}/${id}`);
+        if (payload.error) throw new Error(payload.error);
+        renderEntityPanel(payload);
+    } catch (error) {
+        body.innerHTML = `<div class="entity-panel-state entity-panel-error">${escapeHtml(error.message || 'Unable to load details')}<button class="btn btn-secondary" onclick="openEntityPanel('${type}', ${Number(id)}, false)">Retry</button></div>`;
+    }
+}
+
+function closeEntityPanel() {
+    document.getElementById('entity-panel').hidden = true;
+    document.getElementById('entity-panel-overlay').hidden = true;
+    document.body.classList.remove('entity-panel-open');
+    State.entityPanelHistory = [];
+}
+
+function goBackEntityPanel() {
+    if (State.entityPanelHistory.length <= 1) return closeEntityPanel();
+    State.entityPanelHistory.pop();
+    const previous = State.entityPanelHistory[State.entityPanelHistory.length - 1];
+    openEntityPanel(previous.type, previous.id, false);
+}
+
+function editEntityFromPanel(type, entity) {
+    if (type === 'flights') {
+        const flight = State.cache.flights.find(item => item.id === entity.id) || entity;
+        openEditFlightModal(flight);
+        return;
+    }
+    openEditDatasetModal(entity, type, () => {
+        openEntityPanel(type, entity.id, false);
+        if (State.currentView === 'datasets' && State.currentDataset === type) loadDataset(type);
+    });
+}
+
+function editCurrentEntityPanel() {
+    const current = State.entityPanelCurrent;
+    if (!current) return;
+    editEntityFromPanel(current.type, current.entity);
+}
+
+function entityRelationshipLinks(type, entity) {
+    const links = [];
+    const add = (target, id, label, detail = '') => {
+        if (!id) return;
+        links.push(`<button class="entity-related-row" onclick="openEntityPanel('${target}', ${Number(id)})"><span><b>${escapeHtml(label)}</b><small>${escapeHtml(detail)}</small></span><i class="fa-solid fa-chevron-right"></i></button>`);
+    };
+    if (type === 'flights') {
+        add('airlines', entity.airline_id, entity.airline_name || 'Airline', 'Airline');
+        add('airports', entity.origin_airport_id, entity.origin_name || entity.origin_code || 'Origin airport', 'Origin');
+        add('airports', entity.dest_airport_id, entity.dest_name || entity.dest_code || 'Destination airport', 'Destination');
+        add('aircraft_models', entity.aircraft_model_id, entity.aircraft_model || 'Aircraft model', 'Aircraft');
+    } else if (type === 'airports') {
+        add('cities', entity.city_id, entity.city_name || 'City', 'City');
+    }
+    if (type === 'airlines' && entity.website_url) {
+        links.push(`<a class="entity-related-row" href="${escapeHtml(normalizeWebsiteUrl(entity.website_url))}" target="_blank" rel="noopener noreferrer"><span><b>Official website</b><small>${escapeHtml(entity.website_url)}</small></span><i class="fa-solid fa-arrow-up-right-from-square"></i></a>`);
+    }
+    return links.join('');
+}
+
+function renderEntityPanel(payload) {
+    const { type, entity, stats = {}, related = {} } = payload;
+    State.entityPanelCurrent = { type, entity };
+    const title = entityDisplayName(type, entity);
+    document.getElementById('entity-panel-title').textContent = ENTITY_LABELS[type] || 'Details';
+    const codes = [entity.iata_code, entity.icao_code, entity.flight_number].filter(Boolean);
+    const relationshipLinks = entityRelationshipLinks(type, entity);
+    const statsHtml = Object.entries(stats).filter(([, value]) => value !== null).map(([key, value]) => `
+        <div class="entity-stat"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(key.replaceAll('_', ' '))}</span></div>`).join('');
+    const metadata = Object.entries(entity).filter(([key, value]) => value !== null && value !== '' && !['user_id', 'logo_url', 'logo_source_url'].includes(key)).slice(0, 18).map(([key, value]) => `
+        <div class="entity-field"><span>${escapeHtml(key.replaceAll('_', ' '))}</span><strong>${escapeHtml(value)}</strong></div>`).join('');
+    const relatedFlights = (related.flights || []).map(f => `
+        <button class="entity-related-row" onclick="openEntityPanel('flights', ${Number(f.id)})"><span><b>${escapeHtml(f.flight_number || 'Flight')}</b><small>${escapeHtml(f.date || '')}</small></span><span>${escapeHtml(f.origin_code || '')} → ${escapeHtml(f.dest_code || '')}</span></button>`).join('');
+    const relatedAirports = (related.airports || []).map(a => `
+        <button class="entity-related-row" onclick="openEntityPanel('airports', ${Number(a.id)})"><span><b>${escapeHtml(a.name)}</b><small>${escapeHtml(a.iata_code || a.icao_code || '')}</small></span></button>`).join('');
+    document.getElementById('entity-panel-body').innerHTML = `
+        <section class="entity-hero">${type === 'airlines' ? airlineLogoMarkup(entity.logo_url, entity.logo_source_url, entity.iata_code || entity.icao_code || entity.name, 'detail') : `<div class="entity-mark">${escapeHtml((codes[0] || title || '?').slice(0, 3).toUpperCase())}</div>`}<div class="entity-hero-copy"><h2>${escapeHtml(title)}</h2><p>${codes.map(escapeHtml).join(' · ')}</p><div class="entity-hero-actions"><button class="btn btn-sm btn-primary" onclick="editCurrentEntityPanel()">Edit</button>${type === 'airlines' ? `<button class="btn btn-sm btn-secondary" onclick="manageAirlineLogo(${Number(entity.id)})">Manage logo</button>` : ''}</div></div></section>
+        ${statsHtml ? `<section><h3>Overview</h3><div class="entity-stats">${statsHtml}</div></section>` : ''}
+        ${relationshipLinks ? `<section><h3>Connections</h3>${relationshipLinks}</section>` : ''}
+        <section><h3>Details</h3><div class="entity-fields">${metadata}</div></section>
+        ${relatedAirports ? `<section><h3>Airports</h3>${relatedAirports}</section>` : ''}
+        ${relatedFlights ? `<section><h3>Related flights</h3>${relatedFlights}</section>` : ''}`;
 }
 
 // --- View Management ---
@@ -570,6 +756,7 @@ function renderDatasetTable(config, data) {
     processedData.forEach(item => {
         const tr = document.createElement('tr');
         tr.className = 'data-row';
+        tr.onclick = () => openEntityPanel(State.currentDataset, item.id);
         config.columns.forEach(col => {
             const td = document.createElement('td');
             td.className = 'data-cell';
@@ -645,13 +832,13 @@ function renderDatasetTable(config, data) {
         const btnEdit = document.createElement('button');
         btnEdit.className = 'btn btn-sm btn-icon';
         btnEdit.innerHTML = '<i class="fa-solid fa-pen"></i>';
-        btnEdit.onclick = () => openEditDatasetModal(item);
+        btnEdit.onclick = (e) => { e.stopPropagation(); openEditDatasetModal(item); };
 
         const btnDel = document.createElement('button');
         btnDel.className = 'btn btn-sm btn-icon';
         btnDel.innerHTML = '<i class="fa-solid fa-trash"></i>';
         btnDel.style.color = 'var(--danger)';
-        btnDel.onclick = () => deleteDatasetItem(item.id);
+        btnDel.onclick = (e) => { e.stopPropagation(); deleteDatasetItem(item.id); };
 
         tdAction.appendChild(btnEdit);
         tdAction.appendChild(btnDel);
@@ -679,7 +866,7 @@ function openModal(title, contentFn, onSave) {
     // Header
     const header = document.createElement('div');
     header.className = 'modal-header';
-    header.innerHTML = `<h3>${title}</h3><button class="close-btn">&times;</button>`;
+    header.innerHTML = `<h3>${escapeHtml(title)}</h3><button class="close-btn">&times;</button>`;
     header.querySelector('.close-btn').onclick = () => closeModal();
 
     // Body
@@ -1066,48 +1253,29 @@ function filterFlights() {
 function renderFlights() {
     let data = [...State.cache.flights];
 
-    // Filter
     const filters = State.flightFilters;
     if (Object.keys(filters).length > 0) {
-        data = data.filter(item => {
-            return Object.entries(filters).every(([key, filterValue]) => {
-                const keys = key.split(',');
-                return keys.some(field => {
-                    const val = (item[field] || '').toString().toLowerCase();
-                    return val.includes(filterValue);
-                });
-            });
-        });
+        data = data.filter(item => Object.entries(filters).every(([key, filterValue]) => {
+            const keys = key.split(',');
+            return keys.some(field => (item[field] || '').toString().toLowerCase().includes(filterValue));
+        }));
     }
 
-    // Sort
     const { key, dir } = State.flightSort;
     if (key) {
         data.sort((a, b) => {
-            // Timestamp sorting for Date/Time fields
             if (key === 'std' || key === 'date') {
-                const ta = a._std_ts;
-                const tb = b._std_ts;
-                return dir === 'asc' ? ta - tb : tb - ta;
+                return dir === 'asc' ? a._std_ts - b._std_ts : b._std_ts - a._std_ts;
             }
-
-            let va = a[key];
-            let vb = b[key];
-
-            if (va === null || va === undefined) va = '';
-            if (vb === null || vb === undefined) vb = '';
-
-            // Special handling for numbers
+            let va = a[key] ?? '';
+            let vb = b[key] ?? '';
             if (key === 'distance' || key === 'duration_actual') {
                 va = parseFloat(va) || 0;
                 vb = parseFloat(vb) || 0;
                 return dir === 'asc' ? va - vb : vb - va;
             }
-
-            // String comparison
             va = va.toString().toLowerCase();
             vb = vb.toString().toLowerCase();
-
             if (va < vb) return dir === 'asc' ? -1 : 1;
             if (va > vb) return dir === 'asc' ? 1 : -1;
             return 0;
@@ -1116,18 +1284,20 @@ function renderFlights() {
 
     const tbody = document.querySelector('#flights-table tbody');
     tbody.innerHTML = '';
-
-    const escapeAttr = (value) => String(value || '').replace(/"/g, '&quot;');
-    const safe = (value) => value || '-';
+    const safe = (value) => escapeHtml(value || '-');
 
     data.forEach(f => {
         const tr = document.createElement('tr');
-        const formatTime = (iso) => iso ? iso.replace('T', ' ').substring(0, 16) : '-';
-        // Extract plain date for display (handle T or space separator)
-        const displayDate = f.date ? f.date.split(/[ T]/)[0] : '-';
-        const distanceText = f.distance ? `${f.distance} km` : '-';
-        const scheduledDuration = f.duration_scheduled ? `${f.duration_scheduled} min` : '-';
-        const actualDuration = f.duration_actual ? `${f.duration_actual} min` : '-';
+        const formatTime = (iso) => escapeHtml(iso ? iso.replace('T', ' ').substring(0, 16) : '-');
+        const displayDate = escapeHtml(f.date ? f.date.split(/[ T]/)[0] : '-');
+        const distanceText = escapeHtml(f.distance ? `${f.distance} km` : '-');
+        const scheduledDuration = escapeHtml(f.duration_scheduled ? `${f.duration_scheduled} min` : '-');
+        const actualDuration = escapeHtml(f.duration_actual ? `${f.duration_actual} min` : '-');
+        const registration = f.registration ? escapeHtml(f.registration) : '-';
+        const registrationLink = f.registration
+            ? `<a href="https://www.flightera.net/en/planes/${encodeURIComponent(f.registration)}" target="_blank" rel="noopener">${registration}</a>`
+            : '-';
+        const tags = [f.tag_generation, f.tag_winglets, f.tag_config].filter(Boolean).map(escapeHtml).join(' / ');
 
         tr.className = 'flight-row';
         tr.innerHTML = `
@@ -1143,49 +1313,30 @@ function renderFlights() {
                     <div><span>ATA</span><strong>${formatTime(f.ata)}</strong></div>
                 </div>
             </td>
-            <td class="flight-cell flight-origin" data-label="From">
-                <div style="font-weight:500">${f.origin_name || f.origin_code || '-'}</div>
-                <div style="font-size:0.75rem; color:#666">${f.origin_code || '-'} ${f.origin_terminal ? `(${f.origin_terminal})` : ''}</div>
-            </td>
-            <td class="flight-cell flight-destination" data-label="To">
-                <div style="font-weight:500">${f.dest_name || f.dest_code || '-'}</div>
-                <div style="font-size:0.75rem; color:#666">${f.dest_code || '-'} ${f.dest_terminal ? `(${f.dest_terminal})` : ''}</div>
-            </td>
+            <td class="flight-cell flight-origin" data-label="From">${entityLinkButton('airports', f.origin_airport_id, f.origin_name || f.origin_code)}<div style="font-size:0.75rem; color:#666">${safe(f.origin_code)} ${f.origin_terminal ? `(${escapeHtml(f.origin_terminal)})` : ''}</div></td>
+            <td class="flight-cell flight-destination" data-label="To">${entityLinkButton('airports', f.dest_airport_id, f.dest_name || f.dest_code)}<div style="font-size:0.75rem; color:#666">${safe(f.dest_code)} ${f.dest_terminal ? `(${escapeHtml(f.dest_terminal)})` : ''}</div></td>
             <td class="flight-cell flight-metrics" data-label="Dist / Dur">
-                <div>${distanceText}</div>
-                <small>Sched ${scheduledDuration}</small>
-                <small>Actual ${actualDuration}</small>
+                <div>${distanceText}</div><small>Sched ${scheduledDuration}</small><small>Actual ${actualDuration}</small>
             </td>
-            <td class="flight-cell flight-airline" data-label="Airline">${safe(f.airline_name)}</td>
+            <td class="flight-cell flight-airline" data-label="Airline"><div class="flight-airline-content">${airlineLogoMarkup(f.airline_logo_url, f.airline_logo_source_url, f.airline_iata_code || f.airline_icao_code || f.airline_name)}${entityLinkButton('airlines', f.airline_id, f.airline_name)}</div></td>
             <td class="flight-cell flight-aircraft" data-label="Aircraft / Reg">
-                <div>${safe(f.aircraft_model)}</div>
-                <small>
-                    ${f.registration ?
-                    `<a href="https://www.flightera.net/en/planes/${f.registration}" target="_blank" rel="noopener">${f.registration}</a>`
-                    : '-'}
-                    ${f.tag_generation || f.tag_winglets || f.tag_config ? `<br>${[f.tag_generation, f.tag_winglets, f.tag_config].filter(Boolean).join(' / ')}` : ''}
-                </small>
+                ${entityLinkButton('aircraft_models', f.aircraft_model_id, f.aircraft_model)}<small>${registrationLink}${tags ? `<br>${tags}` : ''}</small>
             </td>
             <td class="flight-cell flight-seat" data-label="Seat / Class">
-                <div>${safe(f.seat_number)} <small>${safe(f.seat_type)}</small></div>
-                <small>${safe(f.flight_class)}</small>
+                <div>${safe(f.seat_number)} <small>${safe(f.seat_type)}</small></div><small>${safe(f.flight_class)}</small>
             </td>
-            <td class="flight-cell flight-note" data-label="Note" style="max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeAttr(f.note)}">${f.note || ''}</td>
+            <td class="flight-cell flight-note" data-label="Note" style="max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(f.note || '')}">${escapeHtml(f.note || '')}</td>
             <td class="flight-cell flight-actions" data-label="Actions">
-                <button class="btn btn-sm btn-icon" style="color:var(--accent-blue)" title="Update from AeroAPI" onclick="updateFlightFromAeroAPI(${f.id})"><i class="fa-solid fa-cloud-arrow-down"></i></button>
-                <button class="btn btn-sm btn-icon" onclick="openEditFlightModal(${JSON.stringify(f).replace(/"/g, '&quot;')})"><i class="fa-solid fa-pen"></i></button>
-                <button class="btn btn-sm btn-icon" style="color:var(--danger)" onclick="deleteFlight(${f.id})"><i class="fa-solid fa-trash"></i></button>
+                <button class="btn btn-sm btn-icon flight-update" style="color:var(--accent-blue)" title="Update from AeroAPI"><i class="fa-solid fa-cloud-arrow-down"></i></button>
+                <button class="btn btn-sm btn-icon flight-edit"><i class="fa-solid fa-pen"></i></button>
+                <button class="btn btn-sm btn-icon flight-delete" style="color:var(--danger)"><i class="fa-solid fa-trash"></i></button>
             </td>
         `;
+        tr.onclick = () => openEntityPanel('flights', f.id);
+        tr.querySelector('.flight-update').onclick = (e) => { e.stopPropagation(); updateFlightFromAeroAPI(f.id); };
+        tr.querySelector('.flight-edit').onclick = (e) => { e.stopPropagation(); openEditFlightModal(f); };
+        tr.querySelector('.flight-delete').onclick = (e) => { e.stopPropagation(); deleteFlight(f.id); };
         tbody.appendChild(tr);
-    });
-
-    // Update headers sort icon
-    document.querySelectorAll('#flights-table th').forEach(th => {
-        const sortKey = th.getAttribute('onclick');
-        if (sortKey) {
-            // lazy checking, remove logic for simplicity or improve UI feedback later
-        }
     });
 }
 
@@ -1851,7 +2002,7 @@ const renderStatsDashboard = (stats, container) => {
             d.onmouseenter = () => d.style.background = '#f0f0f0';
             d.onmouseleave = () => d.style.background = 'transparent';
 
-            d.innerHTML = `<span style="font-size:0.9rem; color:#666">${k}</span><b>${v}</b>`;
+            d.innerHTML = `<span style="font-size:0.9rem; color:#666">${escapeHtml(k)}</span><b>${escapeHtml(v)}</b>`;
             d.onclick = (e) => {
                 e.stopPropagation();
                 // Filter airlines by group keywords
@@ -1879,7 +2030,7 @@ const renderStatsDashboard = (stats, container) => {
         d.onmouseenter = () => d.style.background = '#f0f0f0';
         d.onmouseleave = () => d.style.background = 'transparent';
 
-        d.innerHTML = `<span style="font-size:0.9rem; color:#666">${k}</span><b>${v}</b>`;
+        d.innerHTML = `<span style="font-size:0.9rem; color:#666">${escapeHtml(k)}</span><b>${escapeHtml(v)}</b>`;
         d.onclick = (e) => {
             e.stopPropagation();
             // Filter aircraft by manufacturer (which is in 'extra')
@@ -1975,9 +2126,9 @@ const showStatsModal = (title, data) => {
             const row = document.createElement('div');
             row.className = 'chart-row';
             const pct = (item.count / max) * 100;
-            const extra = item.extra ? ` <small style='color:#999; margin-left:5px;'>${item.extra}</small>` : '';
+            const extra = item.extra ? ` <small style='color:#999; margin-left:5px;'>${escapeHtml(item.extra)}</small>` : '';
             row.innerHTML = `
-                <div class="chart-label" title="${item.name}">${item.name || 'Unknown'}${extra}</div>
+                <div class="chart-label" title="${escapeHtml(item.name)}">${escapeHtml(item.name || 'Unknown')}${extra}</div>
                 <div class="chart-bar-bg"><div class="chart-bar" style="width:${pct}%"></div></div>
                 <div class="chart-val">${item.count}</div>
             `;
@@ -2010,10 +2161,10 @@ const renderHeaderStats = (flights) => {
         header.innerHTML = `
             <div style="display:flex; align-items:center; gap:15px;">
                 <div style="width:40px; height:40px; border-radius:50%; background:var(--primary-color); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:1.2rem;">
-                    <span>${CURRENT_USER.username[0].toUpperCase()}</span>
+                    <span>${escapeHtml(CURRENT_USER.username[0].toUpperCase())}</span>
                 </div>
                 <div>
-                    <div style="font-weight:bold; font-size:1.1rem; color: #2c3e50;">${CURRENT_USER.username}</div>
+                    <div style="font-weight:bold; font-size:1.1rem; color: #2c3e50;">${escapeHtml(CURRENT_USER.username)}</div>
                     <div style="font-size:0.85rem; color:#7f8c8d; font-weight:500;">everfly User</div>
                 </div>
             </div>
@@ -2126,7 +2277,7 @@ function refreshProfileMapLayers({ fitBounds = false } = {}) {
         const curvePoints = getGeodesicPath(lat1, lon1, lat2, lon2);
         longitudeOffsets.forEach(offset => {
             const line = L.polyline(shiftPathLongitude(curvePoints, offset), { color: '#ffb800', weight: 2, opacity: 0.6 });
-            line.bindPopup(`${f.flight_number}<br>${f.date}<br>${f.origin.code} -> ${f.dest.code}`);
+            line.bindPopup(`${escapeHtml(f.flight_number)}<br>${escapeHtml(f.date)}<br>${escapeHtml(f.origin.code)} -> ${escapeHtml(f.dest.code)}`);
             line.addTo(State.map);
             State.profileLayers.push(line);
         });
@@ -2142,7 +2293,7 @@ function refreshProfileMapLayers({ fitBounds = false } = {}) {
         longitudeOffsets.forEach(offset => {
             const loc = [data.loc[0], data.loc[1] + offset];
             const m = L.circleMarker(loc, { radius: 4, color: '#00b0ff', fillColor: '#00b0ff', fillOpacity: 0.8 });
-            m.bindPopup(`<b>${code}</b><br>${data.name}`);
+            m.bindPopup(`<b>${escapeHtml(code)}</b><br>${escapeHtml(data.name)}`);
             m.addTo(State.map);
             State.profileLayers.push(m);
         });

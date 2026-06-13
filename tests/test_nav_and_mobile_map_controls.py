@@ -15,7 +15,7 @@ class NavAndMobileMapControlsTest(unittest.TestCase):
 
         self.assertIn('data-view-nav="datasets"', source)
         self.assertIn("onclick=\"navigateTo('datasets')\"", source)
-        self.assertIn(">Data<", source)
+        self.assertIn(">Library<", source)
         self.assertNotIn("data-dataset-nav=", source)
         self.assertNotIn("navigateToDataset('cities')", source)
 

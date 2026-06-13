@@ -48,6 +48,10 @@ MYSQL_PORT=3306
 MYSQL_USER=flightlog
 MYSQL_PASSWORD=
 MYSQL_DB=flightlog
+
+# Optional: airline logo import and CDN delivery
+IMAGEKIT_PRIVATE_KEY=
+IMAGEKIT_URL_ENDPOINT=
 ```
 
 生成密钥：
@@ -58,6 +62,8 @@ python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 注意：`MASTER_SECRET_KEY` 用于加密用户保存的 FlightAware API Key。部署后必须保持稳定；如果更换，旧的 API Key 密文将无法解密，需要用户重新填写。
+
+航空公司 Logo 可以使用外部公开 URL。配置 ImageKit 后，服务会尝试将 Logo 导入 ImageKit；未配置、导入失败或免费套餐额度耗尽时，会依次回退到原始 URL 和航司代码占位图，不影响其他功能。`IMAGEKIT_PRIVATE_KEY` 只能保存在服务端环境变量中。
 
 ## 数据库准备
 
@@ -280,6 +286,8 @@ mysql -h <mysql-host> -u flightlog -p flightlog < schema_mysql.sql
 ```
 
 已有数据库不要直接重复导入整份 schema。应根据变更编写明确的 `ALTER TABLE` 迁移语句，再手动执行。
+
+租户关联完整性约束迁移位于 `migrations/20260609_tenant_integrity_constraints.sql`。该脚本会先检查孤立记录和跨用户关联；发现问题时会主动中止，不会继续添加约束。请先备份数据库，再使用 MySQL 客户端执行并根据错误信息清理历史数据。
 
 ## 运维命令
 

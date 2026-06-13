@@ -34,9 +34,9 @@
             </a>
         </div>
         <div class="navbar-right">
-            <div class="nav-item active" data-view-nav="profile" onclick="navigateTo('profile')">Profile</div>
+            <div class="nav-item active" data-view-nav="profile" onclick="navigateTo('profile')">Journey</div>
             <div class="nav-item" data-view-nav="flights" onclick="navigateTo('flights')">Flights</div>
-            <div class="nav-item" data-view-nav="datasets" onclick="navigateTo('datasets')">Data</div>
+            <div class="nav-item" data-view-nav="datasets" onclick="navigateTo('datasets')">Library</div>
             <button class="btn btn-primary" onclick="openAddFlightModal()">
                 <i class="fa-solid fa-plus"></i> Add flight
             </button>
@@ -53,7 +53,7 @@
                 </button>
                 <div class="dropdown-content">
                     <button onclick="navigateTo('datasets'); toggleDropdown();">
-                        <i class="fa-solid fa-database"></i> Other Datasets
+                        <i class="fa-solid fa-database"></i> Library
                     </button>
                     <button onclick="openEditProfileModal(); toggleDropdown();">
                         <i class="fa-solid fa-user-edit"></i> Edit Profile
@@ -198,7 +198,7 @@
     <nav class="mobile-bottom-nav" aria-label="Mobile primary navigation">
         <button class="mobile-nav-item active" data-mobile-view="profile" onclick="navigateTo('profile')">
             <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
-            <span>Profile</span>
+            <span>Journey</span>
         </button>
         <button class="mobile-nav-item" data-mobile-view="flights" onclick="navigateTo('flights')">
             <i class="fa-solid fa-plane-departure" aria-hidden="true"></i>
@@ -210,9 +210,19 @@
         </button>
         <button class="mobile-nav-item" data-mobile-view="datasets" onclick="navigateTo('datasets')">
             <i class="fa-solid fa-database" aria-hidden="true"></i>
-            <span>Data</span>
+            <span>Library</span>
         </button>
     </nav>
+
+    <div id="entity-panel-overlay" class="entity-panel-overlay" onclick="closeEntityPanel()" hidden></div>
+    <aside id="entity-panel" class="entity-panel" aria-label="Entity details" hidden>
+        <header class="entity-panel-header">
+            <button class="btn-icon entity-panel-back" aria-label="Back" onclick="goBackEntityPanel()"><i class="fa-solid fa-arrow-left"></i></button>
+            <div id="entity-panel-title" class="entity-panel-title">Details</div>
+            <button class="btn-icon" aria-label="Close details" onclick="closeEntityPanel()"><i class="fa-solid fa-xmark"></i></button>
+        </header>
+        <div id="entity-panel-body" class="entity-panel-body"></div>
+    </aside>
 
     <!-- Modals -->
     <div id="modal-container" class="modal-overlay" style="display: none;">

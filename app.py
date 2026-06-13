@@ -10,6 +10,10 @@ from datetime import datetime, time, timedelta
 import pytz
 import json
 import re
+import socket
+import ipaddress
+import uuid
+from urllib.parse import urlparse
 import werkzeug.security
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -47,7 +51,7 @@ def handle_csrf_error(e):
 def safe_jsonify_error(e):
     """Return generic error in production, detailed in debug."""
     if app.debug:
-        return safe_jsonify_error(e)
+        return jsonify({'error': str(e)}), 500
     print(f"Internal Error: {e}") # Log it
     return jsonify({'error': 'An internal error occurred.'}), 500
 
@@ -167,10 +171,28 @@ def migrate_airlines_website_url():
         if getattr(e, 'args', [None])[0] != 1060:
             print(f"migrate_airlines_website_url error: {e}")
 
+def migrate_airline_logo_metadata():
+    try:
+        raw_conn = database._raw_connect()
+        cur = raw_conn.cursor()
+        for column, definition in [('logo_source_url', 'TEXT'), ('logo_file_id', 'VARCHAR(255)')]:
+            cur.execute("""
+                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'airlines' AND COLUMN_NAME = %s
+            """, (column,))
+            if not cur.fetchone():
+                cur.execute(f"ALTER TABLE airlines ADD COLUMN {column} {definition}")
+        raw_conn.commit()
+        raw_conn.close()
+    except Exception as e:
+        if getattr(e, 'args', [None])[0] != 1060:
+            print(f"migrate_airline_logo_metadata error: {e}")
+
 # --- Migrate users DB at startup ---
 with app.app_context():
     database.migrate_users_db()
     migrate_airlines_website_url()
+    migrate_airline_logo_metadata()
 
 # --- Auth Middleware ---
 @app.before_request
@@ -377,6 +399,31 @@ def get_continent_from_tz(tz_name):
         return None
     return tz_name.split('/')[0]
 
+TENANT_RELATIONSHIPS = {
+    'airports': {
+        'city_id': 'cities',
+    },
+    'flights': {
+        'airline_id': 'airlines',
+        'aircraft_model_id': 'aircraft_models',
+        'origin_airport_id': 'airports',
+        'dest_airport_id': 'airports',
+    },
+}
+
+def validate_tenant_relationships(conn, table_name, data, uid):
+    """Reject relationship IDs that are not owned by the current user."""
+    for field, related_table in TENANT_RELATIONSHIPS.get(table_name, {}).items():
+        related_id = data.get(field)
+        if related_id in (None, ''):
+            continue
+        row = conn.execute(
+            f"SELECT 1 FROM {related_table} WHERE id = ? AND user_id = ?",
+            (related_id, uid)
+        ).fetchone()
+        if not row:
+            raise ValueError(f"Invalid {field}: related record does not belong to current user")
+
 # --- CRUD Routes Generation Helper ---
 def create_crud_routes(endpoint, table_name, columns):
     # GET all
@@ -431,9 +478,12 @@ def create_crud_routes(endpoint, table_name, columns):
         values = list(valid_data.values())
         
         try:
+            validate_tenant_relationships(database.get_db(), table_name, valid_data, g.user['id'])
             new_id = execute_db(f"INSERT INTO {table_name} ({cols}) VALUES ({placeholders})", values)
             new_item = query_db(f"SELECT * FROM {table_name} WHERE id = ? AND user_id = ?", (new_id, g.user['id']), one=True)
             return jsonify(new_item), 201
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
         except Exception as e:
             return safe_jsonify_error(e)
 
@@ -488,9 +538,12 @@ def create_crud_routes(endpoint, table_name, columns):
         values.extend([id, g.user['id']])
         
         try:
+            validate_tenant_relationships(database.get_db(), table_name, valid_data, g.user['id'])
             execute_db(f"UPDATE {table_name} SET {set_clause} WHERE id = ? AND user_id = ?", values)
             updated_item = query_db(f"SELECT * FROM {table_name} WHERE id = ? AND user_id = ?", (id, g.user['id']), one=True)
             return jsonify(updated_item)
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
         except Exception as e:
             return safe_jsonify_error(e)
 
@@ -510,7 +563,7 @@ def create_crud_routes(endpoint, table_name, columns):
 # Schema columns for validation (excluding id)
 cities_cols = ['name', 'country', 'country_code', 'timezone', 'continent']
 airports_cols = ['name', 'iata_code', 'icao_code', 'city_id', 'lat', 'lon', 'terminals', 'timezone']
-airlines_cols = ['name', 'iata_code', 'icao_code', 'frequent_flyer_program', 'frequent_flyer_id', 'website_url']
+airlines_cols = ['name', 'iata_code', 'icao_code', 'callsign', 'country', 'alliance', 'frequent_flyer_program', 'frequent_flyer_id', 'website_url', 'logo_url', 'logo_source_url', 'logo_file_id']
 aircraft_cols = ['manufacturer', 'model', 'series', 'subtype', 'tags_generation', 'tags_engine', 'tags_winglets', 'tags_config', 'name']
 flights_cols = ['date', 'flight_number', 'airline_id', 'aircraft_model_id', 'origin_airport_id', 'dest_airport_id',
                 'dep_time_scheduled', 'arr_time_scheduled', 'seat_number', 'seat_type', 'flight_class', 'note',
@@ -529,6 +582,122 @@ create_crud_routes('airlines', 'airlines', airlines_cols)
 create_crud_routes('aircraft_models', 'aircraft_models', aircraft_cols)
 create_crud_routes('flights', 'flights', flights_cols)
 
+
+# --- Airline Logo Management ---
+MAX_AIRLINE_LOGO_BYTES = 1024 * 1024
+ALLOWED_AIRLINE_LOGO_TYPES = {'image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'}
+
+
+def validate_public_image_url(source_url):
+    parsed = urlparse((source_url or '').strip())
+    if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+        raise ValueError('Logo URL must use HTTP or HTTPS')
+    try:
+        addresses = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == 'https' else 80))
+    except socket.gaierror as e:
+        raise ValueError('Logo URL hostname could not be resolved') from e
+    for address in addresses:
+        address = ipaddress.ip_address(address[4][0])
+        if not address.is_global:
+            raise ValueError('Logo URL must resolve to a public address')
+    return parsed.geturl()
+
+
+def _import_logo_to_imagekit(source_url, airline_id):
+    private_key = os.environ.get('IMAGEKIT_PRIVATE_KEY')
+    url_endpoint = os.environ.get('IMAGEKIT_URL_ENDPOINT')
+    if not private_key or not url_endpoint:
+        return None
+    response = requests.post(
+        'https://upload.imagekit.io/api/v1/files/upload',
+        auth=(private_key, ''),
+        data={
+            'file': source_url,
+            'fileName': f'airline-{airline_id}-{uuid.uuid4().hex}',
+            'folder': '/everfly/airlines/',
+            'useUniqueFileName': 'true',
+        },
+        timeout=12,
+    )
+    response.raise_for_status()
+    result = response.json()
+    return {'logo_url': result.get('url'), 'logo_file_id': result.get('fileId')}
+
+
+def _upload_logo_file_to_imagekit(file_storage, airline_id):
+    private_key = os.environ.get('IMAGEKIT_PRIVATE_KEY')
+    url_endpoint = os.environ.get('IMAGEKIT_URL_ENDPOINT')
+    if not private_key or not url_endpoint:
+        raise RuntimeError('ImageKit is required for uploaded logos; use a public URL instead')
+    if file_storage.mimetype not in ALLOWED_AIRLINE_LOGO_TYPES:
+        raise ValueError('Logo file must be PNG, JPEG, WebP, or SVG')
+    content = file_storage.stream.read(MAX_AIRLINE_LOGO_BYTES + 1)
+    if len(content) > MAX_AIRLINE_LOGO_BYTES:
+        raise ValueError('Logo file must be 1 MB or smaller')
+    if not content:
+        raise ValueError('Logo file is empty')
+    response = requests.post(
+        'https://upload.imagekit.io/api/v1/files/upload',
+        auth=(private_key, ''),
+        files={'file': (file_storage.filename or 'airline-logo', content, file_storage.mimetype)},
+        data={
+            'fileName': f'airline-{airline_id}-{uuid.uuid4().hex}',
+            'folder': '/everfly/airlines/',
+            'useUniqueFileName': 'true',
+        },
+        timeout=20,
+    )
+    response.raise_for_status()
+    result = response.json()
+    return {'logo_url': result.get('url'), 'logo_file_id': result.get('fileId')}
+
+
+@app.route('/api/airlines/<int:id>/logo', methods=['POST'])
+@login_required
+def update_airline_logo(id):
+    airline = query_db("SELECT id FROM airlines WHERE id = ? AND user_id = ?", (id, g.user['id']), one=True)
+    if not airline:
+        return jsonify({'error': 'Not found'}), 404
+    upload = request.files.get('file')
+    if upload:
+        try:
+            imported = _upload_logo_file_to_imagekit(upload, id)
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        except RuntimeError as e:
+            return jsonify({'error': str(e)}), 503
+        except Exception as e:
+            print(f"ImageKit logo upload failed: {e}")
+            return jsonify({'error': 'ImageKit could not upload this logo'}), 502
+        execute_db("UPDATE airlines SET logo_url = ?, logo_source_url = NULL, logo_file_id = ? WHERE id = ? AND user_id = ?",
+                   (imported.get('logo_url'), imported.get('logo_file_id'), id, g.user['id']))
+        return jsonify(query_db("SELECT * FROM airlines WHERE id = ? AND user_id = ?", (id, g.user['id']), one=True))
+
+    try:
+        source_url = validate_public_image_url((request.get_json(silent=True) or {}).get('source_url'))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    imported = None
+    try:
+        imported = _import_logo_to_imagekit(source_url, id)
+    except Exception as e:
+        print(f"ImageKit logo import failed: {e}")
+    logo_url = imported.get('logo_url') if imported else None
+    logo_file_id = imported.get('logo_file_id') if imported else None
+    execute_db("UPDATE airlines SET logo_url = ?, logo_source_url = ?, logo_file_id = ? WHERE id = ? AND user_id = ?",
+               (logo_url, source_url, logo_file_id, id, g.user['id']))
+    return jsonify(query_db("SELECT * FROM airlines WHERE id = ? AND user_id = ?", (id, g.user['id']), one=True))
+
+
+@app.route('/api/airlines/<int:id>/logo', methods=['DELETE'])
+@login_required
+def delete_airline_logo(id):
+    airline = query_db("SELECT id FROM airlines WHERE id = ? AND user_id = ?", (id, g.user['id']), one=True)
+    if not airline:
+        return jsonify({'error': 'Not found'}), 404
+    execute_db("UPDATE airlines SET logo_url = NULL, logo_source_url = NULL, logo_file_id = NULL WHERE id = ? AND user_id = ?",
+               (id, g.user['id']))
+    return jsonify({'message': 'Logo removed'})
 
 # --- CSV Import Route ---
 import os
@@ -898,6 +1067,7 @@ def import_csv(table_name):
             values = list(valid_data.values())
 
             try:
+                validate_tenant_relationships(conn, table_name, valid_data, g.user['id'])
                 conn.execute(f"INSERT INTO {table_name} ({cols}) VALUES ({placeholders})", values)
                 success_count += 1
             except Exception as e:
@@ -1795,6 +1965,102 @@ def get_stats():
 
     return jsonify(stats)
 
+# --- Entity Detail APIs ---
+def _entity_response(entity_type, entity, stats=None, related=None):
+    if not entity:
+        return jsonify({'error': 'Not found'}), 404
+    return jsonify({'type': entity_type, 'entity': entity, 'stats': stats or {}, 'related': related or {}})
+
+
+def _related_flights(where_clause, params):
+    return query_db(f'''
+        SELECT f.id, f.date, f.flight_number, f.airline_id, f.aircraft_model_id,
+               f.origin_airport_id, f.dest_airport_id, f.distance, f.duration_actual,
+               oa.iata_code AS origin_code, da.iata_code AS dest_code, al.name AS airline_name
+        FROM flights f
+        LEFT JOIN airports oa ON f.origin_airport_id = oa.id AND oa.user_id = ?
+        LEFT JOIN airports da ON f.dest_airport_id = da.id AND da.user_id = ?
+        LEFT JOIN airlines al ON f.airline_id = al.id AND al.user_id = ?
+        WHERE f.user_id = ? AND ({where_clause})
+        ORDER BY f.date DESC LIMIT 50
+    ''', params)
+
+
+@app.route('/api/entities/flights/<int:id>', methods=['GET'])
+@login_required
+def get_flight_entity(id):
+    uid = g.user['id']
+    entity = query_db('''
+        SELECT f.*, oa.name AS origin_name, oa.iata_code AS origin_code,
+               da.name AS dest_name, da.iata_code AS dest_code,
+               al.name AS airline_name, al.logo_url AS airline_logo_url,
+               al.logo_source_url AS airline_logo_source_url,
+               CONCAT(am.manufacturer, ' ', COALESCE(am.name, am.model)) AS aircraft_model
+        FROM flights f
+        LEFT JOIN airports oa ON f.origin_airport_id = oa.id AND oa.user_id = ?
+        LEFT JOIN airports da ON f.dest_airport_id = da.id AND da.user_id = ?
+        LEFT JOIN airlines al ON f.airline_id = al.id AND al.user_id = ?
+        LEFT JOIN aircraft_models am ON f.aircraft_model_id = am.id AND am.user_id = ?
+        WHERE f.id = ? AND f.user_id = ?
+    ''', (uid, uid, uid, uid, id, uid), one=True)
+    return _entity_response('flights', entity)
+
+
+@app.route('/api/entities/airlines/<int:id>', methods=['GET'])
+@login_required
+def get_airline_entity(id):
+    uid = g.user['id']
+    entity = query_db("SELECT * FROM airlines WHERE id = ? AND user_id = ?", (id, uid), one=True)
+    stats = query_db('''SELECT COUNT(*) AS flights, COALESCE(SUM(distance), 0) AS distance,
+                        COALESCE(SUM(COALESCE(duration_actual, duration_scheduled)), 0) AS duration
+                        FROM flights WHERE airline_id = ? AND user_id = ?''', (id, uid), one=True)
+    related = {'flights': _related_flights('f.airline_id = ?', (uid, uid, uid, uid, id))} if entity else {}
+    return _entity_response('airlines', entity, stats, related)
+
+
+@app.route('/api/entities/airports/<int:id>', methods=['GET'])
+@login_required
+def get_airport_entity(id):
+    uid = g.user['id']
+    entity = query_db('''SELECT a.*, c.name AS city_name, c.country, c.country_code
+                         FROM airports a LEFT JOIN cities c ON a.city_id = c.id AND c.user_id = ?
+                         WHERE a.id = ? AND a.user_id = ?''', (uid, id, uid), one=True)
+    stats = query_db('''SELECT COUNT(*) AS visits, SUM(origin_airport_id = ?) AS departures,
+                        SUM(dest_airport_id = ?) AS arrivals FROM flights
+                        WHERE user_id = ? AND (origin_airport_id = ? OR dest_airport_id = ?)''',
+                     (id, id, uid, id, id), one=True)
+    related = {'flights': _related_flights('f.origin_airport_id = ? OR f.dest_airport_id = ?', (uid, uid, uid, uid, id, id))} if entity else {}
+    return _entity_response('airports', entity, stats, related)
+
+
+@app.route('/api/entities/cities/<int:id>', methods=['GET'])
+@login_required
+def get_city_entity(id):
+    uid = g.user['id']
+    entity = query_db("SELECT * FROM cities WHERE id = ? AND user_id = ?", (id, uid), one=True)
+    airports = query_db("SELECT * FROM airports WHERE city_id = ? AND user_id = ? ORDER BY name", (id, uid)) if entity else []
+    stats = query_db('''SELECT COUNT(*) AS visits FROM flights f
+                        LEFT JOIN airports oa ON f.origin_airport_id = oa.id AND oa.user_id = ?
+                        LEFT JOIN airports da ON f.dest_airport_id = da.id AND da.user_id = ?
+                        WHERE f.user_id = ? AND (oa.city_id = ? OR da.city_id = ?)''', (uid, uid, uid, id, id), one=True)
+    flights = _related_flights('EXISTS (SELECT 1 FROM airports ca WHERE ca.user_id = ? AND ca.city_id = ? AND ca.id IN (f.origin_airport_id, f.dest_airport_id))', (uid, uid, uid, uid, uid, id)) if entity else []
+    return _entity_response('cities', entity, stats, {'airports': airports, 'flights': flights})
+
+
+@app.route('/api/entities/aircraft_models/<int:id>', methods=['GET'])
+@login_required
+def get_aircraft_model_entity(id):
+    uid = g.user['id']
+    entity = query_db("SELECT * FROM aircraft_models WHERE id = ? AND user_id = ?", (id, uid), one=True)
+    stats = query_db('''SELECT COUNT(*) AS flights, COALESCE(SUM(distance), 0) AS distance,
+                        COALESCE(SUM(COALESCE(duration_actual, duration_scheduled)), 0) AS duration,
+                        COUNT(DISTINCT registration) AS registrations
+                        FROM flights WHERE aircraft_model_id = ? AND user_id = ?''', (id, uid), one=True)
+    related = {'flights': _related_flights('f.aircraft_model_id = ?', (uid, uid, uid, uid, id))} if entity else {}
+    return _entity_response('aircraft_models', entity, stats, related)
+
+# --- End Entity Detail APIs ---
+
 @app.route('/api/flights/detailed', methods=['GET'])
 @login_required
 def get_detailed_flights():
@@ -1804,20 +2070,21 @@ def get_detailed_flights():
         SELECT f.*,
                oa.iata_code as origin_code, oa.name as origin_name, oa.lat as origin_lat, oa.lon as origin_lon, oa.city_id as origin_city_id,
                da.iata_code as dest_code, da.name as dest_name, da.lat as dest_lat, da.lon as dest_lon, da.city_id as dest_city_id,
-               al.name as airline_name,
+               al.name as airline_name, al.iata_code as airline_iata_code, al.icao_code as airline_icao_code,
+               al.logo_url as airline_logo_url, al.logo_source_url as airline_logo_source_url,
                CONCAT(am.manufacturer, ' ', COALESCE(am.name, am.model)) as aircraft_model,
                am.manufacturer,
                am.tags_generation as model_tag_generation,
                am.tags_winglets as model_tag_winglets,
                am.tags_config as model_tag_config
         FROM flights f
-        LEFT JOIN airports oa ON f.origin_airport_id = oa.id
-        LEFT JOIN airports da ON f.dest_airport_id = da.id
-        LEFT JOIN airlines al ON f.airline_id = al.id
-        LEFT JOIN aircraft_models am ON f.aircraft_model_id = am.id
+        LEFT JOIN airports oa ON f.origin_airport_id = oa.id AND oa.user_id = ?
+        LEFT JOIN airports da ON f.dest_airport_id = da.id AND da.user_id = ?
+        LEFT JOIN airlines al ON f.airline_id = al.id AND al.user_id = ?
+        LEFT JOIN aircraft_models am ON f.aircraft_model_id = am.id AND am.user_id = ?
         WHERE f.user_id = ?
         ORDER BY f.date DESC
-    ''', (uid,))
+    ''', (uid, uid, uid, uid, uid))
 
     flights = []
     col_names = [d[0] for d in cursor.description]
