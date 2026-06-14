@@ -31,6 +31,15 @@ class TableInteractionPolishTest(unittest.TestCase):
         self.assertIn("action-danger", self.js)
         self.assertIn("deleteCurrentEntityPanel", self.js)
 
+    def test_flight_airline_logo_opens_airline_panel(self):
+        self.assertIn("airline-logo-link", self.js)
+        self.assertIn("openEntityPanel('airlines'", self.js)
+
+    def test_registration_has_explicit_external_link_box(self):
+        self.assertIn("registration-link", self.js)
+        self.assertIn("Open registration on Flightera", self.js)
+        self.assertIn(".registration-link", self.css)
+
     def test_library_and_interaction_polish_styles_exist(self):
         for selector in [".library-airline-cell", ".entity-link", ".flight-row-hint", ".action-danger", ".flight-aircraft-tag"]:
             self.assertIn(selector, self.css)

@@ -1324,9 +1324,13 @@ function renderFlights() {
         const actualDuration = escapeHtml(f.duration_actual ? `${f.duration_actual} min` : '-');
         const registration = f.registration ? escapeHtml(f.registration) : '-';
         const registrationLink = f.registration
-            ? `<a href="https://www.flightera.net/en/planes/${encodeURIComponent(f.registration)}" target="_blank" rel="noopener">${registration}</a>`
+            ? `<a class="registration-link" href="https://www.flightera.net/en/planes/${encodeURIComponent(f.registration)}" target="_blank" rel="noopener" title="Open registration on Flightera" aria-label="Open registration ${registration} on Flightera" onclick="event.stopPropagation()">${registration}<i class="fa-solid fa-arrow-up-right-from-square"></i></a>`
             : '-';
         const tags = [f.tag_generation, f.tag_winglets, f.tag_config].filter(Boolean);
+        const airlineLogo = airlineLogoMarkup(f.airline_logo_url, f.airline_logo_source_url, f.airline_iata_code || f.airline_icao_code || f.airline_name);
+        const airlineLogoLink = f.airline_id
+            ? `<button class="airline-logo-link" title="Open Airline details" aria-label="Open Airline details: ${escapeHtml(f.airline_name || '-')}" onclick="event.stopPropagation(); openEntityPanel('airlines', ${Number(f.airline_id)})">${airlineLogo}</button>`
+            : airlineLogo;
 
         tr.className = 'flight-row';
         tr.title = 'Open flight details';
@@ -1350,7 +1354,7 @@ function renderFlights() {
             <td class="flight-cell flight-metrics" data-label="Dist / Dur">
                 <div>${distanceText}</div><small>Sched ${scheduledDuration}</small><small>Actual ${actualDuration}</small>
             </td>
-            <td class="flight-cell flight-airline" data-label="Airline"><div class="flight-airline-content">${airlineLogoMarkup(f.airline_logo_url, f.airline_logo_source_url, f.airline_iata_code || f.airline_icao_code || f.airline_name)}${entityLinkButton('airlines', f.airline_id, f.airline_name)}</div></td>
+            <td class="flight-cell flight-airline" data-label="Airline"><div class="flight-airline-content">${airlineLogoLink}${entityLinkButton('airlines', f.airline_id, f.airline_name)}</div></td>
             <td class="flight-cell flight-aircraft" data-label="Aircraft / Reg">
                 <div class="flight-aircraft-model">${entityLinkButton('aircraft_models', f.aircraft_model_id, f.aircraft_model)}</div>
                 <div class="flight-aircraft-registration">${registrationLink}</div>

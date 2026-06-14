@@ -1392,3 +1392,11 @@ tr:hover { background: #f5f9ff; }
     .data-table .data-cell:first-child { grid-column: 1 / -1; padding-bottom: 10px; border-bottom: 1px solid #e7edf4; }
     .data-table .data-cell:first-child::before { display: none; }
 }
+
+/* Focused entity-link affordances */
+.airline-logo-link { display: inline-grid; padding: 2px; border: 1px solid transparent; border-radius: 11px; background: transparent; cursor: pointer; }
+.airline-logo-link:hover, .airline-logo-link:focus-visible { border-color: #b9d3ee; background: #edf6ff; outline: none; box-shadow: 0 3px 10px rgba(24, 91, 155, .14); }
+.registration-link { display: inline-flex; align-items: center; gap: 5px; margin: -3px -5px; padding: 3px 5px; border: 1px solid transparent; border-radius: 7px; }
+.registration-link i { opacity: 0; font-size: .62em; transition: opacity .15s; }
+.registration-link:hover, .registration-link:focus-visible { border-color: #b9d3ee; background: #edf6ff; outline: none; }
+.registration-link:hover i, .registration-link:focus-visible i { opacity: 1; }
