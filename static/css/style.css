@@ -1357,3 +1357,38 @@ tr:hover { background: #f5f9ff; }
     .data-table .data-row { border-radius: 16px; box-shadow: 0 8px 24px rgba(27,61,98,.07); }
     .mobile-bottom-nav { border-top: 1px solid #dce7f2; box-shadow: 0 -10px 26px rgba(22,54,89,.1); }
 }
+
+/* Explicit table interactions and Library polish */
+.airline-logo-placeholder { background: #edf3fa; color: #7890aa; }
+.airline-logo-placeholder i { font-size: .9em; }
+.entity-link { display: inline-flex; align-items: center; gap: 5px; margin: -3px -5px; padding: 3px 5px; border: 1px solid transparent; border-radius: 7px; color: var(--primary-color); background: transparent; font: inherit; font-weight: 700; cursor: pointer; }
+.entity-link i { opacity: 0; font-size: .62em; transition: opacity .15s; }
+.entity-link:hover, .entity-link:focus-visible { border-color: #b9d3ee; background: #edf6ff; outline: none; }
+.entity-link:hover i, .entity-link:focus-visible i { opacity: 1; }
+.library-airline-cell { display: flex; align-items: center; gap: 11px; min-width: 220px; }
+.library-airline-copy { min-width: 0; display: grid; gap: 3px; }
+.library-airline-copy strong { color: #18314f; }
+.library-airline-codes { color: #778aa0; font-size: .7rem; letter-spacing: .06em; }
+.library-airline-cell > a { margin-left: auto; padding: 6px; color: #8297ad; }
+.flight-aircraft-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.flight-aircraft-tag { display: inline-flex; align-items: center; padding: 2px 6px; border: 1px solid #cbdcf0; border-radius: 999px; background: #eff6fd; color: #41698f; font-size: .62rem; font-weight: 700; }
+.flight-row-hint { display: flex; align-items: center; gap: 5px; margin-top: 8px; color: #7990a8; font-size: .67rem; font-weight: 700; opacity: 0; transform: translateX(-4px); transition: .16s; }
+.flight-row:hover .flight-row-hint { opacity: 1; transform: translateX(0); }
+.flight-actions .btn span, .data-actions .btn span { display: none; }
+.action-danger { color: #c83f50 !important; border-color: transparent; }
+.action-danger:hover { color: #a51f31 !important; background: #fff0f2 !important; border-color: #f2c3ca !important; }
+.action-edit:hover { background: #edf6ff !important; border-color: #bed7ee !important; }
+.data-table .data-row { position: relative; transition: background .16s, box-shadow .16s; }
+.data-table .data-row:hover { background: #f5f9fe; box-shadow: inset 3px 0 #2b7bc1; }
+.dataset-content .toolbar { padding: 12px; border: 1px solid #e1e9f2; border-radius: 14px; background: #f7fafe; }
+.dataset-content .search-box input { min-height: 40px; border-color: #d7e2ed !important; border-radius: 10px !important; }
+
+@media (max-width: 768px) {
+    .flight-row-hint { opacity: 1; transform: none; justify-content: flex-end; }
+    #flights-table .flight-actions .btn span, .data-table .data-actions .btn span { display: inline; font-size: .72rem; font-weight: 700; }
+    #flights-table .flight-actions .btn, .data-table .data-actions .btn { gap: 6px; font-size: .85rem; }
+    .library-airline-cell { min-width: 0; }
+    .data-table .data-row { gap: 14px; border-color: #dce7f2; }
+    .data-table .data-cell:first-child { grid-column: 1 / -1; padding-bottom: 10px; border-bottom: 1px solid #e7edf4; }
+    .data-table .data-cell:first-child::before { display: none; }
+}

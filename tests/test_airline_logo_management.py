@@ -58,7 +58,7 @@ class AirlineLogoManagementTest(unittest.TestCase):
         self.assertIn("function airlineLogoMarkup", source)
         self.assertIn("loading=\"lazy\"", source)
         self.assertIn("logo_source_url", source)
-        self.assertIn("airline-logo-fallback", source)
+        self.assertIn("airline-logo-placeholder", source)
         self.assertIn("API.upload(`airlines/${id}/logo`", source)
 
 

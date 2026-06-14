@@ -184,12 +184,15 @@ function escapeHtml(value) {
         .replace(/'/g, '&#039;');
 }
 
+function airlineLogoPlaceholder(size = 'list') {
+    return `<span class="airline-logo airline-logo-${size} airline-logo-placeholder" aria-hidden="true"><i class="fa-solid fa-building"></i></span>`;
+}
+
 function airlineLogoMarkup(logoUrl, logoSourceUrl, code, size = 'list') {
     const primary = logoUrl || logoSourceUrl || '';
     const fallbackSource = logoUrl && logoSourceUrl ? logoSourceUrl : '';
-    const initials = (code || '?').slice(0, 3).toUpperCase();
-    if (!primary) return `<span class="airline-logo airline-logo-${size} airline-logo-fallback">${escapeHtml(initials)}</span>`;
-    return `<span class="airline-logo airline-logo-${size}"><img loading="lazy" src="${escapeHtml(primary)}" data-fallback-src="${escapeHtml(fallbackSource)}" alt="" onerror="handleAirlineLogoError(this)"><span class="airline-logo-fallback">${escapeHtml(initials)}</span></span>`;
+    if (!primary) return airlineLogoPlaceholder(size);
+    return `<span class="airline-logo airline-logo-${size}"><img loading="lazy" src="${escapeHtml(primary)}" data-fallback-src="${escapeHtml(fallbackSource)}" data-logo-size="${escapeHtml(size)}" alt="" onerror="handleAirlineLogoError(this)"></span>`;
 }
 
 function handleAirlineLogoError(image) {
@@ -199,7 +202,7 @@ function handleAirlineLogoError(image) {
         image.src = fallback;
         return;
     }
-    image.style.display = 'none';
+    image.parentElement.innerHTML = airlineLogoPlaceholder(image.dataset.logoSize || 'list');
 }
 
 async function manageAirlineLogo(id) {
@@ -371,7 +374,8 @@ function entityDisplayName(type, entity) {
 
 function entityLinkButton(type, id, label, extraClass = '') {
     if (!id) return `<span>${escapeHtml(label || '-')}</span>`;
-    return `<button class="entity-link ${extraClass}" onclick="event.stopPropagation(); openEntityPanel('${type}', ${Number(id)})">${escapeHtml(label || '-')}</button>`;
+    const destination = ENTITY_LABELS[type] || 'record';
+    return `<button class="entity-link ${extraClass}" title="Open ${escapeHtml(destination)} details" aria-label="Open ${escapeHtml(destination)} details: ${escapeHtml(label || '-')}" onclick="event.stopPropagation(); openEntityPanel('${type}', ${Number(id)})">${escapeHtml(label || '-')}<i class="fa-solid fa-arrow-up-right-from-square"></i></button>`;
 }
 
 async function openEntityPanel(type, id, pushHistory = true) {
@@ -425,6 +429,17 @@ function editCurrentEntityPanel() {
     editEntityFromPanel(current.type, current.entity);
 }
 
+async function deleteCurrentEntityPanel() {
+    const current = State.entityPanelCurrent;
+    if (!current || !confirm(`Delete this ${ENTITY_LABELS[current.type] || 'record'}?`)) return;
+    const result = await API.delete(current.type, current.entity.id);
+    if (result.error) return alert(result.error);
+    closeEntityPanel();
+    if (State.currentView === 'profile') loadProfile();
+    if (State.currentView === 'flights') loadFlights();
+    if (State.currentView === 'datasets' && State.currentDataset === current.type) loadDataset(current.type);
+}
+
 function entityRelationshipLinks(type, entity) {
     const links = [];
     const add = (target, id, label, detail = '') => {
@@ -461,7 +476,7 @@ function renderEntityPanel(payload) {
     const relatedAirports = (related.airports || []).map(a => `
         <button class="entity-related-row" onclick="openEntityPanel('airports', ${Number(a.id)})"><span><b>${escapeHtml(a.name)}</b><small>${escapeHtml(a.iata_code || a.icao_code || '')}</small></span></button>`).join('');
     document.getElementById('entity-panel-body').innerHTML = `
-        <section class="entity-hero">${type === 'airlines' ? airlineLogoMarkup(entity.logo_url, entity.logo_source_url, entity.iata_code || entity.icao_code || entity.name, 'detail') : `<div class="entity-mark">${escapeHtml((codes[0] || title || '?').slice(0, 3).toUpperCase())}</div>`}<div class="entity-hero-copy"><h2>${escapeHtml(title)}</h2><p>${codes.map(escapeHtml).join(' · ')}</p><div class="entity-hero-actions"><button class="btn btn-sm btn-primary" onclick="editCurrentEntityPanel()">Edit</button>${type === 'airlines' ? `<button class="btn btn-sm btn-secondary" onclick="manageAirlineLogo(${Number(entity.id)})">Manage logo</button>` : ''}</div></div></section>
+        <section class="entity-hero">${type === 'airlines' ? airlineLogoMarkup(entity.logo_url, entity.logo_source_url, entity.iata_code || entity.icao_code || entity.name, 'detail') : `<div class="entity-mark">${escapeHtml((codes[0] || title || '?').slice(0, 3).toUpperCase())}</div>`}<div class="entity-hero-copy"><h2>${escapeHtml(title)}</h2><p>${codes.map(escapeHtml).join(' · ')}</p><div class="entity-hero-actions"><button class="btn btn-sm btn-primary" onclick="editCurrentEntityPanel()">Edit</button>${type === 'airlines' ? `<button class="btn btn-sm btn-secondary" onclick="manageAirlineLogo(${Number(entity.id)})">Manage logo</button>` : ''}<button class="btn btn-sm action-danger" onclick="deleteCurrentEntityPanel()"><i class="fa-solid fa-trash"></i> Delete</button></div></div></section>
         ${statsHtml ? `<section><h3>Overview</h3><div class="entity-stats">${statsHtml}</div></section>` : ''}
         ${relationshipLinks ? `<section><h3>Connections</h3>${relationshipLinks}</section>` : ''}
         <section><h3>Details</h3><div class="entity-fields">${metadata}</div></section>
@@ -756,6 +771,7 @@ function renderDatasetTable(config, data) {
     processedData.forEach(item => {
         const tr = document.createElement('tr');
         tr.className = 'data-row';
+        tr.title = `Open ${ENTITY_LABELS[State.currentDataset] || 'record'} details`;
         tr.onclick = () => openEntityPanel(State.currentDataset, item.id);
         config.columns.forEach(col => {
             const td = document.createElement('td');
@@ -769,13 +785,21 @@ function renderDatasetTable(config, data) {
                 val = lookupItem ? lookupItem[col.display] : val;
             }
 
-            if (State.currentDataset === 'airlines' && col.key === 'name' && item.website_url) {
-                const link = document.createElement('a');
-                link.href = normalizeWebsiteUrl(item.website_url);
-                link.target = '_blank';
-                link.rel = 'noopener noreferrer';
-                link.textContent = val || '';
-                td.appendChild(link);
+            if (State.currentDataset === 'airlines' && col.key === 'name') {
+                const identity = document.createElement('div');
+                identity.className = 'library-airline-cell';
+                identity.innerHTML = `${airlineLogoMarkup(item.logo_url, item.logo_source_url, item.iata_code || item.icao_code || item.name)}<span class="library-airline-copy"><strong>${escapeHtml(val || '-')}</strong><small class="library-airline-codes">${escapeHtml([item.iata_code, item.icao_code].filter(Boolean).join(' · '))}</small></span>`;
+                if (item.website_url) {
+                    const link = document.createElement('a');
+                    link.href = normalizeWebsiteUrl(item.website_url);
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+                    link.title = 'Open official website';
+                    link.innerHTML = '<i class="fa-solid fa-arrow-up-right-from-square"></i>';
+                    link.onclick = (event) => event.stopPropagation();
+                    identity.appendChild(link);
+                }
+                td.appendChild(identity);
             } else {
                 td.textContent = val;
             }
@@ -830,14 +854,19 @@ function renderDatasetTable(config, data) {
         }
 
         const btnEdit = document.createElement('button');
-        btnEdit.className = 'btn btn-sm btn-icon';
-        btnEdit.innerHTML = '<i class="fa-solid fa-pen"></i>';
+        btnEdit.className = 'btn btn-sm btn-icon action-edit';
+        btnEdit.title = 'Edit record';
+        btnEdit.setAttribute('aria-label', 'Edit record');
+        btnEdit.setAttribute('data-action-label', 'Edit');
+        btnEdit.innerHTML = '<i class="fa-solid fa-pen"></i><span>Edit</span>';
         btnEdit.onclick = (e) => { e.stopPropagation(); openEditDatasetModal(item); };
 
         const btnDel = document.createElement('button');
-        btnDel.className = 'btn btn-sm btn-icon';
-        btnDel.innerHTML = '<i class="fa-solid fa-trash"></i>';
-        btnDel.style.color = 'var(--danger)';
+        btnDel.className = 'btn btn-sm btn-icon action-danger';
+        btnDel.title = 'Delete record';
+        btnDel.setAttribute('aria-label', 'Delete record');
+        btnDel.setAttribute('data-action-label', 'Delete');
+        btnDel.innerHTML = '<i class="fa-solid fa-trash"></i><span>Delete</span>';
         btnDel.onclick = (e) => { e.stopPropagation(); deleteDatasetItem(item.id); };
 
         tdAction.appendChild(btnEdit);
@@ -1297,14 +1326,16 @@ function renderFlights() {
         const registrationLink = f.registration
             ? `<a href="https://www.flightera.net/en/planes/${encodeURIComponent(f.registration)}" target="_blank" rel="noopener">${registration}</a>`
             : '-';
-        const tags = [f.tag_generation, f.tag_winglets, f.tag_config].filter(Boolean).map(escapeHtml).join(' / ');
+        const tags = [f.tag_generation, f.tag_winglets, f.tag_config].filter(Boolean);
 
         tr.className = 'flight-row';
+        tr.title = 'Open flight details';
         tr.innerHTML = `
             <td class="flight-cell flight-summary" data-label="Date / Flight">
                 <div class="flight-summary-date">${displayDate}</div>
                 <div class="flight-route-strip"><span>${safe(f.origin_code)}</span><i class="fa-solid fa-plane"></i><span>${safe(f.dest_code)}</span></div>
                 <div class="flight-summary-number">${safe(f.flight_number)}</div>
+                <div class="flight-row-hint"><span>View flight details</span><i class="fa-solid fa-chevron-right"></i></div>
             </td>
             <td class="flight-cell flight-times" data-label="Times">
                 <div class="flight-times-grid">
@@ -1323,16 +1354,16 @@ function renderFlights() {
             <td class="flight-cell flight-aircraft" data-label="Aircraft / Reg">
                 <div class="flight-aircraft-model">${entityLinkButton('aircraft_models', f.aircraft_model_id, f.aircraft_model)}</div>
                 <div class="flight-aircraft-registration">${registrationLink}</div>
-                ${tags ? `<div class="flight-aircraft-tags">${tags}</div>` : ''}
+                ${tags.length ? `<div class="flight-aircraft-tags">${tags.map(tag => `<span class="flight-aircraft-tag">${escapeHtml(tag)}</span>`).join('')}</div>` : ''}
             </td>
             <td class="flight-cell flight-seat" data-label="Seat / Class">
                 <div>${safe(f.seat_number)} <small>${safe(f.seat_type)}</small></div><small>${safe(f.flight_class)}</small>
             </td>
             <td class="flight-cell flight-note" data-label="Note" style="max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(f.note || '')}">${escapeHtml(f.note || '')}</td>
             <td class="flight-cell flight-actions" data-label="Actions">
-                <button class="btn btn-sm btn-icon flight-update" style="color:var(--accent-blue)" title="Update from AeroAPI"><i class="fa-solid fa-cloud-arrow-down"></i></button>
-                <button class="btn btn-sm btn-icon flight-edit"><i class="fa-solid fa-pen"></i></button>
-                <button class="btn btn-sm btn-icon flight-delete" style="color:var(--danger)"><i class="fa-solid fa-trash"></i></button>
+                <button class="btn btn-sm btn-icon flight-update" data-action-label="Update" aria-label="Update flight from AeroAPI" title="Update from AeroAPI"><i class="fa-solid fa-cloud-arrow-down"></i><span>Update</span></button>
+                <button class="btn btn-sm btn-icon flight-edit action-edit" data-action-label="Edit" aria-label="Edit flight" title="Edit flight"><i class="fa-solid fa-pen"></i><span>Edit</span></button>
+                <button class="btn btn-sm btn-icon flight-delete action-danger" data-action-label="Delete" aria-label="Delete flight" title="Delete flight"><i class="fa-solid fa-trash"></i><span>Delete</span></button>
             </td>
         `;
         tr.onclick = () => openEntityPanel('flights', f.id);
