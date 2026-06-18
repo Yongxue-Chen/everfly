@@ -47,6 +47,11 @@ class TableInteractionPolishTest(unittest.TestCase):
         self.assertIn(".action-api", self.css)
         self.assertIn(".flight-update span", self.css)
 
+    def test_desktop_aeroapi_button_is_near_flight_number(self):
+        self.assertIn("flight-summary-actions", self.js)
+        self.assertIn("flight-update-summary", self.js)
+        self.assertIn(".flight-summary-actions", self.css)
+
     def test_library_and_interaction_polish_styles_exist(self):
         for selector in [".library-airline-cell", ".entity-link", ".flight-row-hint", ".action-danger", ".flight-aircraft-tag"]:
             self.assertIn(selector, self.css)

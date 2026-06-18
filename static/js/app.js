@@ -1338,7 +1338,7 @@ function renderFlights() {
             <td class="flight-cell flight-summary" data-label="Date / Flight">
                 <div class="flight-summary-date">${displayDate}</div>
                 <div class="flight-route-strip"><span>${safe(f.origin_code)}</span><i class="fa-solid fa-plane"></i><span>${safe(f.dest_code)}</span></div>
-                <div class="flight-summary-number">${safe(f.flight_number)}</div>
+                <div class="flight-summary-main flight-summary-actions"><div class="flight-summary-number">${safe(f.flight_number)}</div><button class="btn btn-sm flight-update-summary action-api" data-action-label="Update" aria-label="Update flight from AeroAPI" title="Update from AeroAPI"><i class="fa-solid fa-cloud-arrow-down"></i><span>API</span></button></div>
                 <div class="flight-row-hint"><span>View flight details</span><i class="fa-solid fa-chevron-right"></i></div>
             </td>
             <td class="flight-cell flight-times" data-label="Times">
@@ -1371,7 +1371,7 @@ function renderFlights() {
             </td>
         `;
         tr.onclick = () => openEntityPanel('flights', f.id);
-        tr.querySelector('.flight-update').onclick = (e) => { e.stopPropagation(); updateFlightFromAeroAPI(f.id); };
+        tr.querySelectorAll('.flight-update, .flight-update-summary').forEach(btn => { btn.onclick = (e) => { e.stopPropagation(); updateFlightFromAeroAPI(f.id); }; });
         tr.querySelector('.flight-edit').onclick = (e) => { e.stopPropagation(); openEditFlightModal(f); };
         tr.querySelector('.flight-delete').onclick = (e) => { e.stopPropagation(); deleteFlight(f.id); };
         tbody.appendChild(tr);

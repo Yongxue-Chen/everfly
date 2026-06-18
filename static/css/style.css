@@ -1405,3 +1405,9 @@ tr:hover { background: #f5f9ff; }
 .action-api { display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: #0b5faa !important; border: 1px solid #b9d3ee !important; background: #edf6ff !important; font-weight: 800; }
 .action-api:hover, .action-api:focus-visible { color: #064b87 !important; border-color: #7fb0df !important; background: #dff0ff !important; outline: none; }
 .flight-update span { display: inline !important; font-size: .72rem; font-weight: 800; letter-spacing: .04em; }
+
+/* Desktop-visible per-flight API action */
+.flight-summary-main { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.flight-update-summary { flex: 0 0 auto; min-height: 30px; padding: 5px 8px; border-radius: 999px; }
+.flight-update-summary span { display: inline !important; font-size: .68rem; font-weight: 800; letter-spacing: .04em; }
+.flight-summary-actions { min-width: 0; }
