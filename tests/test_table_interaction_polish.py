@@ -40,6 +40,13 @@ class TableInteractionPolishTest(unittest.TestCase):
         self.assertIn("Open registration on Flightera", self.js)
         self.assertIn(".registration-link", self.css)
 
+    def test_flight_aeroapi_update_button_is_visible_and_bound(self):
+        self.assertIn("flight-update action-api", self.js)
+        self.assertIn("updateFlightFromAeroAPI(f.id)", self.js)
+        self.assertIn(">API</span>", self.js)
+        self.assertIn(".action-api", self.css)
+        self.assertIn(".flight-update span", self.css)
+
     def test_library_and_interaction_polish_styles_exist(self):
         for selector in [".library-airline-cell", ".entity-link", ".flight-row-hint", ".action-danger", ".flight-aircraft-tag"]:
             self.assertIn(selector, self.css)

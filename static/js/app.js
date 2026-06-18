@@ -1365,7 +1365,7 @@ function renderFlights() {
             </td>
             <td class="flight-cell flight-note" data-label="Note" style="max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(f.note || '')}">${escapeHtml(f.note || '')}</td>
             <td class="flight-cell flight-actions" data-label="Actions">
-                <button class="btn btn-sm btn-icon flight-update" data-action-label="Update" aria-label="Update flight from AeroAPI" title="Update from AeroAPI"><i class="fa-solid fa-cloud-arrow-down"></i><span>Update</span></button>
+                <button class="btn btn-sm flight-update action-api" data-action-label="Update" aria-label="Update flight from AeroAPI" title="Update from AeroAPI"><i class="fa-solid fa-cloud-arrow-down"></i><span>API</span></button>
                 <button class="btn btn-sm btn-icon flight-edit action-edit" data-action-label="Edit" aria-label="Edit flight" title="Edit flight"><i class="fa-solid fa-pen"></i><span>Edit</span></button>
                 <button class="btn btn-sm btn-icon flight-delete action-danger" data-action-label="Delete" aria-label="Delete flight" title="Delete flight"><i class="fa-solid fa-trash"></i><span>Delete</span></button>
             </td>

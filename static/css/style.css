@@ -1400,3 +1400,8 @@ tr:hover { background: #f5f9ff; }
 .registration-link i { opacity: 0; font-size: .62em; transition: opacity .15s; }
 .registration-link:hover, .registration-link:focus-visible { border-color: #b9d3ee; background: #edf6ff; outline: none; }
 .registration-link:hover i, .registration-link:focus-visible i { opacity: 1; }
+
+/* Keep per-flight AeroAPI update visible */
+.action-api { display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: #0b5faa !important; border: 1px solid #b9d3ee !important; background: #edf6ff !important; font-weight: 800; }
+.action-api:hover, .action-api:focus-visible { color: #064b87 !important; border-color: #7fb0df !important; background: #dff0ff !important; outline: none; }
+.flight-update span { display: inline !important; font-size: .72rem; font-weight: 800; letter-spacing: .04em; }
