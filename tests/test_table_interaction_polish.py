@@ -60,8 +60,9 @@ class TableInteractionPolishTest(unittest.TestCase):
 
     def test_flight_actions_are_in_summary_not_last_column(self):
         self.assertIn("flight-summary-actions", self.js)
-        self.assertIn("flight-edit action-edit", self.js)
-        self.assertIn("flight-delete action-danger", self.js)
+        summary = self.js.split("flight-summary-button-group", 1)[1].split("</div></div>", 1)[0]
+        self.assertNotIn("flight-edit", summary)
+        self.assertNotIn("flight-delete", summary)
         self.assertNotIn("flight-cell flight-actions", self.js)
 
     def test_library_and_interaction_polish_styles_exist(self):

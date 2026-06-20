@@ -1339,7 +1339,7 @@ function renderFlights() {
             <td class="flight-cell flight-summary" data-label="Date / Flight">
                 <div class="flight-summary-date">${displayDate}</div>
                 <div class="flight-route-strip"><div class="flight-route-point"><span class="flight-route-name">${safe(f.origin_name || f.origin_code)}</span><small class="flight-route-terminal">${safe(f.origin_code)} · ${originTerminal}</small></div><i class="fa-solid fa-plane"></i><div class="flight-route-point"><span class="flight-route-name">${safe(f.dest_name || f.dest_code)}</span><small class="flight-route-terminal">${safe(f.dest_code)} · ${destTerminal}</small></div></div>
-                <div class="flight-summary-main flight-summary-actions"><div class="flight-summary-number">${safe(f.flight_number)}</div><div class="flight-summary-button-group"><button class="btn btn-sm flight-update-summary action-api" data-action-label="Update" aria-label="Update flight from AeroAPI" title="Update from AeroAPI"><i class="fa-solid fa-cloud-arrow-down"></i><span>API</span></button><button class="btn btn-sm btn-icon flight-edit action-edit" data-action-label="Edit" aria-label="Edit flight" title="Edit flight"><i class="fa-solid fa-pen"></i><span>Edit</span></button><button class="btn btn-sm btn-icon flight-delete action-danger" data-action-label="Delete" aria-label="Delete flight" title="Delete flight"><i class="fa-solid fa-trash"></i><span>Delete</span></button></div></div>
+                <div class="flight-summary-main flight-summary-actions"><div class="flight-summary-number">${safe(f.flight_number)}</div><div class="flight-summary-button-group"><button class="btn btn-sm flight-update-summary action-api" data-action-label="Update" aria-label="Update flight from AeroAPI" title="Update from AeroAPI"><i class="fa-solid fa-cloud-arrow-down"></i><span>API</span></button></div></div>
                 <div class="flight-row-hint"><span>View flight details</span><i class="fa-solid fa-chevron-right"></i></div>
             </td>
             <td class="flight-cell flight-times" data-label="Times">
@@ -1368,8 +1368,6 @@ function renderFlights() {
         `;
         tr.onclick = () => openEntityPanel('flights', f.id);
         tr.querySelectorAll('.flight-update-summary').forEach(btn => { btn.onclick = (e) => { e.stopPropagation(); updateFlightFromAeroAPI(f.id); }; });
-        tr.querySelector('.flight-edit').onclick = (e) => { e.stopPropagation(); openEditFlightModal(f); };
-        tr.querySelector('.flight-delete').onclick = (e) => { e.stopPropagation(); deleteFlight(f.id); };
         tbody.appendChild(tr);
     });
 }
