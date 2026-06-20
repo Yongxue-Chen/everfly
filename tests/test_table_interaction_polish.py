@@ -41,7 +41,7 @@ class TableInteractionPolishTest(unittest.TestCase):
         self.assertIn(".registration-link", self.css)
 
     def test_flight_aeroapi_update_button_is_visible_and_bound(self):
-        self.assertIn("flight-update action-api", self.js)
+        self.assertIn("flight-update-summary action-api", self.js)
         self.assertIn("updateFlightFromAeroAPI(f.id)", self.js)
         self.assertIn(">API</span>", self.js)
         self.assertIn(".action-api", self.css)
@@ -51,6 +51,18 @@ class TableInteractionPolishTest(unittest.TestCase):
         self.assertIn("flight-summary-actions", self.js)
         self.assertIn("flight-update-summary", self.js)
         self.assertIn(".flight-summary-actions", self.css)
+
+    def test_mobile_route_uses_airport_names_and_terminals(self):
+        self.assertIn("flight-route-name", self.js)
+        self.assertIn("flight-route-terminal", self.js)
+        self.assertIn("f.origin_name || f.origin_code", self.js)
+        self.assertIn("f.dest_name || f.dest_code", self.js)
+
+    def test_flight_actions_are_in_summary_not_last_column(self):
+        self.assertIn("flight-summary-actions", self.js)
+        self.assertIn("flight-edit action-edit", self.js)
+        self.assertIn("flight-delete action-danger", self.js)
+        self.assertNotIn("flight-cell flight-actions", self.js)
 
     def test_library_and_interaction_polish_styles_exist(self):
         for selector in [".library-airline-cell", ".entity-link", ".flight-row-hint", ".action-danger", ".flight-aircraft-tag"]:

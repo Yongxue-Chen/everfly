@@ -50,6 +50,24 @@ class AeroApiFieldDiffsTest(unittest.TestCase):
             {"registration": None},
         ))
 
+    def test_aeroapi_loader_selects_flight_class_for_preview_default(self):
+        with open(os.path.join(ROOT, "app.py"), encoding="utf-8") as fh:
+            source = fh.read()
+        loader = source.split("def _load_flight_for_aeroapi", 1)[1].split("def _local_aeroapi_values", 1)[0]
+        self.assertIn("flight_class", loader)
+        self.assertIn("flight[16]", source)
+
+
+    def test_empty_flight_class_gets_economy_default_from_aeroapi_update(self):
+        diffs = build_aeroapi_field_diffs(
+            {"flight_class": None},
+            {"flight_class": "Economy"},
+        )
+
+        self.assertEqual("flight_class", diffs[0]["field"])
+        self.assertEqual("missing", diffs[0]["status"])
+        self.assertTrue(diffs[0]["default_selected"])
+
 
 if __name__ == "__main__":
     unittest.main()

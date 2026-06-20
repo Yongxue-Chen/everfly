@@ -83,6 +83,7 @@ AEROAPI_CONFIRM_FIELDS = [
     ('duration_actual', 'Actual Duration'),
     ('origin_terminal', 'Origin Terminal'),
     ('dest_terminal', 'Destination Terminal'),
+    ('flight_class', 'Class'),
 ]
 
 AEROAPI_CONFIRM_FIELD_NAMES = {field for field, _ in AEROAPI_CONFIRM_FIELDS}
@@ -2110,7 +2111,7 @@ def get_detailed_flights():
 def update_single_flight_from_aeroapi(flight_id, force=False):
     conn = database.get_db()
     uid = g.user['id']
-    cur = conn.execute("SELECT flight_number, date, origin_airport_id, dest_airport_id, std, atd, sta, ata, registration, airline_id, aircraft_model_id, distance, duration_scheduled, duration_actual, origin_terminal, dest_terminal FROM flights WHERE id = ? AND user_id = ?", (flight_id, uid))
+    cur = conn.execute("SELECT flight_number, date, origin_airport_id, dest_airport_id, std, atd, sta, ata, registration, airline_id, aircraft_model_id, distance, duration_scheduled, duration_actual, origin_terminal, dest_terminal, flight_class FROM flights WHERE id = ? AND user_id = ?", (flight_id, uid))
     flight = cur.fetchone()
     
     if not flight:
@@ -2273,7 +2274,7 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
     return {'success': True, 'fields_updated': len(update_fields), 'debug_match': best_match.get('ident')}
 
 def _load_flight_for_aeroapi(conn, uid, flight_id):
-    cur = conn.execute("SELECT flight_number, date, origin_airport_id, dest_airport_id, std, atd, sta, ata, registration, airline_id, aircraft_model_id, distance, duration_scheduled, duration_actual, origin_terminal, dest_terminal FROM flights WHERE id = ? AND user_id = ?", (flight_id, uid))
+    cur = conn.execute("SELECT flight_number, date, origin_airport_id, dest_airport_id, std, atd, sta, ata, registration, airline_id, aircraft_model_id, distance, duration_scheduled, duration_actual, origin_terminal, dest_terminal, flight_class FROM flights WHERE id = ? AND user_id = ?", (flight_id, uid))
     return cur.fetchone()
 
 def _local_aeroapi_values(flight):
@@ -2288,6 +2289,7 @@ def _local_aeroapi_values(flight):
         'duration_actual': flight[13],
         'origin_terminal': flight[14],
         'dest_terminal': flight[15],
+        'flight_class': flight[16],
     }
 
 def _format_aeroapi_terminal(t):
@@ -2488,6 +2490,8 @@ def _build_aeroapi_preview(flight_id, selected_candidate_index=None):
     best_match = selection['match']
     local_values = _local_aeroapi_values(flight)
     remote_values = _aeroapi_remote_values(best_match)
+    if _is_empty_value(local_values.get('flight_class')):
+        remote_values['flight_class'] = 'Economy'
     return {
         'success': True,
         'debug_match': best_match.get('ident'),

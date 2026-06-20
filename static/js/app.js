@@ -1266,7 +1266,6 @@ function filterFlights() {
         ['aircraft_model', 'registration', 'tag_generation', 'tag_winglets', 'tag_config'],
         ['seat_number', 'seat_type', 'flight_class'],
         'note',
-        null
     ];
 
     ths.forEach((th, idx) => {
@@ -1327,6 +1326,8 @@ function renderFlights() {
             ? `<a class="registration-link" href="https://www.flightera.net/en/planes/${encodeURIComponent(f.registration)}" target="_blank" rel="noopener" title="Open registration on Flightera" aria-label="Open registration ${registration} on Flightera" onclick="event.stopPropagation()">${registration}<i class="fa-solid fa-arrow-up-right-from-square"></i></a>`
             : '-';
         const tags = [f.tag_generation, f.tag_winglets, f.tag_config].filter(Boolean);
+        const originTerminal = f.origin_terminal ? `Terminal ${escapeHtml(f.origin_terminal)}` : 'Terminal -';
+        const destTerminal = f.dest_terminal ? `Terminal ${escapeHtml(f.dest_terminal)}` : 'Terminal -';
         const airlineLogo = airlineLogoMarkup(f.airline_logo_url, f.airline_logo_source_url, f.airline_iata_code || f.airline_icao_code || f.airline_name);
         const airlineLogoLink = f.airline_id
             ? `<button class="airline-logo-link" title="Open Airline details" aria-label="Open Airline details: ${escapeHtml(f.airline_name || '-')}" onclick="event.stopPropagation(); openEntityPanel('airlines', ${Number(f.airline_id)})">${airlineLogo}</button>`
@@ -1337,8 +1338,8 @@ function renderFlights() {
         tr.innerHTML = `
             <td class="flight-cell flight-summary" data-label="Date / Flight">
                 <div class="flight-summary-date">${displayDate}</div>
-                <div class="flight-route-strip"><span>${safe(f.origin_code)}</span><i class="fa-solid fa-plane"></i><span>${safe(f.dest_code)}</span></div>
-                <div class="flight-summary-main flight-summary-actions"><div class="flight-summary-number">${safe(f.flight_number)}</div><button class="btn btn-sm flight-update-summary action-api" data-action-label="Update" aria-label="Update flight from AeroAPI" title="Update from AeroAPI"><i class="fa-solid fa-cloud-arrow-down"></i><span>API</span></button></div>
+                <div class="flight-route-strip"><div class="flight-route-point"><span class="flight-route-name">${safe(f.origin_name || f.origin_code)}</span><small class="flight-route-terminal">${safe(f.origin_code)} · ${originTerminal}</small></div><i class="fa-solid fa-plane"></i><div class="flight-route-point"><span class="flight-route-name">${safe(f.dest_name || f.dest_code)}</span><small class="flight-route-terminal">${safe(f.dest_code)} · ${destTerminal}</small></div></div>
+                <div class="flight-summary-main flight-summary-actions"><div class="flight-summary-number">${safe(f.flight_number)}</div><div class="flight-summary-button-group"><button class="btn btn-sm flight-update-summary action-api" data-action-label="Update" aria-label="Update flight from AeroAPI" title="Update from AeroAPI"><i class="fa-solid fa-cloud-arrow-down"></i><span>API</span></button><button class="btn btn-sm btn-icon flight-edit action-edit" data-action-label="Edit" aria-label="Edit flight" title="Edit flight"><i class="fa-solid fa-pen"></i><span>Edit</span></button><button class="btn btn-sm btn-icon flight-delete action-danger" data-action-label="Delete" aria-label="Delete flight" title="Delete flight"><i class="fa-solid fa-trash"></i><span>Delete</span></button></div></div>
                 <div class="flight-row-hint"><span>View flight details</span><i class="fa-solid fa-chevron-right"></i></div>
             </td>
             <td class="flight-cell flight-times" data-label="Times">
@@ -1364,14 +1365,9 @@ function renderFlights() {
                 <div>${safe(f.seat_number)} <small>${safe(f.seat_type)}</small></div><small>${safe(f.flight_class)}</small>
             </td>
             <td class="flight-cell flight-note" data-label="Note" style="max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(f.note || '')}">${escapeHtml(f.note || '')}</td>
-            <td class="flight-cell flight-actions" data-label="Actions">
-                <button class="btn btn-sm flight-update action-api" data-action-label="Update" aria-label="Update flight from AeroAPI" title="Update from AeroAPI"><i class="fa-solid fa-cloud-arrow-down"></i><span>API</span></button>
-                <button class="btn btn-sm btn-icon flight-edit action-edit" data-action-label="Edit" aria-label="Edit flight" title="Edit flight"><i class="fa-solid fa-pen"></i><span>Edit</span></button>
-                <button class="btn btn-sm btn-icon flight-delete action-danger" data-action-label="Delete" aria-label="Delete flight" title="Delete flight"><i class="fa-solid fa-trash"></i><span>Delete</span></button>
-            </td>
         `;
         tr.onclick = () => openEntityPanel('flights', f.id);
-        tr.querySelectorAll('.flight-update, .flight-update-summary').forEach(btn => { btn.onclick = (e) => { e.stopPropagation(); updateFlightFromAeroAPI(f.id); }; });
+        tr.querySelectorAll('.flight-update-summary').forEach(btn => { btn.onclick = (e) => { e.stopPropagation(); updateFlightFromAeroAPI(f.id); }; });
         tr.querySelector('.flight-edit').onclick = (e) => { e.stopPropagation(); openEditFlightModal(f); };
         tr.querySelector('.flight-delete').onclick = (e) => { e.stopPropagation(); deleteFlight(f.id); };
         tbody.appendChild(tr);

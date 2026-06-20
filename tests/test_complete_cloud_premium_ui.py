@@ -34,8 +34,8 @@ class CompleteCloudPremiumUiTest(unittest.TestCase):
         self.assertIn('border-radius: 18px', self.css)
 
     def test_static_assets_use_cloud_premium_version(self):
-        self.assertIn('/static/css/style.css?v=cloud-premium-7', self.template)
-        self.assertIn('/static/js/app.js?v=cloud-premium-7', self.template)
+        self.assertIn('/static/css/style.css?v=cloud-premium-8', self.template)
+        self.assertIn('/static/js/app.js?v=cloud-premium-8', self.template)
 
 if __name__ == "__main__":
     unittest.main()

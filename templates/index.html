@@ -20,7 +20,7 @@
         const CURRENT_USER = {{ user| tojson | safe }};
         const CSRF_TOKEN = "{{ csrf_token() }}";
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=cloud-premium-7">
+    <link rel="stylesheet" href="/static/css/style.css?v=cloud-premium-8">
 </head>
 
 <body>
@@ -139,7 +139,6 @@
                                 <th onclick="sortFlights('seat_number')" style="cursor:pointer">Seat / Class <i
                                         class="fas fa-sort"></i></th>
                                 <th>Note</th>
-                                <th>Actions</th>
                             </tr>
                             <tr class="filter-row">
                                 <th><input type="text" onkeyup="filterFlights()" placeholder="Date / No.">
@@ -154,7 +153,6 @@
                                 <th><input type="text" onkeyup="filterFlights()" placeholder="Seat / Class">
                                 </th>
                                 <th><input type="text" onkeyup="filterFlights()" placeholder="Note"></th>
-                                <th></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -253,7 +251,7 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js?v=cloud-premium-7"></script>
+    <script src="/static/js/app.js?v=cloud-premium-8"></script>
 </body>
 
 </html>

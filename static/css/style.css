@@ -250,7 +250,7 @@ table {
 }
 
 .flight-table {
-    min-width: 1310px;
+    min-width: 1215px;
     table-layout: fixed;
 }
 
@@ -296,10 +296,6 @@ table {
     width: 125px;
 }
 
-.flight-table th:nth-child(10),
-.flight-table td:nth-child(10) {
-    width: 85px;
-}
 
 .flight-table .filter-row input {
     width: 100%;
@@ -1411,3 +1407,16 @@ tr:hover { background: #f5f9ff; }
 .flight-update-summary { flex: 0 0 auto; min-height: 30px; padding: 5px 8px; border-radius: 999px; }
 .flight-update-summary span { display: inline !important; font-size: .68rem; font-weight: 800; letter-spacing: .04em; }
 .flight-summary-actions { min-width: 0; }
+
+/* Mobile route detail and summary actions */
+.flight-summary-button-group { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.flight-route-point { min-width: 0; display: grid; gap: 3px; }
+.flight-route-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flight-route-terminal { color: #65809c; font-size: .68rem; font-weight: 700; letter-spacing: 0; }
+@media (max-width: 768px) {
+    #flights-table .flight-route-strip { align-items: center; grid-column: 1 / -1; font-size: 1rem; }
+    #flights-table .flight-route-strip i { margin: 0; flex: 0 0 auto; }
+    #flights-table .flight-route-point { flex: 1 1 0; }
+    #flights-table .flight-summary-main { align-items: center; }
+    #flights-table .flight-summary-button-group .btn span { display: inline; font-size: .68rem; font-weight: 800; }
+}
