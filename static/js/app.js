@@ -1112,6 +1112,7 @@ function renderDatasetTable(config, data) {
 
 // --- Modals ---
 // --- Modals (Stacked) ---
+const modalStack = [];
 
 function openModal(title, contentFn, onSave) {
     const zIndex = 2000 + (modalStack.length * 10);
@@ -2316,6 +2317,9 @@ function openFlightListModal(title, flights) {
         return container;
     });
 }
+window.openFlightListModal = openFlightListModal;
+window.filterFlightsForInsight = filterFlightsForInsight;
+
 
 function renderJourneyHighlights(stats) {
     const container = document.getElementById('journey-highlights');
@@ -2418,6 +2422,7 @@ function renderJourneyTrends(stats) {
                     <button id="btn-cum-distance" class="btn btn-xs" onclick="switchCumulativeType('distance')">Distance</button>
                 </div>
             </div>
+            <p class="journey-chart-note">Compare how your flights or travel distance accumulated day-by-day (Day 1 to 365) across different years to see your growth trends.</p>
             <div class="journey-chart-box"><canvas id="yearlyCumulativeChart"></canvas></div>
         </article>
 
