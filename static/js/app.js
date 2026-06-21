@@ -2436,46 +2436,17 @@ function renderJourneyTrends(stats) {
     const distanceMap = byYear(stats.distance_by_year, 'distance');
     const durationMap = byYear(stats.duration_by_year, 'duration');
 
-    const yearlySpanDataHtml = `
-        <div class="yearly-span-table-container">
-            <table class="yearly-span-table">
-                <thead>
-                    <tr>
-                        <th>Year</th>
-                        <th>Flights</th>
-                        <th>Distance</th>
-                        <th>Duration</th>
-                        <th>New Airports</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${years.slice().reverse().map(y => {
-                        const fCount = flightMap[y] || 0;
-                        const dist = distanceMap[y] || 0;
-                        const dur = durationMap[y] || 0;
-                        const newApsByYr = (stats.new_airports_by_year || []).find(d => Number(d.year) === Number(y));
-                        const newAps = newApsByYr ? newApsByYr.count : 0;
-                        return `
-                            <tr>
-                                <td><strong>${y}</strong></td>
-                                <td>${fCount}</td>
-                                <td>${dist > 0 ? formatCompactNumber(Math.round(dist)) + ' km' : '-'}</td>
-                                <td>${dur > 0 ? Math.floor(dur / 60) + 'h' : '-'}</td>
-                                <td><span class="new-airport-badge ${newAps > 0 ? 'active' : ''}">${newAps > 0 ? `+${newAps}` : '-'}</span></td>
-                            </tr>
-                        `;
-                    }).join('')}
-                </tbody>
-            </table>
-        </div>
-    `;
-
     container.innerHTML = `
         <article class="journey-chart-card journey-chart-wide">
             <div class="stats-header">Yearly rhythm</div>
             <p class="journey-chart-note">Left axis: flights and hours. Right axis: total distance in km.</p>
             <div class="journey-chart-box"><canvas id="yearComboChart"></canvas></div>
-            ${yearlySpanDataHtml}
+        </article>
+
+        <article class="journey-chart-card journey-chart-wide">
+            <div class="stats-header">Footprint collection timeline</div>
+            <p class="journey-chart-note">Growth curve of cumulative airports, cities, and countries unlocked over the years.</p>
+            <div class="journey-chart-box"><canvas id="footprintGrowthChart"></canvas></div>
         </article>
         
         <article class="journey-chart-card journey-chart-wide">
@@ -2507,12 +2478,6 @@ function renderJourneyTrends(stats) {
                     <div class="donut-canvas-container"><canvas id="distanceBucketChart"></canvas></div>
                 </div>
             </div>
-        </article>
-
-        <article class="journey-chart-card journey-chart-wide">
-            <div class="stats-header">Footprint collection timeline</div>
-            <p class="journey-chart-note">Growth curve of cumulative airports, cities, and countries unlocked over the years.</p>
-            <div class="journey-chart-box"><canvas id="footprintGrowthChart"></canvas></div>
         </article>
     `;
 
