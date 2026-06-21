@@ -2025,6 +2025,94 @@ def get_stats():
         for year, count in sorted(new_airports_by_year.items())
     ]
 
+    # Calculate cumulative cities visited by year
+    yearly_cities = conn.execute("""
+        SELECT y, city_id
+        FROM (
+            SELECT YEAR(date) AS y, a.city_id
+            FROM flights f
+            JOIN airports a ON f.origin_airport_id = a.id AND a.user_id = ?
+            WHERE f.user_id = ? AND date IS NOT NULL AND date != '' AND a.city_id IS NOT NULL
+            UNION
+            SELECT YEAR(date) AS y, a.city_id
+            FROM flights f
+            JOIN airports a ON f.dest_airport_id = a.id AND a.user_id = ?
+            WHERE f.user_id = ? AND date IS NOT NULL AND date != '' AND a.city_id IS NOT NULL
+        ) t
+        WHERE y IS NOT NULL
+        ORDER BY y ASC
+    """, (uid, uid, uid, uid)).fetchall()
+    
+    seen_cities = set()
+    cumulative_cities = {}
+    for year, city_id in yearly_cities:
+        seen_cities.add(city_id)
+        cumulative_cities[year] = len(seen_cities)
+        
+    stats['cumulative_cities_by_year'] = [
+        {'year': year, 'count': count}
+        for year, count in cumulative_cities.items()
+    ]
+
+    # Calculate cumulative countries visited by year
+    yearly_countries = conn.execute("""
+        SELECT y, country
+        FROM (
+            SELECT YEAR(date) AS y, c.country
+            FROM flights f
+            JOIN airports a ON f.origin_airport_id = a.id AND a.user_id = ?
+            JOIN cities c ON a.city_id = c.id AND c.user_id = ?
+            WHERE f.user_id = ? AND date IS NOT NULL AND date != '' AND c.country IS NOT NULL AND c.country != ''
+            UNION
+            SELECT YEAR(date) AS y, c.country
+            FROM flights f
+            JOIN airports a ON f.dest_airport_id = a.id AND a.user_id = ?
+            JOIN cities c ON a.city_id = c.id AND c.user_id = ?
+            WHERE f.user_id = ? AND date IS NOT NULL AND date != '' AND c.country IS NOT NULL AND c.country != ''
+        ) t
+        WHERE y IS NOT NULL
+        ORDER BY y ASC
+    """, (uid, uid, uid, uid, uid, uid)).fetchall()
+    
+    seen_countries = set()
+    cumulative_countries = {}
+    for year, country in yearly_countries:
+        seen_countries.add(country)
+        cumulative_countries[year] = len(seen_countries)
+        
+    stats['cumulative_countries_by_year'] = [
+        {'year': year, 'count': count}
+        for year, count in cumulative_countries.items()
+    ]
+
+    # Calculate cumulative mileage by year and month
+    yearly_monthly_dist = conn.execute("""
+        SELECT YEAR(date) AS y, MONTH(date) AS m, COALESCE(SUM(distance), 0) AS dist
+        FROM flights
+        WHERE user_id = ? AND date IS NOT NULL AND date != ''
+        GROUP BY y, m
+        ORDER BY y ASC, m ASC
+    """, (uid,)).fetchall()
+
+    cumulative_yearly_monthly = {}
+    for year in set(r[0] for r in yearly_monthly_dist):
+        cumulative_yearly_monthly[year] = [0] * 12
+        
+    for year, month, dist in yearly_monthly_dist:
+        if 1 <= month <= 12:
+            cumulative_yearly_monthly[year][month - 1] = dist
+            
+    for year, monthly_dists in cumulative_yearly_monthly.items():
+        cum_sum = 0
+        for i in range(12):
+            cum_sum += monthly_dists[i]
+            monthly_dists[i] = cum_sum
+            
+    stats['cumulative_mileage_by_year_month'] = [
+        {'year': year, 'data': data}
+        for year, data in sorted(cumulative_yearly_monthly.items())
+    ]
+
     stats['breakdowns']['alliance'] = {r[0]: r[1] for r in conn.execute("""
         SELECT al.frequent_flyer_program, COUNT(*)
         FROM flights f JOIN airlines al ON f.airline_id = al.id AND al.user_id = ?

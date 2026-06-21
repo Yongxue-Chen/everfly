@@ -2508,6 +2508,18 @@ function renderJourneyTrends(stats) {
                 </div>
             </div>
         </article>
+
+        <article class="journey-chart-card journey-chart-wide">
+            <div class="stats-header">Year-over-year cumulative mileage</div>
+            <p class="journey-chart-note">Comparison of cumulative flight distance growth throughout the year (Jan - Dec).</p>
+            <div class="journey-chart-box"><canvas id="cumulativeYearlyChart"></canvas></div>
+        </article>
+
+        <article class="journey-chart-card journey-chart-wide">
+            <div class="stats-header">Footprint collection timeline</div>
+            <p class="journey-chart-note">Growth curve of cumulative airports, cities, and countries unlocked over the years.</p>
+            <div class="journey-chart-box"><canvas id="footprintGrowthChart"></canvas></div>
+        </article>
     `;
 
     renderJourneyChart('yearComboChart', {
@@ -2644,6 +2656,87 @@ function renderJourneyTrends(stats) {
             maintainAspectRatio: false,
             plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 } } } },
             cutout: '60%'
+        }
+    });
+
+    // Render Yearly Cumulative Mileage YoY Chart
+    const yearlyCumData = stats.cumulative_mileage_by_year_month || [];
+    const lastFourYearsData = yearlyCumData.slice(-4);
+    const monthLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const colorPalette = ['#ef8b2c', '#6cae75', '#00a0b5', '#1c70bf'];
+    
+    const cumDatasets = lastFourYearsData.map((yearItem, idx) => {
+        const color = colorPalette[idx % colorPalette.length];
+        return {
+            label: String(yearItem.year),
+            data: yearItem.data,
+            borderColor: color,
+            backgroundColor: color + '15',
+            borderWidth: 2,
+            tension: 0.3,
+            pointRadius: 2.5
+        };
+    });
+
+    renderJourneyChart('cumulativeYearlyChart', {
+        type: 'line',
+        data: { labels: monthLabels, datasets: cumDatasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { position: 'bottom' } },
+            scales: {
+                y: { beginAtZero: true, title: { display: true, text: 'Cumulative Distance (km)' }, grid: { color: '#eef3f8' } },
+                x: { grid: { display: false } }
+            }
+        }
+    });
+
+    // Render Footprint Growth Timeline Chart
+    const cumAirports = stats.cumulative_airports_by_year || [];
+    const cumCities = stats.cumulative_cities_by_year || [];
+    const cumCountries = stats.cumulative_countries_by_year || [];
+    
+    const growthYears = buildContinuousYears(stats);
+    const airportsMap = Object.fromEntries(cumAirports.map(d => [d.year, d.count]));
+    const citiesMap = Object.fromEntries(cumCities.map(d => [d.year, d.count]));
+    const countriesMap = Object.fromEntries(cumCountries.map(d => [d.year, d.count]));
+    
+    let lastAirports = 0, lastCities = 0, lastCountries = 0;
+    const airportsData = [];
+    const citiesData = [];
+    const countriesData = [];
+    
+    growthYears.forEach(y => {
+        if (airportsMap[y] !== undefined) lastAirports = airportsMap[y];
+        if (citiesMap[y] !== undefined) lastCities = citiesMap[y];
+        if (countriesMap[y] !== undefined) lastCountries = countriesMap[y];
+        
+        airportsData.push(lastAirports);
+        citiesData.push(lastCities);
+        countriesData.push(lastCountries);
+    });
+
+    renderJourneyChart('footprintGrowthChart', {
+        type: 'line',
+        data: {
+            labels: growthYears,
+            datasets: [
+                { label: 'Airports', data: airportsData, borderColor: '#1c70bf', backgroundColor: 'rgba(28, 112, 191, .08)', fill: true, tension: 0.25, pointRadius: 3 },
+                { label: 'Cities', data: citiesData, borderColor: '#00a0b5', backgroundColor: 'rgba(0, 160, 181, .08)', fill: true, tension: 0.25, pointRadius: 3 },
+                { label: 'Countries', data: countriesData, borderColor: '#ef8b2c', backgroundColor: 'rgba(239, 139, 44, .08)', fill: true, tension: 0.25, pointRadius: 3 }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { position: 'bottom' } },
+            scales: {
+                y: { beginAtZero: true, title: { display: true, text: 'Cumulative Counts' }, grid: { color: '#eef3f8' } },
+                x: { grid: { display: false } }
+            }
         }
     });
 }
