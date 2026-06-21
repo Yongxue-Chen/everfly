@@ -2510,12 +2510,6 @@ function renderJourneyTrends(stats) {
         </article>
 
         <article class="journey-chart-card journey-chart-wide">
-            <div class="stats-header">Year-over-year cumulative mileage</div>
-            <p class="journey-chart-note">Comparison of cumulative flight distance growth throughout the year (Jan - Dec).</p>
-            <div class="journey-chart-box"><canvas id="cumulativeYearlyChart"></canvas></div>
-        </article>
-
-        <article class="journey-chart-card journey-chart-wide">
             <div class="stats-header">Footprint collection timeline</div>
             <p class="journey-chart-note">Growth curve of cumulative airports, cities, and countries unlocked over the years.</p>
             <div class="journey-chart-box"><canvas id="footprintGrowthChart"></canvas></div>
@@ -2656,40 +2650,6 @@ function renderJourneyTrends(stats) {
             maintainAspectRatio: false,
             plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 } } } },
             cutout: '60%'
-        }
-    });
-
-    // Render Yearly Cumulative Mileage YoY Chart
-    const yearlyCumData = stats.cumulative_mileage_by_year_month || [];
-    const lastFourYearsData = yearlyCumData.slice(-4);
-    const monthLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const colorPalette = ['#ef8b2c', '#6cae75', '#00a0b5', '#1c70bf'];
-    
-    const cumDatasets = lastFourYearsData.map((yearItem, idx) => {
-        const color = colorPalette[idx % colorPalette.length];
-        return {
-            label: String(yearItem.year),
-            data: yearItem.data,
-            borderColor: color,
-            backgroundColor: color + '15',
-            borderWidth: 2,
-            tension: 0.3,
-            pointRadius: 2.5
-        };
-    });
-
-    renderJourneyChart('cumulativeYearlyChart', {
-        type: 'line',
-        data: { labels: monthLabels, datasets: cumDatasets },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            plugins: { legend: { position: 'bottom' } },
-            scales: {
-                y: { beginAtZero: true, title: { display: true, text: 'Cumulative Distance (km)' }, grid: { color: '#eef3f8' } },
-                x: { grid: { display: false } }
-            }
         }
     });
 
