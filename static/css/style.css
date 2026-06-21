@@ -2271,9 +2271,11 @@ th[onclick] {
     flex: 0 0 45px;
 }
 
-.heatmap-month-label {
-    width: 20px;
-    flex: 0 0 20px;
+.heatmap-year-column-label {
+    width: 28px;
+    flex: 0 0 28px;
+    font-size: 0.72rem;
+    font-weight: 600;
     text-align: center;
 }
 
@@ -2289,7 +2291,7 @@ th[onclick] {
     align-items: center;
 }
 
-.heatmap-year-label {
+.heatmap-month-row-label {
     width: 45px;
     flex: 0 0 45px;
     font-size: 0.8rem;
@@ -2299,9 +2301,9 @@ th[onclick] {
 }
 
 .heatmap-cell {
-    width: 20px;
-    height: 20px;
-    flex: 0 0 20px;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
     border: none;
     border-radius: 4px;
     cursor: pointer;

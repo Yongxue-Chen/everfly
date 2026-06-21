@@ -2415,18 +2415,6 @@ function renderJourneyTrends(stats) {
         <article class="journey-chart-card journey-chart-wide"><div class="stats-header">Yearly rhythm</div><p class="journey-chart-note">Left axis: flights and hours. Right axis: total distance in km.</p><div class="journey-chart-box"><canvas id="yearComboChart"></canvas></div></article>
         
         <article class="journey-chart-card journey-chart-wide">
-            <div class="stats-header">
-                <span>Yearly cumulative comparison</span>
-                <div class="cumulative-toggle-group">
-                    <button id="btn-cum-flights" class="btn btn-xs active" onclick="switchCumulativeType('flights')">Flights</button>
-                    <button id="btn-cum-distance" class="btn btn-xs" onclick="switchCumulativeType('distance')">Distance</button>
-                </div>
-            </div>
-            <p class="journey-chart-note">Compare how your flights or travel distance accumulated day-by-day (Day 1 to 365) across different years to see your growth trends.</p>
-            <div class="journey-chart-box"><canvas id="yearlyCumulativeChart"></canvas></div>
-        </article>
-
-        <article class="journey-chart-card journey-chart-wide">
             <div class="stats-header">Monthly flight heatmap (Contribution Graph)</div>
             <p class="journey-chart-note">Grid color intensity represents flight frequency per month across years.</p>
             ${renderFlightHeatmap(months)}
@@ -2515,7 +2503,6 @@ function renderJourneyTrends(stats) {
     });
 
     // Render new stage 2 charts
-    renderCumulativeChart();
 
     const cabinCounts = {};
     const seatCounts = { Window: 0, Aisle: 0, Middle: 0 };
@@ -2937,116 +2924,7 @@ function refreshProfileMapLayers({ fitBounds = false } = {}) {
     console.log(`Map rendering complete: ${drawnCount} routes drawn across ${longitudeOffsets.length} world copies, ${Object.keys(airports).length} airports`);
 }
 
-// --- Stage 2 Features: Heatmap, Cumulative Chart & Filters ---
-let currentCumulativeType = 'flights';
-function switchCumulativeType(type) {
-    currentCumulativeType = type;
-    const btnF = document.getElementById('btn-cum-flights');
-    const btnD = document.getElementById('btn-cum-distance');
-    if (btnF && btnD) {
-        btnF.classList.toggle('active', type === 'flights');
-        btnD.classList.toggle('active', type === 'distance');
-    }
-    renderCumulativeChart();
-}
-window.switchCumulativeType = switchCumulativeType;
-
-function getDayOfYear(dateObjOrStr) {
-    const d = new Date(dateObjOrStr);
-    if (isNaN(d.getTime())) return null;
-    const start = new Date(d.getFullYear(), 0, 0);
-    const diff = d - start + (start.getTimezoneOffset() - d.getTimezoneOffset()) * 60 * 1000;
-    const oneDay = 1000 * 60 * 60 * 24;
-    return Math.floor(diff / oneDay);
-}
-
-function renderCumulativeChart() {
-    const flights = State.cache.flights || [];
-    const flightsByYear = {};
-    flights.forEach(f => {
-        const d = new Date(f.date);
-        const yr = d.getFullYear();
-        if (isNaN(yr)) return;
-        if (!flightsByYear[yr]) flightsByYear[yr] = [];
-        flightsByYear[yr].push(f);
-    });
-
-    const years = Object.keys(flightsByYear).map(Number).sort();
-    const displayYears = years.slice(-5); // Show last 5 years
-
-    const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'];
-    const datasets = [];
-
-    displayYears.forEach((yr, idx) => {
-        const yrFlights = flightsByYear[yr];
-        yrFlights.sort((a, b) => a._std_ts - b._std_ts);
-
-        const points = [{ x: 1, y: 0 }];
-        let cum = 0;
-        yrFlights.forEach(f => {
-            const day = getDayOfYear(f.date);
-            if (day === null) return;
-            
-            if (currentCumulativeType === 'flights') {
-                cum += 1;
-            } else {
-                cum += (f.distance || 0);
-            }
-            if (points.length > 0 && points[points.length - 1].x === day) {
-                points[points.length - 1].y = cum;
-            } else {
-                points.push({ x: day, y: cum });
-            }
-        });
-
-        const currentYear = new Date().getFullYear();
-        if (yr === currentYear) {
-            const todayDay = getDayOfYear(new Date());
-            if (todayDay && points[points.length - 1].x < todayDay) {
-                points.push({ x: todayDay, y: cum });
-            }
-        } else {
-            if (points[points.length - 1].x < 365) {
-                points.push({ x: 365, y: cum });
-            }
-        }
-
-        datasets.push({
-            label: String(yr),
-            data: points,
-            borderColor: colors[idx % colors.length],
-            backgroundColor: 'transparent',
-            tension: 0.1,
-            borderWidth: 2,
-            pointRadius: 2,
-            pointHoverRadius: 4
-        });
-    });
-
-    renderJourneyChart('yearlyCumulativeChart', {
-        type: 'line',
-        data: { datasets },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            scales: {
-                x: {
-                    type: 'linear',
-                    min: 1,
-                    max: 366,
-                    title: { display: true, text: 'Day of Year' },
-                    grid: { display: false }
-                },
-                y: {
-                    beginAtZero: true,
-                    title: { display: true, text: currentCumulativeType === 'flights' ? 'Flights' : 'Distance (km)' },
-                    grid: { color: '#eef3f8' }
-                }
-            }
-        }
-    });
-}
+// --- Stage 2 Features: Heatmap & Filters ---
 
 function renderFlightHeatmap(months) {
     const dataByYearMonth = {};
@@ -3065,8 +2943,9 @@ function renderFlightHeatmap(months) {
         }
     });
 
+    // Years from minYear to maxYear (left to right)
     const years = [];
-    for (let y = maxYear; y >= minYear; y--) {
+    for (let y = minYear; y <= maxYear; y++) {
         years.push(y);
     }
 
@@ -3087,24 +2966,26 @@ function renderFlightHeatmap(months) {
         <div class="heatmap-container">
             <div class="heatmap-header">
                 <div class="heatmap-label-placeholder"></div>
-                ${monthLabels.map(m => `<div class="heatmap-month-label">${m}</div>`).join('')}
+                ${years.map(yr => `<div class="heatmap-year-column-label">${yr}</div>`).join('')}
             </div>
             <div class="heatmap-grid">
     `;
 
-    years.forEach(yr => {
-        html += `<div class="heatmap-row"><div class="heatmap-year-label">${yr}</div>`;
-        for (let mn = 1; mn <= 12; mn++) {
+    // 12 rows for months
+    monthLabels.forEach((monthName, monthIdx) => {
+        const mn = monthIdx + 1; // 1-indexed month
+        html += `<div class="heatmap-row"><div class="heatmap-month-row-label">${monthName}</div>`;
+        years.forEach(yr => {
             const count = (dataByYearMonth[yr] && dataByYearMonth[yr][mn]) || 0;
             const monthStr = `${yr}-${String(mn).padStart(2, '0')}`;
             const levelClass = getLevelClass(count);
             html += `
                 <button class="heatmap-cell ${levelClass}" 
-                        title="${yr}-${mn}: ${count} flights" 
-                        onclick="openFlightListModal('${yr}-${mn}', filterFlightsForInsight('month', '${monthStr}'))">
+                        title="${yr}-${monthName}: ${count} flights" 
+                        onclick="openFlightListModal('${yr}-${monthName}', filterFlightsForInsight('month', '${monthStr}'))">
                 </button>
             `;
-        }
+        });
         html += `</div>`;
     });
 
