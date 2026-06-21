@@ -2282,82 +2282,149 @@ function renderLibraryOverview() {
     }).join('');
 }
 
+window.handleLocationClick = (title, topKey) => {
+    if (State.cache.stats && State.cache.stats.top) {
+        showStatsModal(title, State.cache.stats.top[topKey]);
+    }
+};
+
+window.handleAllianceClick = (allianceName) => {
+    const groups = {
+        'SkyTeam (天合联盟)': ['SkyTeam', '天合联盟'],
+        'Star Alliance (星空联盟)': ['Star Alliance', '星空联盟'],
+        'Oneworld (寰宇一家)': ['Oneworld', '寰宇一家']
+    };
+    const keywords = groups[allianceName];
+    if (!keywords || !State.cache.stats || !State.cache.stats.top) return;
+    const filtered = State.cache.stats.top.airlines.filter(a => 
+        keywords.some(kw => (a.extra || '').includes(kw))
+    );
+    showStatsModal(allianceName, filtered);
+};
+
+window.handleManufacturerClick = (manufacturerName) => {
+    if (!State.cache.stats || !State.cache.stats.top) return;
+    const filtered = State.cache.stats.top.aircraft.filter(a => a.extra === manufacturerName);
+    showStatsModal(manufacturerName + ' Models', filtered);
+};
+
 const renderStatsDashboard = (stats, container) => {
     if (!container) return;
     container.innerHTML = '';
 
-    const makeRankRows = (items, card) => {
-        const rows = (items || []).slice(0, 5);
-        if (!rows.length) return '<div class="aviation-world-empty">No data yet</div>';
-        return rows.map((item, index) => `
-            <button class="aviation-world-rank" onclick="event.stopPropagation(); openFlightListModal('${escapeHtml(card.label)}', filterFlightsForInsight('${escapeHtml(item.kind)}', '${escapeHtml(item.value)}'))">
-                <span>${index + 1}</span>
-                <strong title="${escapeHtml(item.name || 'Unknown')}">${escapeHtml(item.name || 'Unknown')}</strong>
-                <em>${formatCompactNumber(item.count)}</em>
-            </button>
-        `).join('');
-    };
+    // --- Card 1: Locations ---
+    const locCard = document.createElement('article');
+    locCard.className = 'aviation-world-card aviation-world-teal';
+    locCard.onclick = () => showStatsModal('Top Airports', stats.top.airports);
 
-    const airlineCategoryRows = ['SkyTeam', 'Star Alliance', 'Oneworld', 'Low-cost', 'Other']
-        .map(name => ({ name, value: name, kind: 'airlineCategory', count: stats.breakdowns.airline_categories?.[name] || 0 }));
-    const manufacturerRows = Object.entries(stats.breakdowns.manufacturer || {})
-        .map(([name, count]) => ({ name, value: name, kind: 'manufacturer', count }))
-        .sort((a, b) => b.count - a.count);
-
-    const cards = [
-        {
-            label: 'Locations',
-            title: 'Locations',
-            icon: 'fa-earth-americas',
-            total: stats.totals.airports,
-            unit: 'airports',
-            accent: 'teal',
-            allKind: 'locations',
-            allValue: 'all',
-            rows: [
-                { name: 'Continents', count: stats.totals.continents, kind: 'locations', value: 'all' },
-                { name: 'Countries', count: stats.totals.countries, kind: 'locations', value: 'all' },
-                { name: 'Cities', count: stats.totals.cities, kind: 'locations', value: 'all' },
-                { name: 'Routes', count: stats.totals.routes, kind: 'locations', value: 'all' }
-            ]
-        },
-        {
-            label: 'Airlines',
-            title: 'Airlines',
-            icon: 'fa-building',
-            total: stats.totals.airlines,
-            unit: 'airlines',
-            accent: 'amber',
-            allKind: 'all',
-            allValue: 'all',
-            rows: airlineCategoryRows
-        },
-        {
-            label: 'Aircraft',
-            title: 'Aircraft',
-            icon: 'fa-plane-up',
-            total: stats.totals.aircraft,
-            unit: 'models',
-            accent: 'rose',
-            allKind: 'all',
-            allValue: 'all',
-            rows: manufacturerRows
-        }
+    const locRows = [
+        { label: 'Continents', count: stats.totals.continents, topKey: 'continents', title: 'Top Continents' },
+        { label: 'Countries', count: stats.totals.countries, topKey: 'countries', title: 'Top Countries' },
+        { label: 'Cities', count: stats.totals.cities, topKey: 'cities', title: 'Top Cities' },
+        { label: 'Airports', count: stats.totals.airports, topKey: 'airports', title: 'Top Airports' },
+        { label: 'Routes', count: stats.totals.routes, topKey: 'routes', title: 'Top Routes' }
     ];
 
-    cards.forEach(card => {
-        const el = document.createElement('article');
-        el.className = `aviation-world-card aviation-world-${card.accent}`;
-        el.onclick = () => openFlightListModal(card.modalTitle || card.label, filterFlightsForInsight(card.allKind, card.allValue));
-        el.innerHTML = `
-            <div class="aviation-world-topline">
-                <span class="aviation-world-icon"><i class="fa-solid ${card.icon}"></i></span>
-                <div><span>${escapeHtml(card.title)}</span><strong>${formatCompactNumber(card.total)}</strong><small>${escapeHtml(card.unit)}</small></div>
-            </div>
-            <div class="aviation-world-ranks">${makeRankRows(card.rows, card)}</div>
-        `;
-        container.appendChild(el);
+    const locRanksHtml = locRows.map((row, index) => `
+        <button class="aviation-world-rank" onclick="event.stopPropagation(); handleLocationClick('${escapeHtml(row.title)}', '${escapeHtml(row.topKey)}')">
+            <span>${index + 1}</span>
+            <strong title="${escapeHtml(row.label)}">${escapeHtml(row.label)}</strong>
+            <em>${formatCompactNumber(row.count)}</em>
+        </button>
+    `).join('');
+
+    locCard.innerHTML = `
+        <div class="aviation-world-topline">
+            <span class="aviation-world-icon"><i class="fa-solid fa-earth-americas"></i></span>
+            <div><span>Locations</span><strong>${formatCompactNumber(stats.totals.airports)}</strong><small>airports</small></div>
+        </div>
+        <div class="aviation-world-ranks">${locRanksHtml}</div>
+    `;
+    container.appendChild(locCard);
+
+    // --- Card 2: Airlines ---
+    const alCard = document.createElement('article');
+    alCard.className = 'aviation-world-card aviation-world-amber';
+    alCard.onclick = () => showStatsModal('Top Airlines', stats.top.airlines);
+
+    const groups = {
+        'SkyTeam (天合联盟)': ['SkyTeam', '天合联盟'],
+        'Star Alliance (星空联盟)': ['Star Alliance', '星空联盟'],
+        'Oneworld (寰宇一家)': ['Oneworld', '寰宇一家']
+    };
+    const counts = {
+        'SkyTeam (天合联盟)': 0,
+        'Star Alliance (星空联盟)': 0,
+        'Oneworld (寰宇一家)': 0
+    };
+
+    Object.entries(stats.breakdowns.alliance || {}).forEach(([k, v]) => {
+        for (const [groupName, keywords] of Object.entries(groups)) {
+            if (keywords.some(kw => k.includes(kw))) {
+                counts[groupName] += v;
+                break;
+            }
+        }
     });
+
+    const allianceRows = Object.entries(counts)
+        .filter(([k, v]) => v > 0)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, count]) => ({ name, count }));
+
+    let alRanksHtml = '';
+    if (!allianceRows.length) {
+        alRanksHtml = '<div class="aviation-world-empty">No alliance data yet</div>';
+    } else {
+        alRanksHtml = allianceRows.map((row, index) => `
+            <button class="aviation-world-rank" data-name="${escapeHtml(row.name)}" onclick="event.stopPropagation(); handleAllianceClick(this.getAttribute('data-name'))">
+                <span>${index + 1}</span>
+                <strong title="${escapeHtml(row.name)}">${escapeHtml(row.name)}</strong>
+                <em>${formatCompactNumber(row.count)}</em>
+            </button>
+        `).join('');
+    }
+
+    alCard.innerHTML = `
+        <div class="aviation-world-topline">
+            <span class="aviation-world-icon"><i class="fa-solid fa-building"></i></span>
+            <div><span>Airlines</span><strong>${formatCompactNumber(stats.totals.airlines)}</strong><small>airlines</small></div>
+        </div>
+        <div class="aviation-world-ranks">${alRanksHtml}</div>
+    `;
+    container.appendChild(alCard);
+
+    // --- Card 3: Aircraft ---
+    const acCard = document.createElement('article');
+    acCard.className = 'aviation-world-card aviation-world-rose';
+    acCard.onclick = () => showStatsModal('Top Aircraft', stats.top.aircraft);
+
+    const mfrs = Object.entries(stats.breakdowns.manufacturer || {})
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([name, count]) => ({ name, count }));
+
+    let acRanksHtml = '';
+    if (!mfrs.length) {
+        acRanksHtml = '<div class="aviation-world-empty">No aircraft data yet</div>';
+    } else {
+        acRanksHtml = mfrs.map((row, index) => `
+            <button class="aviation-world-rank" data-name="${escapeHtml(row.name)}" onclick="event.stopPropagation(); handleManufacturerClick(this.getAttribute('data-name'))">
+                <span>${index + 1}</span>
+                <strong title="${escapeHtml(row.name)}">${escapeHtml(row.name)}</strong>
+                <em>${formatCompactNumber(row.count)}</em>
+            </button>
+        `).join('');
+    }
+
+    acCard.innerHTML = `
+        <div class="aviation-world-topline">
+            <span class="aviation-world-icon"><i class="fa-solid fa-plane-up"></i></span>
+            <div><span>Aircraft</span><strong>${formatCompactNumber(stats.totals.aircraft)}</strong><small>models</small></div>
+        </div>
+        <div class="aviation-world-ranks">${acRanksHtml}</div>
+    `;
+    container.appendChild(acCard);
 };
 
 const showStatsModal = (title, data) => {
@@ -2416,6 +2483,7 @@ async function loadProfile() {
             API.get('flights/detailed')
         ]);
         State.cache.flights = flights;
+        State.cache.stats = stats;
         console.log(`Data fetched: ${flights.length} flights`);
 
         // 1. Header Stats

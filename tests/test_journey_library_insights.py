@@ -74,8 +74,8 @@ class JourneyLibraryInsightsTest(unittest.TestCase):
         self.assertIn("openFlightListModal('Yearly rhythm'", self.js)
         self.assertIn("openFlightListModal('Route distance mix'", self.js)
         self.assertIn("openFlightListModal('Month pattern'", self.js)
-        self.assertIn("openFlightListModal(card.modalTitle", self.js)
-        self.assertIn("openFlightListModal(card.label", self.js)
+        self.assertIn("showStatsModal", self.js)
+        self.assertIn("handleLocationClick", self.js)
 
     def test_trend_ranges_fill_missing_months_and_years(self):
         self.assertIn("buildRecentTwelveMonths", self.js)
