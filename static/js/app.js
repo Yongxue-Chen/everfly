@@ -121,7 +121,8 @@ const State = {
     profileMapResizeObserverBound: false,
     entityPanelHistory: [],
     journeyCharts: {},
-    libraryViewMode: 'table'
+    libraryViewMode: 'table',
+    libraryFilters: {}
 };
 
 // --- API Client ---
@@ -636,6 +637,7 @@ async function loadDataset(datasetKey) {
     // Reset sort/filter on new dataset load
     State.filter = '';
     State.sort = { key: null, dir: 'asc' };
+    State.libraryFilters = {};
     const searchInput = document.getElementById('dataset-search');
     if (searchInput) {
         searchInput.value = '';
@@ -677,6 +679,7 @@ async function loadDataset(datasetKey) {
         }
     }
 
+    renderLibraryFilters(datasetKey);
     renderDatasetTable(config, data);
     renderLibraryOverview();
 }
@@ -727,6 +730,51 @@ function sortDataset(key) {
     renderDatasetTable(config, State.cache[State.currentDataset]);
 }
 
+function getProcessedDatasetData(config, data) {
+    let processedData = [...data];
+
+    // 1. Filter (Search)
+    if (State.filter) {
+        const filterVal = State.filter.toLowerCase();
+        processedData = processedData.filter(item => {
+            return Object.values(item).some(val =>
+                String(val).toLowerCase().includes(filterVal)
+            );
+        });
+    }
+
+    // 2. Composite Filter (from UI badges/selects)
+    if (State.libraryFilters) {
+        Object.entries(State.libraryFilters).forEach(([key, value]) => {
+            if (value) {
+                processedData = processedData.filter(item => String(item[key]) === String(value));
+            }
+        });
+    }
+
+    // 3. Sort
+    if (State.sort.key) {
+        processedData.sort((a, b) => {
+            let valA = a[State.sort.key];
+            let valB = b[State.sort.key];
+
+            const colDef = config.columns.find(c => c.key === State.sort.key);
+            if (colDef && colDef.type === 'lookup' && State.cache[colDef.lookup]) {
+                const lookupA = State.cache[colDef.lookup].find(i => i.id === valA);
+                const lookupB = State.cache[colDef.lookup].find(i => i.id === valB);
+                valA = lookupA ? lookupA[colDef.display] : valA;
+                valB = lookupB ? lookupB[colDef.display] : valB;
+            }
+
+            if (valA < valB) return State.sort.dir === 'asc' ? -1 : 1;
+            if (valA > valB) return State.sort.dir === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }
+
+    return processedData;
+}
+
 function switchLibraryView(mode) {
     State.libraryViewMode = mode;
     
@@ -753,37 +801,7 @@ function renderDatasetCards(config, data) {
     if (!container) return;
     container.innerHTML = '';
 
-    // Process Data (Filter & Sort)
-    let processedData = [...data];
-
-    // 1. Filter
-    if (State.filter) {
-        processedData = processedData.filter(item => {
-            return Object.values(item).some(val =>
-                String(val).toLowerCase().includes(State.filter)
-            );
-        });
-    }
-
-    // 2. Sort
-    if (State.sort.key) {
-        processedData.sort((a, b) => {
-            let valA = a[State.sort.key];
-            let valB = b[State.sort.key];
-
-            const colDef = config.columns.find(c => c.key === State.sort.key);
-            if (colDef && colDef.type === 'lookup' && State.cache[colDef.lookup]) {
-                const lookupA = State.cache[colDef.lookup].find(i => i.id === valA);
-                const lookupB = State.cache[colDef.lookup].find(i => i.id === valB);
-                valA = lookupA ? lookupA[colDef.display] : valA;
-                valB = lookupB ? lookupB[colDef.display] : valB;
-            }
-
-            if (valA < valB) return State.sort.dir === 'asc' ? -1 : 1;
-            if (valA > valB) return State.sort.dir === 'asc' ? 1 : -1;
-            return 0;
-        });
-    }
+    const processedData = getProcessedDatasetData(config, data);
 
     if (processedData.length === 0) {
         container.innerHTML = '<div class="empty-state">No records found matching current criteria.</div>';
@@ -796,13 +814,15 @@ function renderDatasetCards(config, data) {
         card.onclick = () => openEntityPanel(State.currentDataset, item.id);
         
         let cardHTML = '';
+        const badges = getDataHealthBadges(State.currentDataset, item);
+        
         if (State.currentDataset === 'cities') {
             const countryStr = item.country_code ? `${item.country} (${item.country_code})` : item.country;
             cardHTML = `
                 <div class="library-card-header">
                     <span class="library-card-icon"><i class="fa-solid fa-city"></i></span>
                     <div class="library-card-title-group">
-                        <h4 class="library-card-title">${escapeHtml(item.name)}</h4>
+                        <h4 class="library-card-title">${escapeHtml(item.name)}${badges}</h4>
                         <span class="library-card-subtitle">${escapeHtml(countryStr || '-')}</span>
                     </div>
                 </div>
@@ -826,7 +846,7 @@ function renderDatasetCards(config, data) {
                 <div class="library-card-header">
                     <div class="library-card-large-code">${escapeHtml(iata || icao || '???')}</div>
                     <div class="library-card-title-group">
-                        <h4 class="library-card-title">${escapeHtml(item.name)}</h4>
+                        <h4 class="library-card-title">${escapeHtml(item.name)}${badges}</h4>
                         <span class="library-card-subtitle">${escapeHtml(cityVal || '-')}</span>
                     </div>
                 </div>
@@ -844,7 +864,7 @@ function renderDatasetCards(config, data) {
                         ${airlineLogoMarkup(item.logo_url, item.logo_source_url, item.iata_code || item.icao_code || item.name)}
                     </div>
                     <div class="library-card-title-group">
-                        <h4 class="library-card-title">${escapeHtml(item.name)}</h4>
+                        <h4 class="library-card-title">${escapeHtml(item.name)}${badges}</h4>
                         <span class="library-card-subtitle">${escapeHtml(codes || '-')}</span>
                     </div>
                 </div>
@@ -876,7 +896,7 @@ function renderDatasetCards(config, data) {
                 <div class="library-card-header">
                     <span class="library-card-icon"><i class="fa-solid fa-plane"></i></span>
                     <div class="library-card-title-group">
-                        <h4 class="library-card-title">${escapeHtml(item.manufacturer)} ${escapeHtml(item.model)}</h4>
+                        <h4 class="library-card-title">${escapeHtml(item.manufacturer)} ${escapeHtml(item.model)}${badges}</h4>
                         <span class="library-card-subtitle">Series: ${escapeHtml(item.series || '-')} ${item.subtype ? `(${escapeHtml(item.subtype)})` : ''}</span>
                     </div>
                 </div>
@@ -941,38 +961,7 @@ function renderDatasetTable(config, data) {
         table.innerHTML = '';
     }
 
-    // Process Data (Filter & Sort)
-    let processedData = [...data];
-
-    // 1. Filter
-    if (State.filter) {
-        processedData = processedData.filter(item => {
-            return Object.values(item).some(val =>
-                String(val).toLowerCase().includes(State.filter)
-            );
-        });
-    }
-
-    // 2. Sort
-    if (State.sort.key) {
-        processedData.sort((a, b) => {
-            let valA = a[State.sort.key];
-            let valB = b[State.sort.key];
-
-            // Handle Lookups for proper sorting
-            const colDef = config.columns.find(c => c.key === State.sort.key);
-            if (colDef && colDef.type === 'lookup' && State.cache[colDef.lookup]) {
-                const lookupA = State.cache[colDef.lookup].find(i => i.id === valA);
-                const lookupB = State.cache[colDef.lookup].find(i => i.id === valB);
-                valA = lookupA ? lookupA[colDef.display] : valA;
-                valB = lookupB ? lookupB[colDef.display] : valB;
-            }
-
-            if (valA < valB) return State.sort.dir === 'asc' ? -1 : 1;
-            if (valA > valB) return State.sort.dir === 'asc' ? 1 : -1;
-            return 0;
-        });
-    }
+    const processedData = getProcessedDatasetData(config, data);
 
     // Header
     const thead = document.createElement('thead');
@@ -1018,7 +1007,8 @@ function renderDatasetTable(config, data) {
             if (State.currentDataset === 'airlines' && col.key === 'name') {
                 const identity = document.createElement('div');
                 identity.className = 'library-airline-cell';
-                identity.innerHTML = `${airlineLogoMarkup(item.logo_url, item.logo_source_url, item.iata_code || item.icao_code || item.name)}<span class="library-airline-copy"><strong>${escapeHtml(val || '-')}</strong><small class="library-airline-codes">${escapeHtml([item.iata_code, item.icao_code].filter(Boolean).join(' · '))}</small></span>`;
+                const badges = getDataHealthBadges('airlines', item);
+                identity.innerHTML = `${airlineLogoMarkup(item.logo_url, item.logo_source_url, item.iata_code || item.icao_code || item.name)}<span class="library-airline-copy"><strong>${escapeHtml(val || '-')}</strong>${badges}<small class="library-airline-codes">${escapeHtml([item.iata_code, item.icao_code].filter(Boolean).join(' · '))}</small></span>`;
                 if (item.website_url) {
                     const link = document.createElement('a');
                     link.href = normalizeWebsiteUrl(item.website_url);
@@ -1031,7 +1021,20 @@ function renderDatasetTable(config, data) {
                 }
                 td.appendChild(identity);
             } else {
-                td.textContent = val;
+                if (col.key === 'name' || (State.currentDataset === 'aircraft_models' && col.key === 'manufacturer')) {
+                    const badges = getDataHealthBadges(State.currentDataset, item);
+                    if (badges) {
+                        const nameSpan = document.createElement('span');
+                        nameSpan.style.display = 'inline-flex';
+                        nameSpan.style.alignItems = 'center';
+                        nameSpan.innerHTML = `${escapeHtml(val || '-')} ${badges}`;
+                        td.appendChild(nameSpan);
+                    } else {
+                        td.textContent = val;
+                    }
+                } else {
+                    td.textContent = val;
+                }
             }
             tr.appendChild(td);
         });
@@ -1109,7 +1112,6 @@ function renderDatasetTable(config, data) {
 
 // --- Modals ---
 // --- Modals (Stacked) ---
-const modalStack = [];
 
 function openModal(title, contentFn, onSave) {
     const zIndex = 2000 + (modalStack.length * 10);
@@ -2407,8 +2409,41 @@ function renderJourneyTrends(stats) {
     const buckets = stats.distributions?.route_distance_buckets || [];
     container.innerHTML = `
         <article class="journey-chart-card journey-chart-wide"><div class="stats-header">Yearly rhythm</div><p class="journey-chart-note">Left axis: flights and hours. Right axis: total distance in km.</p><div class="journey-chart-box"><canvas id="yearComboChart"></canvas></div></article>
+        
+        <article class="journey-chart-card journey-chart-wide">
+            <div class="stats-header">
+                <span>Yearly cumulative comparison</span>
+                <div class="cumulative-toggle-group">
+                    <button id="btn-cum-flights" class="btn btn-xs active" onclick="switchCumulativeType('flights')">Flights</button>
+                    <button id="btn-cum-distance" class="btn btn-xs" onclick="switchCumulativeType('distance')">Distance</button>
+                </div>
+            </div>
+            <div class="journey-chart-box"><canvas id="yearlyCumulativeChart"></canvas></div>
+        </article>
+
+        <article class="journey-chart-card journey-chart-wide">
+            <div class="stats-header">Monthly flight heatmap (Contribution Graph)</div>
+            <p class="journey-chart-note">Grid color intensity represents flight frequency per month across years.</p>
+            ${renderFlightHeatmap(months)}
+        </article>
+
         <article class="journey-chart-card"><div class="stats-header">Recent months</div><div class="journey-chart-box"><canvas id="monthlyChart"></canvas></div></article>
         <article class="journey-chart-card"><div class="stats-header">Month pattern</div><p class="journey-chart-note">Flights grouped by calendar month, January through December.</p>${renderMonthOfYearStats(months)}</article>
+        
+        <article class="journey-chart-card">
+            <div class="stats-header">Preference profile (Cabin & Seats)</div>
+            <div class="preference-donut-box">
+                <div class="donut-chart-wrapper">
+                    <span class="donut-chart-title">Cabin Class</span>
+                    <div class="donut-canvas-container"><canvas id="classDonutChart"></canvas></div>
+                </div>
+                <div class="donut-chart-wrapper">
+                    <span class="donut-chart-title">Seat Placement</span>
+                    <div class="donut-canvas-container"><canvas id="seatDonutChart"></canvas></div>
+                </div>
+            </div>
+        </article>
+
         <article class="journey-chart-card"><div class="stats-header">Route distance mix</div><div class="journey-chart-box"><canvas id="distanceBucketChart"></canvas></div></article>
     `;
     const years = buildContinuousYears(stats);
@@ -2471,6 +2506,66 @@ function renderJourneyTrends(stats) {
             },
             plugins: { legend: { position: 'bottom' } },
             cutout: '62%'
+        }
+    });
+
+    // Render new stage 2 charts
+    renderCumulativeChart();
+
+    const cabinCounts = {};
+    const seatCounts = { Window: 0, Aisle: 0, Middle: 0 };
+    const flights = State.cache.flights || [];
+    
+    flights.forEach(f => {
+        const cls = (f.flight_class || 'Unknown').trim();
+        cabinCounts[cls] = (cabinCounts[cls] || 0) + 1;
+        
+        const seat = (f.seat_number || '').trim().toUpperCase();
+        if (seat) {
+            const lastChar = seat.slice(-1);
+            if (['A', 'F', 'K', 'L'].includes(lastChar)) {
+                seatCounts.Window++;
+            } else if (['C', 'D', 'G', 'H', 'J'].includes(lastChar)) {
+                seatCounts.Aisle++;
+            } else if (['B', 'E'].includes(lastChar)) {
+                seatCounts.Middle++;
+            }
+        }
+    });
+
+    renderJourneyChart('classDonutChart', {
+        type: 'doughnut',
+        data: {
+            labels: Object.keys(cabinCounts),
+            datasets: [{
+                data: Object.values(cabinCounts),
+                backgroundColor: ['#1c70bf', '#00a0b5', '#6cae75', '#ef8b2c', '#c86c8f'],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 } } } },
+            cutout: '60%'
+        }
+    });
+
+    renderJourneyChart('seatDonutChart', {
+        type: 'doughnut',
+        data: {
+            labels: ['Window', 'Aisle', 'Middle'],
+            datasets: [{
+                data: [seatCounts.Window, seatCounts.Aisle, seatCounts.Middle],
+                backgroundColor: ['#3b82f6', '#10b981', '#f59e0b'],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 } } } },
+            cutout: '60%'
         }
     });
 }
@@ -2835,6 +2930,452 @@ function refreshProfileMapLayers({ fitBounds = false } = {}) {
         State.map.fitBounds(group.getBounds(), { padding: [50, 50] });
     }
     console.log(`Map rendering complete: ${drawnCount} routes drawn across ${longitudeOffsets.length} world copies, ${Object.keys(airports).length} airports`);
+}
+
+// --- Stage 2 Features: Heatmap, Cumulative Chart & Filters ---
+let currentCumulativeType = 'flights';
+function switchCumulativeType(type) {
+    currentCumulativeType = type;
+    const btnF = document.getElementById('btn-cum-flights');
+    const btnD = document.getElementById('btn-cum-distance');
+    if (btnF && btnD) {
+        btnF.classList.toggle('active', type === 'flights');
+        btnD.classList.toggle('active', type === 'distance');
+    }
+    renderCumulativeChart();
+}
+window.switchCumulativeType = switchCumulativeType;
+
+function getDayOfYear(dateObjOrStr) {
+    const d = new Date(dateObjOrStr);
+    if (isNaN(d.getTime())) return null;
+    const start = new Date(d.getFullYear(), 0, 0);
+    const diff = d - start + (start.getTimezoneOffset() - d.getTimezoneOffset()) * 60 * 1000;
+    const oneDay = 1000 * 60 * 60 * 24;
+    return Math.floor(diff / oneDay);
+}
+
+function renderCumulativeChart() {
+    const flights = State.cache.flights || [];
+    const flightsByYear = {};
+    flights.forEach(f => {
+        const d = new Date(f.date);
+        const yr = d.getFullYear();
+        if (isNaN(yr)) return;
+        if (!flightsByYear[yr]) flightsByYear[yr] = [];
+        flightsByYear[yr].push(f);
+    });
+
+    const years = Object.keys(flightsByYear).map(Number).sort();
+    const displayYears = years.slice(-5); // Show last 5 years
+
+    const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'];
+    const datasets = [];
+
+    displayYears.forEach((yr, idx) => {
+        const yrFlights = flightsByYear[yr];
+        yrFlights.sort((a, b) => a._std_ts - b._std_ts);
+
+        const points = [{ x: 1, y: 0 }];
+        let cum = 0;
+        yrFlights.forEach(f => {
+            const day = getDayOfYear(f.date);
+            if (day === null) return;
+            
+            if (currentCumulativeType === 'flights') {
+                cum += 1;
+            } else {
+                cum += (f.distance || 0);
+            }
+            if (points.length > 0 && points[points.length - 1].x === day) {
+                points[points.length - 1].y = cum;
+            } else {
+                points.push({ x: day, y: cum });
+            }
+        });
+
+        const currentYear = new Date().getFullYear();
+        if (yr === currentYear) {
+            const todayDay = getDayOfYear(new Date());
+            if (todayDay && points[points.length - 1].x < todayDay) {
+                points.push({ x: todayDay, y: cum });
+            }
+        } else {
+            if (points[points.length - 1].x < 365) {
+                points.push({ x: 365, y: cum });
+            }
+        }
+
+        datasets.push({
+            label: String(yr),
+            data: points,
+            borderColor: colors[idx % colors.length],
+            backgroundColor: 'transparent',
+            tension: 0.1,
+            borderWidth: 2,
+            pointRadius: 2,
+            pointHoverRadius: 4
+        });
+    });
+
+    renderJourneyChart('yearlyCumulativeChart', {
+        type: 'line',
+        data: { datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                x: {
+                    type: 'linear',
+                    min: 1,
+                    max: 366,
+                    title: { display: true, text: 'Day of Year' },
+                    grid: { display: false }
+                },
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: currentCumulativeType === 'flights' ? 'Flights' : 'Distance (km)' },
+                    grid: { color: '#eef3f8' }
+                }
+            }
+        }
+    });
+}
+
+function renderFlightHeatmap(months) {
+    const dataByYearMonth = {};
+    let minYear = new Date().getFullYear();
+    let maxYear = minYear;
+
+    months.forEach(m => {
+        const parts = m.month.split('-');
+        if (parts.length === 2) {
+            const yr = parseInt(parts[0], 10);
+            const mn = parseInt(parts[1], 10);
+            if (!dataByYearMonth[yr]) dataByYearMonth[yr] = {};
+            dataByYearMonth[yr][mn] = parseInt(m.count, 10);
+            if (yr < minYear) minYear = yr;
+            if (yr > maxYear) maxYear = yr;
+        }
+    });
+
+    const years = [];
+    for (let y = maxYear; y >= minYear; y--) {
+        years.push(y);
+    }
+
+    const monthLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const counts = months.map(m => parseInt(m.count, 10));
+    const maxCount = Math.max(...counts, 1);
+
+    const getLevelClass = (count) => {
+        if (!count) return 'level-0';
+        const pct = count / maxCount;
+        if (pct <= 0.25) return 'level-1';
+        if (pct <= 0.5) return 'level-2';
+        if (pct <= 0.75) return 'level-3';
+        return 'level-4';
+    };
+
+    let html = `
+        <div class="heatmap-container">
+            <div class="heatmap-header">
+                <div class="heatmap-label-placeholder"></div>
+                ${monthLabels.map(m => `<div class="heatmap-month-label">${m}</div>`).join('')}
+            </div>
+            <div class="heatmap-grid">
+    `;
+
+    years.forEach(yr => {
+        html += `<div class="heatmap-row"><div class="heatmap-year-label">${yr}</div>`;
+        for (let mn = 1; mn <= 12; mn++) {
+            const count = (dataByYearMonth[yr] && dataByYearMonth[yr][mn]) || 0;
+            const monthStr = `${yr}-${String(mn).padStart(2, '0')}`;
+            const levelClass = getLevelClass(count);
+            html += `
+                <button class="heatmap-cell ${levelClass}" 
+                        title="${yr}-${mn}: ${count} flights" 
+                        onclick="openFlightListModal('${yr}-${mn}', filterFlightsForInsight('month', '${monthStr}'))">
+                </button>
+            `;
+        }
+        html += `</div>`;
+    });
+
+    html += `
+            </div>
+            <div class="heatmap-legend">
+                <span>Less</span>
+                <span class="heatmap-cell level-0"></span>
+                <span class="heatmap-cell level-1"></span>
+                <span class="heatmap-cell level-2"></span>
+                <span class="heatmap-cell level-3"></span>
+                <span class="heatmap-cell level-4"></span>
+                <span>More</span>
+            </div>
+        </div>
+    `;
+
+    return html;
+}
+
+function renderLibraryFilters(datasetKey) {
+    const bar = document.getElementById('dataset-filters-bar');
+    if (!bar) return;
+    bar.innerHTML = '';
+    bar.style.display = 'flex';
+
+    const data = State.cache[datasetKey] || [];
+    const getUniqueValues = (list, key) => {
+        return [...new Set(list.map(item => item[key]).filter(Boolean))].sort();
+    };
+
+    if (datasetKey === 'cities') {
+        const continents = getUniqueValues(data, 'continent');
+        const countries = getUniqueValues(data, 'country');
+
+        bar.innerHTML = `
+            <label>Continent: 
+                <select id="filter-city-continent" onchange="applyLibraryFilter('continent', this.value)">
+                    <option value="">All</option>
+                    ${continents.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+                </select>
+            </label>
+            <label>Country: 
+                <select id="filter-city-country" onchange="applyLibraryFilter('country', this.value)">
+                    <option value="">All</option>
+                    ${countries.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+                </select>
+            </label>
+            <label>Data Gaps: 
+                <select id="filter-city-gaps" onchange="applyLibraryFilter('gaps', this.value)">
+                    <option value="">All</option>
+                    <option value="timezone">Missing Timezone</option>
+                    <option value="continent">Missing Continent</option>
+                    <option value="country_code">Missing Country Code</option>
+                </select>
+            </label>
+        `;
+    } else if (datasetKey === 'airports') {
+        const countries = [...new Set((State.cache.cities || []).map(c => c.country).filter(Boolean))].sort();
+        const cities = getUniqueValues(State.cache.cities || [], 'name');
+
+        bar.innerHTML = `
+            <label>Country: 
+                <select id="filter-airport-country" onchange="applyLibraryFilter('country', this.value)">
+                    <option value="">All</option>
+                    ${countries.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+                </select>
+            </label>
+            <label>City: 
+                <select id="filter-airport-city" onchange="applyLibraryFilter('city', this.value)">
+                    <option value="">All</option>
+                    ${cities.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+                </select>
+            </label>
+            <label>Data Gaps: 
+                <select id="filter-airport-gaps" onchange="applyLibraryFilter('gaps', this.value)">
+                    <option value="">All</option>
+                    <option value="iata_code">Missing IATA</option>
+                    <option value="icao_code">Missing ICAO</option>
+                    <option value="coordinates">Missing Coordinates</option>
+                    <option value="timezone">Missing Timezone</option>
+                </select>
+            </label>
+        `;
+    } else if (datasetKey === 'airlines') {
+        const alliances = getUniqueValues(data, 'alliance');
+        const countries = getUniqueValues(data, 'country');
+
+        bar.innerHTML = `
+            <label>Alliance: 
+                <select id="filter-airline-alliance" onchange="applyLibraryFilter('alliance', this.value)">
+                    <option value="">All</option>
+                    ${alliances.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('')}
+                </select>
+            </label>
+            <label>Country: 
+                <select id="filter-airline-country" onchange="applyLibraryFilter('country', this.value)">
+                    <option value="">All</option>
+                    ${countries.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+                </select>
+            </label>
+            <label>Logo: 
+                <select id="filter-airline-logo" onchange="applyLibraryFilter('logo', this.value)">
+                    <option value="">All</option>
+                    <option value="has">Has Logo</option>
+                    <option value="missing">No Logo</option>
+                </select>
+            </label>
+            <label>Website: 
+                <select id="filter-airline-website" onchange="applyLibraryFilter('website', this.value)">
+                    <option value="">All</option>
+                    <option value="has">Has Website</option>
+                    <option value="missing">No Website</option>
+                </select>
+            </label>
+        `;
+    } else if (datasetKey === 'aircraft_models') {
+        const manufacturers = getUniqueValues(data, 'manufacturer');
+        const seriesList = getUniqueValues(data, 'series');
+        
+        const allTags = new Set();
+        data.forEach(item => {
+            ['tags_generation', 'tags_winglets', 'tags_config'].forEach(key => {
+                if (item[key]) {
+                    item[key].split(',').map(t => t.trim()).filter(Boolean).forEach(t => allTags.add(t));
+                }
+            });
+        });
+        const tags = [...allTags].sort();
+
+        bar.innerHTML = `
+            <label>Manufacturer: 
+                <select id="filter-aircraft-mfr" onchange="applyLibraryFilter('manufacturer', this.value)">
+                    <option value="">All</option>
+                    ${manufacturers.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('')}
+                </select>
+            </label>
+            <label>Series: 
+                <select id="filter-aircraft-series" onchange="applyLibraryFilter('series', this.value)">
+                    <option value="">All</option>
+                    ${seriesList.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('')}
+                </select>
+            </label>
+            <label>Tag Chip: 
+                <select id="filter-aircraft-tag" onchange="applyLibraryFilter('tag', this.value)">
+                    <option value="">All</option>
+                    ${tags.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('')}
+                </select>
+            </label>
+        `;
+    }
+}
+window.renderLibraryFilters = renderLibraryFilters;
+
+function applyLibraryFilter(key, value) {
+    State.libraryFilters[key] = value;
+    const config = DATASETS[State.currentDataset];
+    const data = State.cache[State.currentDataset] || [];
+    renderDatasetTable(config, data);
+}
+window.applyLibraryFilter = applyLibraryFilter;
+
+function getDataHealthBadges(datasetKey, item) {
+    const badges = [];
+    const isMissing = val => val === null || val === undefined || val === '';
+    if (datasetKey === 'cities') {
+        if (isMissing(item.timezone)) badges.push('<span class="health-badge missing">Missing timezone</span>');
+        if (isMissing(item.continent)) badges.push('<span class="health-badge missing">Missing continent</span>');
+        if (isMissing(item.country_code)) badges.push('<span class="health-badge missing">Missing code</span>');
+    } else if (datasetKey === 'airports') {
+        if (isMissing(item.iata_code)) badges.push('<span class="health-badge missing">Missing IATA</span>');
+        if (isMissing(item.icao_code)) badges.push('<span class="health-badge missing">Missing ICAO</span>');
+        if (isMissing(item.lat) || isMissing(item.lon)) badges.push('<span class="health-badge missing">No coordinates</span>');
+        if (isMissing(item.timezone)) badges.push('<span class="health-badge missing">Missing timezone</span>');
+    } else if (datasetKey === 'airlines') {
+        if (isMissing(item.iata_code) && isMissing(item.icao_code)) badges.push('<span class="health-badge missing">No codes</span>');
+        if (isMissing(item.logo_url) && isMissing(item.logo_source_url)) badges.push('<span class="health-badge missing">No logo</span>');
+        if (isMissing(item.website_url)) badges.push('<span class="health-badge missing">No website</span>');
+    } else if (datasetKey === 'aircraft_models') {
+        if (isMissing(item.manufacturer)) badges.push('<span class="health-badge missing">No manufacturer</span>');
+        if (isMissing(item.model)) badges.push('<span class="health-badge missing">No model</span>');
+    }
+    return badges.join('');
+}
+window.getDataHealthBadges = getDataHealthBadges;
+
+function getProcessedDatasetData(config, data) {
+    let processedData = [...data];
+
+    // 1. Text Filter
+    if (State.filter) {
+        processedData = processedData.filter(item => {
+            return Object.values(item).some(val =>
+                String(val).toLowerCase().includes(State.filter)
+            );
+        });
+    }
+
+    // 2. Composite Filters
+    if (State.libraryFilters) {
+        Object.entries(State.libraryFilters).forEach(([key, val]) => {
+            if (!val) return;
+            
+            if (State.currentDataset === 'cities') {
+                if (key === 'gaps') {
+                    if (val === 'timezone') processedData = processedData.filter(item => !item.timezone);
+                    if (val === 'continent') processedData = processedData.filter(item => !item.continent);
+                    if (val === 'country_code') processedData = processedData.filter(item => !item.country_code);
+                } else {
+                    processedData = processedData.filter(item => String(item[key]) === val);
+                }
+            } else if (State.currentDataset === 'airports') {
+                if (key === 'gaps') {
+                    if (val === 'iata_code') processedData = processedData.filter(item => !item.iata_code);
+                    if (val === 'icao_code') processedData = processedData.filter(item => !item.icao_code);
+                    if (val === 'timezone') processedData = processedData.filter(item => !item.timezone);
+                    if (val === 'coordinates') processedData = processedData.filter(item => item.lat === null || item.lon === null);
+                } else if (key === 'country') {
+                    processedData = processedData.filter(item => {
+                        const cityItem = (State.cache.cities || []).find(c => c.id === item.city_id);
+                        return cityItem && cityItem.country === val;
+                    });
+                } else if (key === 'city') {
+                    processedData = processedData.filter(item => {
+                        const cityItem = (State.cache.cities || []).find(c => c.id === item.city_id);
+                        return cityItem && cityItem.name === val;
+                    });
+                } else {
+                    processedData = processedData.filter(item => String(item[key]) === val);
+                }
+            } else if (State.currentDataset === 'airlines') {
+                if (key === 'logo') {
+                    if (val === 'has') processedData = processedData.filter(item => item.logo_url || item.logo_source_url);
+                    if (val === 'missing') processedData = processedData.filter(item => !item.logo_url && !item.logo_source_url);
+                } else if (key === 'website') {
+                    if (val === 'has') processedData = processedData.filter(item => item.website_url);
+                    if (val === 'missing') processedData = processedData.filter(item => !item.website_url);
+                } else {
+                    processedData = processedData.filter(item => String(item[key]) === val);
+                }
+            } else if (State.currentDataset === 'aircraft_models') {
+                if (key === 'tag') {
+                    processedData = processedData.filter(item => {
+                        const tags = [item.tags_generation, item.tags_winglets, item.tags_config]
+                            .filter(Boolean)
+                            .flatMap(t => t.split(',').map(s => s.trim().toUpperCase()));
+                        return tags.includes(val.toUpperCase());
+                    });
+                } else {
+                    processedData = processedData.filter(item => String(item[key]) === val);
+                }
+            }
+        });
+    }
+
+    // 3. Sort
+    if (State.sort.key) {
+        processedData.sort((a, b) => {
+            let valA = a[State.sort.key];
+            let valB = b[State.sort.key];
+
+            const colDef = config.columns.find(c => c.key === State.sort.key);
+            if (colDef && colDef.type === 'lookup' && State.cache[colDef.lookup]) {
+                const lookupA = State.cache[colDef.lookup].find(i => i.id === valA);
+                const lookupB = State.cache[colDef.lookup].find(i => i.id === valB);
+                valA = lookupA ? lookupA[colDef.display] : valA;
+                valB = lookupB ? lookupB[colDef.display] : valB;
+            }
+
+            if (valA < valB) return State.sort.dir === 'asc' ? -1 : 1;
+            if (valA > valB) return State.sort.dir === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }
+
+    return processedData;
 }
 
 // --- Initialization ---

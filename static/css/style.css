@@ -2234,3 +2234,253 @@ th[onclick] {
         opacity: 1; /* Always visible on touch screens */
     }
 }
+
+/* ==========================================================================
+   Stage 2 Styling: Heatmap, Preference Donut Box, Filters Bar, Cumulative Toggle
+   ========================================================================== */
+
+/* 1. Monthly Flight Heatmap */
+.heatmap-container {
+    padding: 16px;
+    background: var(--surface, #ffffff);
+    border: 1px solid var(--surface-border, #dfe7f1);
+    border-radius: var(--radius-lg, 14px);
+    box-shadow: var(--shadow-soft);
+    margin-bottom: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.heatmap-header {
+    display: grid;
+    grid-template-columns: 50px repeat(12, 1fr);
+    gap: 8px;
+    align-items: center;
+    font-size: 0.8rem;
+    color: var(--text-muted, #6b7b90);
+    text-align: center;
+    font-weight: 500;
+}
+
+.heatmap-label-placeholder {
+    width: 50px;
+}
+
+.heatmap-month-label {
+    text-align: center;
+}
+
+.heatmap-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.heatmap-row {
+    display: grid;
+    grid-template-columns: 50px repeat(12, 1fr);
+    gap: 8px;
+    align-items: center;
+}
+
+.heatmap-year-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-dark, #333);
+    text-align: left;
+}
+
+.heatmap-cell {
+    aspect-ratio: 1;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    outline: none;
+    padding: 0;
+}
+
+.heatmap-cell:hover {
+    transform: scale(1.15);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    z-index: 2;
+}
+
+.heatmap-cell.level-0 {
+    background-color: #f1f5f9;
+}
+.heatmap-cell.level-0:hover {
+    background-color: #e2e8f0;
+}
+.heatmap-cell.level-1 {
+    background-color: #dbeafe;
+}
+.heatmap-cell.level-2 {
+    background-color: #93c5fd;
+}
+.heatmap-cell.level-3 {
+    background-color: #3b82f6;
+}
+.heatmap-cell.level-4 {
+    background-color: #1d4ed8;
+}
+
+.heatmap-legend {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 12px;
+    font-size: 0.75rem;
+    color: var(--text-muted, #6b7b90);
+}
+
+.heatmap-legend span {
+    display: inline-block;
+}
+
+.heatmap-legend .heatmap-cell {
+    width: 14px;
+    height: 14px;
+    aspect-ratio: 1;
+    cursor: default;
+    border-radius: 2px;
+}
+.heatmap-legend .heatmap-cell:hover {
+    transform: none;
+    box-shadow: none;
+}
+
+/* 2. Preference Donut Box */
+.preference-donut-box {
+    display: flex;
+    gap: 20px;
+    justify-content: space-around;
+    align-items: center;
+    width: 100%;
+    padding: 10px 0;
+}
+
+.donut-chart-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+}
+
+.donut-chart-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: var(--text-dark, #333);
+}
+
+.donut-canvas-container {
+    position: relative;
+    width: 100%;
+    max-width: 180px;
+    height: 180px;
+}
+
+/* 3. Filters Bar */
+.filters-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 12px 16px;
+    background-color: #f8fafc;
+    border: 1px solid var(--surface-border, #dfe7f1);
+    border-radius: 8px;
+    margin-bottom: 16px;
+    align-items: center;
+}
+
+.filters-bar label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-muted, #6b7b90);
+}
+
+.filters-bar select {
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color, #ddd);
+    background-color: var(--surface, #ffffff);
+    font-size: 0.85rem;
+    color: var(--text-dark, #333);
+    outline: none;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+.filters-bar select:focus {
+    border-color: var(--primary-color, #0056b3);
+}
+
+/* 4. Cumulative Toggle Group */
+.cumulative-toggle-group {
+    display: inline-flex;
+    border-radius: 6px;
+    background: #eef2f6;
+    padding: 2px;
+    border: 1px solid #e2e8f0;
+}
+
+.cumulative-toggle-group button {
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 12px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    color: #64748b;
+    transition: all 0.2s ease;
+}
+
+.cumulative-toggle-group button.active {
+    background: var(--surface, #ffffff);
+    color: var(--primary-color, #0056b3);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.stats-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* 5. Health Badge */
+.health-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    border-radius: 4px;
+    margin-left: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    line-height: 1;
+    vertical-align: middle;
+}
+
+.health-badge.missing {
+    background-color: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fca5a5;
+}
+
+@media (max-width: 576px) {
+    .preference-donut-box {
+        flex-direction: column;
+        gap: 24px;
+    }
+}
+
