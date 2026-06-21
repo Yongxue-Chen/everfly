@@ -1616,3 +1616,224 @@ tr:hover { background: #f5f9ff; }
         justify-self: start;
     }
 }
+
+/* Journey polish pass */
+.journey-highlight-card {
+    align-items: center;
+    box-sizing: border-box;
+    min-height: 112px;
+    padding: 18px;
+}
+
+.journey-highlight-icon {
+    align-self: center;
+    box-sizing: border-box;
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+    border: 1px solid rgba(43, 123, 193, .16);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.8), 0 8px 20px rgba(33, 100, 165, .08);
+}
+
+.journey-highlight-icon i {
+    line-height: 1;
+    font-size: 1rem;
+}
+
+.journey-chart-note {
+    margin: -6px 0 12px;
+    color: #6f8299;
+    font-size: .78rem;
+    line-height: 1.35;
+}
+
+.month-of-year-grid {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 7px;
+    align-items: end;
+    min-height: 220px;
+    padding: 14px 0 2px;
+}
+
+.month-of-year-item {
+    min-width: 0;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: 7px;
+    height: 190px;
+    text-align: center;
+}
+
+.month-of-year-item span,
+.month-of-year-item strong {
+    color: #61738a;
+    font-size: .66rem;
+    font-weight: 800;
+}
+
+.month-of-year-item i {
+    align-self: end;
+    display: block;
+    min-height: 8px;
+    height: var(--month-level);
+    border-radius: 999px 999px 5px 5px;
+    background: linear-gradient(180deg, #2b7bc1, #68b4e8);
+    box-shadow: 0 8px 18px rgba(43, 123, 193, .16);
+}
+
+.journey-insights .stats-container {
+    gap: 16px;
+}
+
+.aviation-world-card {
+    position: relative;
+    min-width: 0;
+    overflow: hidden;
+    padding: 18px;
+    border: 1px solid #dfe8f2;
+    border-radius: 18px;
+    background: linear-gradient(180deg, #ffffff, #f7fbff);
+    box-shadow: 0 12px 30px rgba(25, 55, 95, .08);
+    cursor: pointer;
+    transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+
+.aviation-world-card::after {
+    content: '';
+    position: absolute;
+    inset: auto -42px -58px auto;
+    width: 145px;
+    height: 145px;
+    border-radius: 50%;
+    background: rgba(43, 123, 193, .08);
+    pointer-events: none;
+}
+
+.aviation-world-card:hover {
+    transform: translateY(-2px);
+    border-color: #aac8e7;
+    box-shadow: 0 18px 42px rgba(25, 55, 95, .13);
+}
+
+.aviation-world-topline {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    gap: 13px;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.aviation-world-icon {
+    width: 46px;
+    height: 46px;
+    border-radius: 15px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #0b5faa;
+    background: #e7f2ff;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.8);
+    flex: 0 0 auto;
+}
+
+.aviation-world-topline div {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+}
+
+.aviation-world-topline span {
+    color: #6f8299;
+    font-size: .7rem;
+    font-weight: 900;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+}
+
+.aviation-world-topline strong {
+    color: #142943;
+    font-size: 2rem;
+    line-height: 1;
+    letter-spacing: -.045em;
+}
+
+.aviation-world-topline small {
+    color: #7b8ea5;
+    font-size: .74rem;
+    font-weight: 700;
+}
+
+.aviation-world-ranks {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    gap: 8px;
+}
+
+.aviation-world-rank {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 9px;
+    min-height: 36px;
+    border: 1px solid #e5edf6;
+    border-radius: 11px;
+    background: rgba(255,255,255,.74);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+}
+
+.aviation-world-rank span {
+    width: 20px;
+    height: 20px;
+    border-radius: 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #edf5ff;
+    color: #2b6da8;
+    font-size: .66rem;
+    font-weight: 900;
+}
+
+.aviation-world-rank strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #233b58;
+    font-size: .84rem;
+}
+
+.aviation-world-rank em {
+    color: #0b5faa;
+    font-style: normal;
+    font-weight: 900;
+}
+
+.aviation-world-empty {
+    color: #7b8ea5;
+    font-size: .84rem;
+}
+
+.aviation-world-amber .aviation-world-icon,
+.aviation-world-amber .aviation-world-rank span { background: #fff4df; color: #a35d00; }
+.aviation-world-amber::after { background: rgba(239, 139, 44, .1); }
+.aviation-world-rose .aviation-world-icon,
+.aviation-world-rose .aviation-world-rank span { background: #fff0f4; color: #ad4262; }
+.aviation-world-rose::after { background: rgba(200, 108, 143, .1); }
+
+@media (max-width: 768px) {
+    .month-of-year-grid {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        min-height: 180px;
+    }
+
+    .month-of-year-item {
+        height: 132px;
+    }
+}

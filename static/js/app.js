@@ -2034,14 +2034,32 @@ function renderJourneyChart(key, config) {
     State.journeyCharts[key] = new Chart(canvas.getContext('2d'), config);
 }
 
+function renderMonthOfYearStats(monthRows) {
+    const totals = Array.from({ length: 12 }, (_, index) => ({ month: index + 1, count: 0 }));
+    (monthRows || []).forEach(row => {
+        const month = Number(String(row.month || '').slice(5, 7));
+        if (month >= 1 && month <= 12) totals[month - 1].count += Number(row.count || 0);
+    });
+    const max = Math.max(...totals.map(row => row.count), 1);
+    return `<div class="month-of-year-grid">${totals.map(row => `
+        <div class="month-of-year-item" title="${row.count} flights in month ${row.month}">
+            <span>${String(row.month).padStart(2, '0')}</span>
+            <i style="--month-level:${Math.max(8, Math.round((row.count / max) * 100))}%"></i>
+            <strong>${row.count}</strong>
+        </div>
+    `).join('')}</div>`;
+}
+
 function renderJourneyTrends(stats) {
     const container = document.getElementById('journey-trends');
     if (!container) return;
-    const months = (stats.flights_by_month || []).slice(-18);
+    const months = stats.flights_by_month || [];
+    const recentMonths = months.slice(-18);
     const buckets = stats.distributions?.route_distance_buckets || [];
     container.innerHTML = `
-        <article class="journey-chart-card journey-chart-wide"><div class="stats-header">Yearly rhythm</div><div class="journey-chart-box"><canvas id="yearComboChart"></canvas></div></article>
+        <article class="journey-chart-card journey-chart-wide"><div class="stats-header">Yearly rhythm</div><p class="journey-chart-note">Left axis: flights and hours. Right axis: total distance in km.</p><div class="journey-chart-box"><canvas id="yearComboChart"></canvas></div></article>
         <article class="journey-chart-card"><div class="stats-header">Recent months</div><div class="journey-chart-box"><canvas id="monthlyChart"></canvas></div></article>
+        <article class="journey-chart-card"><div class="stats-header">Month pattern</div><p class="journey-chart-note">Flights grouped by calendar month, January through December.</p>${renderMonthOfYearStats(months)}</article>
         <article class="journey-chart-card"><div class="stats-header">Route distance mix</div><div class="journey-chart-box"><canvas id="distanceBucketChart"></canvas></div></article>
     `;
     const years = Array.from(new Set([
@@ -2059,16 +2077,26 @@ function renderJourneyTrends(stats) {
             labels: years,
             datasets: [
                 { type: 'bar', label: 'Flights', data: years.map(y => flightMap[y] || 0), backgroundColor: 'rgba(28, 112, 191, .18)', borderColor: '#1c70bf', borderWidth: 1, yAxisID: 'y' },
-                { type: 'line', label: 'Distance km', data: years.map(y => distanceMap[y] || 0), borderColor: '#00a0b5', backgroundColor: 'rgba(0,160,181,.08)', tension: .35, pointRadius: 3, yAxisID: 'y1' },
+                { type: 'line', label: 'Distance (km)', data: years.map(y => distanceMap[y] || 0), borderColor: '#00a0b5', backgroundColor: 'rgba(0,160,181,.08)', tension: .35, pointRadius: 3, yAxisID: 'y1' },
                 { type: 'line', label: 'Hours', data: years.map(y => Math.round((durationMap[y] || 0) / 60)), borderColor: '#ef8b2c', backgroundColor: 'rgba(239,139,44,.08)', tension: .35, pointRadius: 3, yAxisID: 'y' }
             ]
         },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true, grid: { color: '#eef3f8' } }, y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false } }, x: { grid: { display: false } } } }
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { position: 'bottom' } },
+            scales: {
+                y: { beginAtZero: true, title: { display: true, text: 'Flights / Hours' }, grid: { color: '#eef3f8' } },
+                y1: { beginAtZero: true, position: 'right', title: { display: true, text: 'Distance (km)' }, grid: { drawOnChartArea: false } },
+                x: { grid: { display: false } }
+            }
+        }
     });
     renderJourneyChart('monthlyChart', {
         type: 'bar',
-        data: { labels: months.map(d => d.month), datasets: [{ label: 'Flights', data: months.map(d => d.count), backgroundColor: '#2b7bc1', borderRadius: 6 }] },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: '#eef3f8' } }, x: { grid: { display: false } } } }
+        data: { labels: recentMonths.map(d => d.month), datasets: [{ label: 'Flights', data: recentMonths.map(d => d.count), backgroundColor: '#2b7bc1', borderRadius: 6 }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'Flights' }, grid: { color: '#eef3f8' } }, x: { grid: { display: false } } } }
     });
     renderJourneyChart('distanceBucketChart', {
         type: 'doughnut',
@@ -2112,183 +2140,76 @@ const renderStatsDashboard = (stats, container) => {
     if (!container) return;
     container.innerHTML = '';
 
-    // Card 1: Locations
-    const locCard = document.createElement('div');
-    locCard.className = 'stats-card card-teal';
-    locCard.innerHTML = `<div class="stats-header">Locations</div>`;
-    const locList = document.createElement('div');
-    const addLocItem = (label, count, key, title) => {
-        const row = document.createElement('div');
-        row.style.display = 'flex'; row.style.justifyContent = 'space-between'; row.style.padding = '8px 0'; row.style.borderBottom = '1px solid #f9f9f9';
+    const makeRankRows = (items, emptyText = 'No data yet') => {
+        const rows = (items || []).slice(0, 4);
+        if (!rows.length) return `<div class="aviation-world-empty">${escapeHtml(emptyText)}</div>`;
+        return rows.map((item, index) => `
+            <button class="aviation-world-rank" onclick="event.stopPropagation();">
+                <span>${index + 1}</span>
+                <strong title="${escapeHtml(item.name || 'Unknown')}">${escapeHtml(item.name || 'Unknown')}</strong>
+                <em>${formatCompactNumber(item.count)}</em>
+            </button>
+        `).join('');
+    };
 
-        row.innerHTML = `<span style="color:#555">${label}</span><strong style="color:#333">${count !== undefined ? count : 0}</strong>`;
-        if (key && stats.top[key]) {
-            row.style.cursor = 'pointer';
-            row.style.padding = '8px 4px';
-            row.style.borderRadius = '4px';
-            row.onmouseenter = () => row.style.background = '#f0f0f0';
-            row.onmouseleave = () => row.style.background = 'transparent';
-            row.onclick = (e) => { e.stopPropagation(); showStatsModal(title, stats.top[key]); };
+    const allianceRows = Object.entries(stats.breakdowns.alliance || {})
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count);
+    const manufacturerRows = Object.entries(stats.breakdowns.manufacturer || {})
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count);
+
+    const cards = [
+        {
+            title: 'Locations',
+            icon: 'fa-earth-americas',
+            total: stats.totals.airports,
+            unit: 'airports',
+            accent: 'teal',
+            rows: [
+                { name: 'Continents', count: stats.totals.continents },
+                { name: 'Countries', count: stats.totals.countries },
+                { name: 'Cities', count: stats.totals.cities },
+                { name: 'Routes', count: stats.totals.routes }
+            ],
+            modalTitle: 'Top Airports',
+            modalData: stats.top.airports
+        },
+        {
+            title: 'Airlines',
+            icon: 'fa-building',
+            total: stats.totals.airlines,
+            unit: 'airlines',
+            accent: 'amber',
+            rows: allianceRows.length ? allianceRows : stats.top.airlines,
+            modalTitle: 'Top Airlines',
+            modalData: stats.top.airlines
+        },
+        {
+            title: 'Aircraft',
+            icon: 'fa-plane-up',
+            total: stats.totals.aircraft,
+            unit: 'models',
+            accent: 'rose',
+            rows: manufacturerRows.length ? manufacturerRows : stats.top.aircraft,
+            modalTitle: 'Top Aircraft',
+            modalData: stats.top.aircraft
         }
-        locList.appendChild(row);
-    };
-    addLocItem('Continents', stats.totals.continents, 'continents', 'Top Continents');
-    addLocItem('Countries', stats.totals.countries, 'countries', 'Top Countries');
-    addLocItem('Cities', stats.totals.cities, 'cities', 'Top Cities');
-    addLocItem('Airports', stats.totals.airports, 'airports', 'Top Airports');
-    addLocItem('Routes', stats.totals.routes, 'routes', 'Top Routes');
-    locCard.appendChild(locList);
+    ];
 
-    // Card 2: Airlines
-    const majorAlliances = ['天合联盟', '星空联盟', '寰宇一家', 'SkyTeam', 'Star Alliance', 'Oneworld'];
-    const alCard = document.createElement('div');
-    alCard.className = 'stats-card card-orange';
-    alCard.innerHTML = `<div class="stats-header">Airlines</div><div class="stats-total">${stats.totals.airlines}</div><div class="stats-subtext">Total Airlines</div>`;
-
-    // Alliance Breakdown (Merged)
-    const alList = document.createElement('div');
-    alList.style.marginTop = '15px';
-
-    const groups = {
-        'SkyTeam (天合联盟)': ['SkyTeam', '天合联盟'],
-        'Star Alliance (星空联盟)': ['Star Alliance', '星空联盟'],
-        'Oneworld (寰宇一家)': ['Oneworld', '寰宇一家']
-    };
-    const counts = {
-        'SkyTeam (天合联盟)': 0,
-        'Star Alliance (星空联盟)': 0,
-        'Oneworld (寰宇一家)': 0
-    };
-
-    Object.entries(stats.breakdowns.alliance || {}).forEach(([k, v]) => {
-        for (const [groupName, keywords] of Object.entries(groups)) {
-            if (keywords.some(kw => k.includes(kw))) {
-                counts[groupName] += v;
-                break;
-            }
-        }
-    });
-
-    Object.entries(counts)
-        .filter(([k, v]) => v > 0)
-        .sort((a, b) => b[1] - a[1])
-        .forEach(([k, v]) => {
-            const d = document.createElement('div');
-            d.style.display = 'flex'; d.style.justifyContent = 'space-between'; d.style.marginBottom = '6px';
-            d.style.cursor = 'pointer';
-            d.style.padding = '2px 4px'; d.style.borderRadius = '4px';
-            d.onmouseenter = () => d.style.background = '#f0f0f0';
-            d.onmouseleave = () => d.style.background = 'transparent';
-
-            d.innerHTML = `<span style="font-size:0.9rem; color:#666">${escapeHtml(k)}</span><b>${escapeHtml(v)}</b>`;
-            d.onclick = (e) => {
-                e.stopPropagation();
-                // Filter airlines by group keywords
-                const keywords = groups[k];
-                const filtered = stats.top.airlines.filter(a => keywords.some(kw => (a.extra || '').includes(kw)));
-                showStatsModal(k, filtered);
-            };
-            alList.appendChild(d);
-        });
-    alCard.appendChild(alList);
-    alCard.onclick = () => showStatsModal('Top Airlines', stats.top.airlines);
-
-    // Card 3: Aircraft
-    const acCard = document.createElement('div');
-    acCard.className = 'stats-card card-red';
-    acCard.innerHTML = `<div class="stats-header">Aircraft</div><div class="stats-total">${stats.totals.aircraft}</div><div class="stats-subtext">Aircraft Models</div>`;
-    const acList = document.createElement('div');
-    acList.style.marginTop = '15px';
-    const mfrs = Object.entries(stats.breakdowns.manufacturer || {}).sort((a, b) => b[1] - a[1]).slice(0, 5);
-    mfrs.forEach(([k, v]) => {
-        const d = document.createElement('div');
-        d.style.display = 'flex'; d.style.justifyContent = 'space-between'; d.style.marginBottom = '6px';
-        d.style.cursor = 'pointer';
-        d.style.padding = '2px 4px'; d.style.borderRadius = '4px';
-        d.onmouseenter = () => d.style.background = '#f0f0f0';
-        d.onmouseleave = () => d.style.background = 'transparent';
-
-        d.innerHTML = `<span style="font-size:0.9rem; color:#666">${escapeHtml(k)}</span><b>${escapeHtml(v)}</b>`;
-        d.onclick = (e) => {
-            e.stopPropagation();
-            // Filter aircraft by manufacturer (which is in 'extra')
-            const filtered = stats.top.aircraft.filter(a => a.extra === k);
-            showStatsModal(k + ' Models', filtered);
-        };
-        acList.appendChild(d);
-    });
-    acCard.appendChild(acList);
-    acCard.onclick = () => showStatsModal('Top Aircraft', stats.top.aircraft);
-
-    container.appendChild(locCard);
-    container.appendChild(alCard);
-    container.appendChild(acCard);
-
-    // --- Chart: Flights per Year ---
-    if (stats.flights_by_year && stats.flights_by_year.length > 0) {
-        const chartCard = document.createElement('div');
-        chartCard.className = 'stats-card';
-        // Force full width if in grid
-        chartCard.style.gridColumn = '1 / -1';
-        chartCard.style.marginTop = '20px';
-        chartCard.innerHTML = `
-            <div class="stats-header">Flights per Year</div>
-            <div style="height:300px; width:100%; position:relative;">
-                <canvas id="yearChart"></canvas>
+    cards.forEach(card => {
+        const el = document.createElement('article');
+        el.className = `aviation-world-card aviation-world-${card.accent}`;
+        el.onclick = () => showStatsModal(card.modalTitle, card.modalData);
+        el.innerHTML = `
+            <div class="aviation-world-topline">
+                <span class="aviation-world-icon"><i class="fa-solid ${card.icon}"></i></span>
+                <div><span>${escapeHtml(card.title)}</span><strong>${formatCompactNumber(card.total)}</strong><small>${escapeHtml(card.unit)}</small></div>
             </div>
+            <div class="aviation-world-ranks">${makeRankRows(card.rows)}</div>
         `;
-        container.appendChild(chartCard);
-
-        const ctx = chartCard.querySelector('#yearChart').getContext('2d');
-        // Destroy previous chart if exists? 
-        // Render function re-clears container (line 1344: container.innerHTML = ''), so safe to new Chart.
-        new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: stats.flights_by_year.map(d => d.year),
-                datasets: [{
-                    label: 'Flights',
-                    data: stats.flights_by_year.map(d => d.count),
-                    borderColor: '#00cec9', // Teal accent
-                    backgroundColor: 'rgba(0, 206, 201, 0.1)',
-                    borderWidth: 2,
-                    tension: 0.3,
-                    fill: true,
-                    pointBackgroundColor: '#fff',
-                    pointBorderColor: '#00cec9',
-                    pointRadius: 4,
-                    pointHoverRadius: 6
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    tooltip: {
-                        backgroundColor: 'rgba(0,0,0,0.8)',
-                        padding: 10,
-                        cornerRadius: 4,
-                        displayColors: false,
-                        callbacks: {
-                            label: (ctx) => `${ctx.parsed.y} Flights`
-                        }
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        grid: { borderDash: [4, 4], color: '#f5f5f5', drawBorder: false },
-                        ticks: { font: { size: 11 }, color: '#999', padding: 8 }
-                    },
-                    x: {
-                        grid: { display: false },
-                        ticks: { font: { size: 11 }, color: '#999', padding: 8 }
-                    }
-                }
-            }
-        });
-    }
+        container.appendChild(el);
+    });
 };
 
 const showStatsModal = (title, data) => {

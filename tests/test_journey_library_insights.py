@@ -48,6 +48,24 @@ class JourneyLibraryInsightsTest(unittest.TestCase):
         self.assertIn("monthlyChart", self.js)
         self.assertIn("distanceBucketChart", self.js)
 
+    def test_journey_charts_are_labeled_and_deduplicated(self):
+        self.assertIn("text: 'Flights / Hours'", self.js)
+        self.assertIn("text: 'Distance (km)'", self.js)
+        self.assertIn("renderMonthOfYearStats", self.js)
+        self.assertIn("month-of-year-grid", self.js)
+        self.assertIn("Month pattern", self.js)
+        dashboard_section = self.js.split("const renderStatsDashboard", 1)[1].split("const showStatsModal", 1)[0]
+        self.assertNotIn("Flights per Year", dashboard_section)
+        self.assertNotIn("yearChart", dashboard_section)
+
+    def test_aviation_world_uses_fancy_cards_and_aligned_highlights(self):
+        self.assertIn("aviation-world-card", self.js)
+        self.assertIn("aviation-world-rank", self.js)
+        self.assertIn(".aviation-world-card", self.css)
+        self.assertIn(".aviation-world-rank", self.css)
+        self.assertIn("align-self: center", self.css)
+        self.assertIn("box-sizing: border-box", self.css)
+
     def test_library_view_has_overview_and_quality_contract(self):
         self.assertIn('id="library-overview"', self.template)
         self.assertIn("renderLibraryOverview", self.js)
