@@ -1855,6 +1855,12 @@ def get_stats():
     stats['totals']['duration'] = conn.execute(
         "SELECT COALESCE(SUM(COALESCE(duration_actual, duration_scheduled, 0)), 0) FROM flights WHERE user_id = ?", (uid,)
     ).fetchone()[0]
+    stats['totals']['airports_departure'] = conn.execute(
+        "SELECT COUNT(DISTINCT origin_airport_id) FROM flights WHERE user_id = ?", (uid,)
+    ).fetchone()[0]
+    stats['totals']['airports_arrival'] = conn.execute(
+        "SELECT COUNT(DISTINCT dest_airport_id) FROM flights WHERE user_id = ?", (uid,)
+    ).fetchone()[0]
 
     def get_top(query, params=()):
         return [{'name': r[0], 'count': r[1], 'extra': r[2] if len(r) > 2 else None}
@@ -1908,6 +1914,22 @@ def get_stats():
         GROUP BY a.iata_code, a.name
         ORDER BY cnt DESC
     """, (uid, uid, uid))
+    stats['top']['airports_departure'] = get_top("""
+        SELECT a.iata_code, COUNT(*) as cnt, a.name
+        FROM flights f
+        JOIN airports a ON f.origin_airport_id = a.id AND a.user_id = ?
+        WHERE f.user_id = ?
+        GROUP BY a.iata_code, a.name
+        ORDER BY cnt DESC
+    """, (uid, uid))
+    stats['top']['airports_arrival'] = get_top("""
+        SELECT a.iata_code, COUNT(*) as cnt, a.name
+        FROM flights f
+        JOIN airports a ON f.dest_airport_id = a.id AND a.user_id = ?
+        WHERE f.user_id = ?
+        GROUP BY a.iata_code, a.name
+        ORDER BY cnt DESC
+    """, (uid, uid))
     stats['top']['routes'] = get_top("""
         SELECT CONCAT(a1.iata_code, '-', a2.iata_code), COUNT(*) as cnt
         FROM flights f
@@ -1986,6 +2008,21 @@ def get_stats():
     stats['cumulative_airports_by_year'] = [
         {'year': year, 'count': count}
         for year, count in cumulative_by_year.items()
+    ]
+
+    # Calculate new airports unlocked in each year
+    airport_first_year = {}
+    for year, airport_id in yearly_airports:
+        if airport_id not in airport_first_year:
+            airport_first_year[airport_id] = year
+    
+    new_airports_by_year = {}
+    for airport_id, year in airport_first_year.items():
+        new_airports_by_year[year] = new_airports_by_year.get(year, 0) + 1
+        
+    stats['new_airports_by_year'] = [
+        {'year': year, 'count': count}
+        for year, count in sorted(new_airports_by_year.items())
     ]
 
     stats['breakdowns']['alliance'] = {r[0]: r[1] for r in conn.execute("""
@@ -2101,6 +2138,82 @@ def get_stats():
             ORDER BY COUNT(*) DESC
         """, (uid, uid, uid, uid, uid)).fetchall()
     ]
+
+    # Calculate day/night flights breakdown
+    day_count = 0
+    night_count = 0
+    unknown_count = 0
+    time_rows = conn.execute("SELECT atd, std FROM flights WHERE user_id = ?", (uid,)).fetchall()
+    for atd_s, std_s in time_rows:
+        time_str = atd_s or std_s
+        if not time_str:
+            unknown_count += 1
+            continue
+        try:
+            parts = time_str.replace('T', ' ').split(' ')
+            if len(parts) >= 2:
+                time_part = parts[1]
+                hour = int(time_part.split(':')[0])
+                if 6 <= hour < 18:
+                    day_count += 1
+                else:
+                    night_count += 1
+            else:
+                unknown_count += 1
+        except Exception:
+            unknown_count += 1
+
+    stats['distributions']['day_night'] = [
+        {'name': 'Day', 'count': day_count},
+        {'name': 'Night', 'count': night_count},
+        {'name': 'Unknown', 'count': unknown_count}
+    ]
+
+    # Calculate OTP (On-time performance) and Delays
+    dep_delays = []
+    arr_delays = []
+    on_time_count = 0
+    total_with_arr_time = 0
+    
+    time_delay_rows = conn.execute("SELECT std, atd, sta, ata FROM flights WHERE user_id = ?", (uid,)).fetchall()
+    
+    def parse_flight_dt(dt_str):
+        if not dt_str: return None
+        dt_str = dt_str.replace('T', ' ')
+        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"]:
+            try:
+                return datetime.strptime(dt_str, fmt)
+            except ValueError:
+                pass
+        return None
+
+    for std_s, atd_s, sta_s, ata_s in time_delay_rows:
+        std_dt = parse_flight_dt(std_s)
+        atd_dt = parse_flight_dt(atd_s)
+        sta_dt = parse_flight_dt(sta_s)
+        ata_dt = parse_flight_dt(ata_s)
+        
+        if std_dt and atd_dt:
+            diff = (atd_dt - std_dt).total_seconds() / 60.0
+            dep_delays.append(max(0.0, diff))
+            
+        if sta_dt and ata_dt:
+            diff = (ata_dt - sta_dt).total_seconds() / 60.0
+            arr_delays.append(max(0.0, diff))
+            total_with_arr_time += 1
+            if diff <= 15:
+                on_time_count += 1
+    
+    avg_dep_delay = round(sum(dep_delays) / len(dep_delays), 1) if dep_delays else 0.0
+    avg_arr_delay = round(sum(arr_delays) / len(arr_delays), 1) if arr_delays else 0.0
+    on_time_rate = round((on_time_count / total_with_arr_time) * 100, 1) if total_with_arr_time else 100.0
+    
+    stats['quality']['on_time_performance'] = {
+        'avg_departure_delay': avg_dep_delay,
+        'avg_arrival_delay': avg_arr_delay,
+        'on_time_rate': on_time_rate,
+        'total_tracked': total_with_arr_time
+    }
 
     stats['quality']['missing_aircraft'] = conn.execute(
         "SELECT COUNT(*) FROM flights WHERE user_id = ? AND aircraft_model_id IS NULL", (uid,)

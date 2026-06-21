@@ -2288,6 +2288,12 @@ function filterFlightsForInsight(kind, value) {
         if (kind === 'aircraft') return flight.aircraft_model === value;
         if (kind === 'airport') return flight.origin_code === value || flight.dest_code === value;
         if (kind === 'locations') return Boolean(flight.origin_code || flight.dest_code);
+        if (kind === 'delayed') {
+            if (!flight.std || !flight.atd) return false;
+            const t1 = new Date(flight.std.replace(' ', 'T'));
+            const t2 = new Date(flight.atd.replace(' ', 'T'));
+            return t2 > t1;
+        }
         if (kind === 'missing') {
             if (value === 'aircraft') return !flight.aircraft_model_id;
             if (value === 'registration') return !flight.registration;
@@ -2326,7 +2332,13 @@ function renderJourneyHighlights(stats) {
     if (!container) return;
     const records = stats.records || {};
     const quality = stats.quality || {};
-    const qualityTotal = Object.values(quality).reduce((sum, value) => sum + Number(value || 0), 0);
+    const qualityTotal = (Number(quality.missing_aircraft || 0) +
+                          Number(quality.missing_registration || 0) +
+                          Number(quality.missing_actual_times || 0) +
+                          Number(quality.missing_distance || 0) +
+                          Number(quality.missing_airport_coordinates || 0) +
+                          Number(quality.missing_airline_logos || 0));
+    const otp = quality.on_time_performance || { avg_departure_delay: 0, avg_arrival_delay: 0, on_time_rate: 100, total_tracked: 0 };
     const cards = [
         {
             icon: 'fa-route',
@@ -2348,6 +2360,13 @@ function renderJourneyHighlights(stats) {
             value: records.most_frequent_route?.route || 'No repeat yet',
             meta: records.most_frequent_route?.count ? `${records.most_frequent_route.count} flights` : 'Every journey is still unique',
             flights: () => filterFlightsForInsight('route', records.most_frequent_route?.route)
+        },
+        {
+            icon: 'fa-plane-arrival',
+            label: 'On-time performance',
+            value: `${otp.on_time_rate}% on-time`,
+            meta: `Avg delay: Dep ${otp.avg_departure_delay}m / Arr ${otp.avg_arrival_delay}m`,
+            flights: () => filterFlightsForInsight('delayed')
         },
         {
             icon: 'fa-screwdriver-wrench',
@@ -2411,8 +2430,53 @@ function renderJourneyTrends(stats) {
     const months = stats.flights_by_month || [];
     const recentMonths = buildRecentTwelveMonths(months);
     const buckets = stats.distributions?.route_distance_buckets || [];
+    const years = buildContinuousYears(stats);
+    const byYear = (rows, key) => Object.fromEntries((rows || []).map(row => [row.year, Number(row[key] || 0)]));
+    const flightMap = byYear(stats.flights_by_year, 'count');
+    const distanceMap = byYear(stats.distance_by_year, 'distance');
+    const durationMap = byYear(stats.duration_by_year, 'duration');
+
+    const yearlySpanDataHtml = `
+        <div class="yearly-span-table-container">
+            <table class="yearly-span-table">
+                <thead>
+                    <tr>
+                        <th>Year</th>
+                        <th>Flights</th>
+                        <th>Distance</th>
+                        <th>Duration</th>
+                        <th>New Airports</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${years.slice().reverse().map(y => {
+                        const fCount = flightMap[y] || 0;
+                        const dist = distanceMap[y] || 0;
+                        const dur = durationMap[y] || 0;
+                        const newApsByYr = (stats.new_airports_by_year || []).find(d => Number(d.year) === Number(y));
+                        const newAps = newApsByYr ? newApsByYr.count : 0;
+                        return `
+                            <tr>
+                                <td><strong>${y}</strong></td>
+                                <td>${fCount}</td>
+                                <td>${dist > 0 ? formatCompactNumber(Math.round(dist)) + ' km' : '-'}</td>
+                                <td>${dur > 0 ? Math.floor(dur / 60) + 'h' : '-'}</td>
+                                <td><span class="new-airport-badge ${newAps > 0 ? 'active' : ''}">${newAps > 0 ? `+${newAps}` : '-'}</span></td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+
     container.innerHTML = `
-        <article class="journey-chart-card journey-chart-wide"><div class="stats-header">Yearly rhythm</div><p class="journey-chart-note">Left axis: flights and hours. Right axis: total distance in km.</p><div class="journey-chart-box"><canvas id="yearComboChart"></canvas></div></article>
+        <article class="journey-chart-card journey-chart-wide">
+            <div class="stats-header">Yearly rhythm</div>
+            <p class="journey-chart-note">Left axis: flights and hours. Right axis: total distance in km.</p>
+            <div class="journey-chart-box"><canvas id="yearComboChart"></canvas></div>
+            ${yearlySpanDataHtml}
+        </article>
         
         <article class="journey-chart-card journey-chart-wide">
             <div class="stats-header">Monthly flight heatmap (Contribution Graph)</div>
@@ -2423,8 +2487,8 @@ function renderJourneyTrends(stats) {
         <article class="journey-chart-card"><div class="stats-header">Recent months</div><div class="journey-chart-box"><canvas id="monthlyChart"></canvas></div></article>
         <article class="journey-chart-card"><div class="stats-header">Month pattern</div><p class="journey-chart-note">Flights grouped by calendar month, January through December.</p>${renderMonthOfYearStats(months)}</article>
         
-        <article class="journey-chart-card">
-            <div class="stats-header">Preference profile (Cabin & Seats)</div>
+        <article class="journey-chart-card journey-chart-wide">
+            <div class="stats-header">Flight Profile Insights (Preferences & Distributions)</div>
             <div class="preference-donut-box">
                 <div class="donut-chart-wrapper">
                     <span class="donut-chart-title">Cabin Class</span>
@@ -2434,22 +2498,24 @@ function renderJourneyTrends(stats) {
                     <span class="donut-chart-title">Seat Placement</span>
                     <div class="donut-canvas-container"><canvas id="seatDonutChart"></canvas></div>
                 </div>
+                <div class="donut-chart-wrapper">
+                    <span class="donut-chart-title">Day & Night</span>
+                    <div class="donut-canvas-container"><canvas id="dayNightDonutChart"></canvas></div>
+                </div>
+                <div class="donut-chart-wrapper">
+                    <span class="donut-chart-title">Route Distance Mix</span>
+                    <div class="donut-canvas-container"><canvas id="distanceBucketChart"></canvas></div>
+                </div>
             </div>
         </article>
-
-        <article class="journey-chart-card"><div class="stats-header">Route distance mix</div><div class="journey-chart-box"><canvas id="distanceBucketChart"></canvas></div></article>
     `;
-    const years = buildContinuousYears(stats);
-    const byYear = (rows, key) => Object.fromEntries((rows || []).map(row => [row.year, Number(row[key] || 0)]));
-    const flightMap = byYear(stats.flights_by_year, 'count');
-    const distanceMap = byYear(stats.distance_by_year, 'distance');
-    const durationMap = byYear(stats.duration_by_year, 'duration');
+
     renderJourneyChart('yearComboChart', {
         type: 'bar',
         data: {
             labels: years,
             datasets: [
-                { type: 'bar', label: 'Flights', data: years.map(y => flightMap[y] || 0), backgroundColor: 'rgba(28, 112, 191, .18)', borderColor: '#1c70bf', borderWidth: 1, yAxisID: 'y' },
+                { type: 'bar', label: 'Flights', data: years.map(y => flightMap[y] || 0), backgroundColor: 'rgba(28, 112, 191, .18)', borderColor: '#1c70bf', borderWidth: 1, borderRadius: 4, yAxisID: 'y' },
                 { type: 'line', label: 'Distance (km)', data: years.map(y => distanceMap[y] || 0), borderColor: '#00a0b5', backgroundColor: 'rgba(0,160,181,.08)', tension: .35, pointRadius: 3, yAxisID: 'y1' },
                 { type: 'line', label: 'Hours', data: years.map(y => Math.round((durationMap[y] || 0) / 60)), borderColor: '#ef8b2c', backgroundColor: 'rgba(239,139,44,.08)', tension: .35, pointRadius: 3, yAxisID: 'y' }
             ]
@@ -2471,9 +2537,10 @@ function renderJourneyTrends(stats) {
             }
         }
     });
+
     renderJourneyChart('monthlyChart', {
         type: 'bar',
-        data: { labels: recentMonths.map(d => d.month), datasets: [{ label: 'Flights', data: recentMonths.map(d => d.count), backgroundColor: '#2b7bc1', borderRadius: 6 }] },
+        data: { labels: recentMonths.map(d => d.month), datasets: [{ label: 'Flights', data: recentMonths.map(d => d.count), backgroundColor: 'rgba(28, 112, 191, 0.85)', borderColor: '#1c70bf', borderWidth: 1, borderRadius: 4 }] },
         options: {
             responsive: true,
             maintainAspectRatio: false,
@@ -2486,6 +2553,7 @@ function renderJourneyTrends(stats) {
             scales: { y: { beginAtZero: true, title: { display: true, text: 'Flights' }, grid: { color: '#eef3f8' } }, x: { grid: { display: false } } }
         }
     });
+
     renderJourneyChart('distanceBucketChart', {
         type: 'doughnut',
         data: { labels: buckets.map(d => d.name), datasets: [{ data: buckets.map(d => d.count), backgroundColor: ['#1c70bf', '#00a0b5', '#6cae75', '#ef8b2c', '#c86c8f', '#aeb9c6'], borderWidth: 0 }] },
@@ -2497,12 +2565,10 @@ function renderJourneyTrends(stats) {
                 const bucket = buckets[elements[0].index]?.name;
                 openFlightListModal('Route distance mix', filterFlightsForInsight('distanceBucket', bucket));
             },
-            plugins: { legend: { position: 'bottom' } },
-            cutout: '62%'
+            plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 } } } },
+            cutout: '60%'
         }
     });
-
-    // Render new stage 2 charts
 
     const cabinCounts = {};
     const seatCounts = { Window: 0, Aisle: 0, Middle: 0 };
@@ -2550,6 +2616,26 @@ function renderJourneyTrends(stats) {
             datasets: [{
                 data: [seatCounts.Window, seatCounts.Aisle, seatCounts.Middle],
                 backgroundColor: ['#3b82f6', '#10b981', '#f59e0b'],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 } } } },
+            cutout: '60%'
+        }
+    });
+
+    const dayNightCounts = stats.distributions?.day_night || [];
+    const dayNightMap = Object.fromEntries(dayNightCounts.map(d => [d.name, d.count]));
+    renderJourneyChart('dayNightDonutChart', {
+        type: 'doughnut',
+        data: {
+            labels: ['Day', 'Night', 'Unknown'],
+            datasets: [{
+                data: [dayNightMap['Day'] || 0, dayNightMap['Night'] || 0, dayNightMap['Unknown'] || 0],
+                backgroundColor: ['#ef8b2c', '#142943', '#8290a2'],
                 borderWidth: 0
             }]
         },
@@ -2632,7 +2718,9 @@ const renderStatsDashboard = (stats, container) => {
         { label: 'Continents', count: stats.totals.continents, topKey: 'continents', title: 'Top Continents' },
         { label: 'Countries', count: stats.totals.countries, topKey: 'countries', title: 'Top Countries' },
         { label: 'Cities', count: stats.totals.cities, topKey: 'cities', title: 'Top Cities' },
-        { label: 'Airports', count: stats.totals.airports, topKey: 'airports', title: 'Top Airports' },
+        { label: 'Total Airports', count: stats.totals.airports, topKey: 'airports', title: 'Top Airports (Total Visits)' },
+        { label: 'Departure Airports', count: stats.totals.airports_departure || 0, topKey: 'airports_departure', title: 'Top Departure Airports' },
+        { label: 'Arrival Airports', count: stats.totals.airports_arrival || 0, topKey: 'airports_arrival', title: 'Top Arrival Airports' },
         { label: 'Routes', count: stats.totals.routes, topKey: 'routes', title: 'Top Routes' }
     ];
 
@@ -2773,13 +2861,67 @@ function renderJourneyHero(flights) {
     const summary = document.getElementById('journey-summary');
     const route = document.getElementById('journey-route');
     const metrics = document.getElementById('journey-metrics');
+    
     if (count) count.textContent = `${flights.length.toLocaleString()} flights`;
     if (summary) summary.textContent = `${Math.round(totalDist).toLocaleString()} km across ${airportIds.size} airports`;
     if (route) route.innerHTML = latest.origin_code && latest.dest_code ? `<strong>${escapeHtml(latest.origin_code)}</strong><span></span><i class="fa-solid fa-plane"></i><span></span><strong>${escapeHtml(latest.dest_code)}</strong>` : '<strong>Ready for your next journey</strong>';
+    
+    // Inject latest flight data health reminder
+    let reminder = document.getElementById('journey-health-reminder');
+    if (latest.id) {
+        const missingFields = [];
+        if (!latest.aircraft_model_id) missingFields.push('aircraft model');
+        if (!latest.registration) missingFields.push('registration');
+        if (!latest.distance) missingFields.push('distance');
+        if (!latest.atd || !latest.ata || !latest.std || !latest.sta) missingFields.push('flight times');
+        
+        if (missingFields.length > 0) {
+            if (!reminder) {
+                reminder = document.createElement('div');
+                reminder.id = 'journey-health-reminder';
+                reminder.className = 'journey-health-reminder';
+                if (route && route.parentNode) {
+                    route.parentNode.insertBefore(reminder, route.nextSibling);
+                }
+            }
+            reminder.onclick = () => openEntityPanel('flights', latest.id);
+            reminder.innerHTML = `
+                <i class="fa-solid fa-circle-exclamation"></i>
+                <span>Latest flight <b>${escapeHtml(latest.flight_number || 'Flight')}</b> is missing: ${missingFields.join(', ')}. Complete now →</span>
+            `;
+            reminder.style.display = 'flex';
+        } else if (reminder) {
+            reminder.style.display = 'none';
+        }
+    } else if (reminder) {
+        reminder.style.display = 'none';
+    }
+
+    const earthRoundsVal = totalDist / 40075;
+    const earthRounds = earthRoundsVal >= 10 ? earthRoundsVal.toFixed(1) : earthRoundsVal.toFixed(2);
+    const flightDays = (totalMin / (60 * 24)).toFixed(1);
+
     if (metrics) metrics.innerHTML = `
-        <div class="journey-metric"><span>Airports</span><strong>${airportIds.size}</strong></div>
-        <div class="journey-metric"><span>Airlines</span><strong>${airlineIds.size}</strong></div>
-        <div class="journey-metric"><span>In the air</span><strong>${Math.floor(totalMin / 60).toLocaleString()}h</strong></div>`;
+        <div class="journey-metric">
+            <span>Distance</span>
+            <strong>${Math.round(totalDist).toLocaleString()} km</strong>
+            <small class="journey-metric-sub">约绕地球 ${earthRounds} 圈</small>
+        </div>
+        <div class="journey-metric">
+            <span>In the air</span>
+            <strong>${Math.floor(totalMin / 60).toLocaleString()}h</strong>
+            <small class="journey-metric-sub">约 ${flightDays} 天在空中</small>
+        </div>
+        <div class="journey-metric">
+            <span>Airports</span>
+            <strong>${airportIds.size}</strong>
+            <small class="journey-metric-sub">visited</small>
+        </div>
+        <div class="journey-metric">
+            <span>Airlines</span>
+            <strong>${airlineIds.size}</strong>
+            <small class="journey-metric-sub">carriers</small>
+        </div>`;
 }
 
 // Calculate & Render Header Stats
