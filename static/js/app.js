@@ -1980,6 +1980,117 @@ function routeLabel(record) {
     return origin && dest ? `${origin} -> ${dest}` : (record.route || record.flight_number || 'Not enough data');
 }
 
+function normalizeYear(value) {
+    return String(value || '').slice(0, 4);
+}
+
+function normalizeMonth(value) {
+    return String(value || '').slice(0, 7);
+}
+
+function parseLocalMonth(monthKey) {
+    const [year, month] = String(monthKey || '').split('-').map(Number);
+    return new Date(year || 1970, (month || 1) - 1, 1);
+}
+
+function monthKeyFromDate(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function buildRecentTwelveMonths(monthRows) {
+    const counts = Object.fromEntries((monthRows || []).map(row => [row.month, Number(row.count || 0)]));
+    const latestDataMonth = (monthRows || []).map(row => row.month).sort().pop();
+    const end = latestDataMonth ? parseLocalMonth(latestDataMonth) : new Date();
+    end.setDate(1);
+    const months = [];
+    for (let i = 11; i >= 0; i--) {
+        const d = new Date(end.getFullYear(), end.getMonth() - i, 1);
+        const month = monthKeyFromDate(d);
+        months.push({ month, count: counts[month] || 0 });
+    }
+    return months;
+}
+
+function buildContinuousYears(stats) {
+    const years = Array.from(new Set([
+        ...(stats.flights_by_year || []).map(d => Number(d.year)),
+        ...(stats.distance_by_year || []).map(d => Number(d.year)),
+        ...(stats.duration_by_year || []).map(d => Number(d.year))
+    ])).filter(Boolean);
+    if (!years.length) return [];
+    const start = Math.min(...years);
+    const end = Math.max(new Date().getFullYear(), Math.max(...years));
+    return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+}
+
+function isLowCostAirline(flight) {
+    const name = String(flight.airline_name || '').toLowerCase();
+    return /ryanair|easyjet|airasia|southwest|jetstar|scoot|spring|vietjet|cebu|wizz|frontier|spirit|norse|peach|zipair|hk express|flynas|flydubai|low.?cost|廉航/.test(name);
+}
+
+function airlineCategoryForFlight(flight) {
+    const alliance = `${flight.airline_alliance || ''} ${flight.airline_ff_program || ''}`;
+    if (/SkyTeam|天合/i.test(alliance)) return 'SkyTeam';
+    if (/Star Alliance|星空/i.test(alliance)) return 'Star Alliance';
+    if (/Oneworld|寰宇/i.test(alliance)) return 'Oneworld';
+    if (isLowCostAirline(flight)) return 'Low-cost';
+    return 'Other';
+}
+
+function distanceBucketForFlight(flight) {
+    const distance = Number(flight.distance || 0);
+    if (!distance) return 'Unknown';
+    if (distance < 500) return '<500 km';
+    if (distance < 1500) return '500-1,499 km';
+    if (distance < 4000) return '1,500-3,999 km';
+    if (distance < 7000) return '4,000-6,999 km';
+    return '7,000+ km';
+}
+
+function filterFlightsForInsight(kind, value) {
+    return (State.cache.flights || []).filter(flight => {
+        if (kind === 'all') return true;
+        if (kind === 'year') return normalizeYear(flight.date) === String(value);
+        if (kind === 'month') return normalizeMonth(flight.date) === String(value);
+        if (kind === 'monthOfYear') return Number(String(flight.date || '').slice(5, 7)) === Number(value);
+        if (kind === 'distanceBucket') return distanceBucketForFlight(flight) === value;
+        if (kind === 'route') return `${flight.origin_code}-${flight.dest_code}` === value;
+        if (kind === 'airlineCategory') return airlineCategoryForFlight(flight) === value;
+        if (kind === 'airline') return flight.airline_name === value;
+        if (kind === 'manufacturer') return flight.manufacturer === value;
+        if (kind === 'aircraft') return flight.aircraft_model === value;
+        if (kind === 'airport') return flight.origin_code === value || flight.dest_code === value;
+        if (kind === 'locations') return Boolean(flight.origin_code || flight.dest_code);
+        if (kind === 'missing') {
+            if (value === 'aircraft') return !flight.aircraft_model_id;
+            if (value === 'registration') return !flight.registration;
+            if (value === 'actual_times') return !flight.atd || !flight.ata;
+            if (value === 'distance') return !flight.distance;
+        }
+        return false;
+    });
+}
+
+function openFlightListModal(title, flights) {
+    const rows = [...(flights || [])].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+    openModal(title, () => {
+        const container = document.createElement('div');
+        container.className = 'flight-list-modal';
+        if (!rows.length) {
+            container.innerHTML = '<p class="flight-list-empty">No matching flights.</p>';
+            return container;
+        }
+        container.innerHTML = rows.map(flight => `
+            <button class="flight-list-row" onclick="openEntityPanel('flights', ${Number(flight.id)}); closeModal();">
+                <span><strong>${escapeHtml(flight.flight_number || '-')}</strong><small>${escapeHtml(flight.date || '')}</small></span>
+                <em>${escapeHtml(flight.origin_code || '-')} -> ${escapeHtml(flight.dest_code || '-')}</em>
+                <span><strong>${escapeHtml(flight.airline_name || 'Unknown airline')}</strong><small>${escapeHtml(flight.aircraft_model || '')}</small></span>
+            </button>
+        `).join('');
+        return container;
+    });
+}
+
 function renderJourneyHighlights(stats) {
     const container = document.getElementById('journey-highlights');
     if (!container) return;
@@ -1991,33 +2102,47 @@ function renderJourneyHighlights(stats) {
             icon: 'fa-route',
             label: 'Longest distance',
             value: records.longest_distance?.distance ? formatKm(records.longest_distance.distance) : 'No distance yet',
-            meta: routeLabel(records.longest_distance)
+            meta: routeLabel(records.longest_distance),
+            flights: () => filterFlightsForInsight('route', `${records.longest_distance?.origin}-${records.longest_distance?.dest}`)
         },
         {
             icon: 'fa-clock',
             label: 'Longest time',
             value: records.longest_duration?.duration ? formatHours(records.longest_duration.duration) : 'No duration yet',
-            meta: routeLabel(records.longest_duration)
+            meta: routeLabel(records.longest_duration),
+            flights: () => filterFlightsForInsight('route', `${records.longest_duration?.origin}-${records.longest_duration?.dest}`)
         },
         {
             icon: 'fa-repeat',
             label: 'Most repeated route',
             value: records.most_frequent_route?.route || 'No repeat yet',
-            meta: records.most_frequent_route?.count ? `${records.most_frequent_route.count} flights` : 'Every journey is still unique'
+            meta: records.most_frequent_route?.count ? `${records.most_frequent_route.count} flights` : 'Every journey is still unique',
+            flights: () => filterFlightsForInsight('route', records.most_frequent_route?.route)
         },
         {
             icon: 'fa-screwdriver-wrench',
             label: 'Data health',
             value: qualityTotal ? `${formatCompactNumber(qualityTotal)} gaps` : 'All tidy',
-            meta: qualityTotal ? 'Missing fields across flights and Library' : 'No obvious missing metadata'
+            meta: qualityTotal ? 'Missing fields across flights and Library' : 'No obvious missing metadata',
+            flights: () => [
+                ...filterFlightsForInsight('missing', 'aircraft'),
+                ...filterFlightsForInsight('missing', 'registration'),
+                ...filterFlightsForInsight('missing', 'actual_times'),
+                ...filterFlightsForInsight('missing', 'distance')
+            ].filter((flight, index, rows) => rows.findIndex(row => row.id === flight.id) === index)
         }
     ];
-    container.innerHTML = cards.map(card => `
-        <article class="journey-highlight-card">
+    container.innerHTML = '';
+    cards.forEach(card => {
+        const el = document.createElement('button');
+        el.className = 'journey-highlight-card';
+        el.onclick = () => openFlightListModal(card.label, card.flights());
+        el.innerHTML = `
             <span class="journey-highlight-icon"><i class="fa-solid ${card.icon}"></i></span>
             <div><span>${escapeHtml(card.label)}</span><strong>${escapeHtml(card.value)}</strong><small>${escapeHtml(card.meta)}</small></div>
-        </article>
-    `).join('');
+        `;
+        container.appendChild(el);
+    });
 }
 
 function destroyJourneyChart(key) {
@@ -2042,11 +2167,11 @@ function renderMonthOfYearStats(monthRows) {
     });
     const max = Math.max(...totals.map(row => row.count), 1);
     return `<div class="month-of-year-grid">${totals.map(row => `
-        <div class="month-of-year-item" title="${row.count} flights in month ${row.month}">
+        <button class="month-of-year-item" onclick="openFlightListModal('Month pattern', filterFlightsForInsight('monthOfYear', ${row.month}))" title="${row.count} flights in month ${row.month}">
             <span>${String(row.month).padStart(2, '0')}</span>
             <i style="--month-level:${Math.max(8, Math.round((row.count / max) * 100))}%"></i>
             <strong>${row.count}</strong>
-        </div>
+        </button>
     `).join('')}</div>`;
 }
 
@@ -2054,7 +2179,7 @@ function renderJourneyTrends(stats) {
     const container = document.getElementById('journey-trends');
     if (!container) return;
     const months = stats.flights_by_month || [];
-    const recentMonths = months.slice(-18);
+    const recentMonths = buildRecentTwelveMonths(months);
     const buckets = stats.distributions?.route_distance_buckets || [];
     container.innerHTML = `
         <article class="journey-chart-card journey-chart-wide"><div class="stats-header">Yearly rhythm</div><p class="journey-chart-note">Left axis: flights and hours. Right axis: total distance in km.</p><div class="journey-chart-box"><canvas id="yearComboChart"></canvas></div></article>
@@ -2062,11 +2187,7 @@ function renderJourneyTrends(stats) {
         <article class="journey-chart-card"><div class="stats-header">Month pattern</div><p class="journey-chart-note">Flights grouped by calendar month, January through December.</p>${renderMonthOfYearStats(months)}</article>
         <article class="journey-chart-card"><div class="stats-header">Route distance mix</div><div class="journey-chart-box"><canvas id="distanceBucketChart"></canvas></div></article>
     `;
-    const years = Array.from(new Set([
-        ...(stats.flights_by_year || []).map(d => d.year),
-        ...(stats.distance_by_year || []).map(d => d.year),
-        ...(stats.duration_by_year || []).map(d => d.year)
-    ])).sort();
+    const years = buildContinuousYears(stats);
     const byYear = (rows, key) => Object.fromEntries((rows || []).map(row => [row.year, Number(row[key] || 0)]));
     const flightMap = byYear(stats.flights_by_year, 'count');
     const distanceMap = byYear(stats.distance_by_year, 'distance');
@@ -2085,6 +2206,11 @@ function renderJourneyTrends(stats) {
             responsive: true,
             maintainAspectRatio: false,
             interaction: { mode: 'index', intersect: false },
+            onClick: (event, elements) => {
+                if (!elements.length) return;
+                const year = years[elements[0].index];
+                openFlightListModal('Yearly rhythm', filterFlightsForInsight('year', year));
+            },
             plugins: { legend: { position: 'bottom' } },
             scales: {
                 y: { beginAtZero: true, title: { display: true, text: 'Flights / Hours' }, grid: { color: '#eef3f8' } },
@@ -2096,12 +2222,32 @@ function renderJourneyTrends(stats) {
     renderJourneyChart('monthlyChart', {
         type: 'bar',
         data: { labels: recentMonths.map(d => d.month), datasets: [{ label: 'Flights', data: recentMonths.map(d => d.count), backgroundColor: '#2b7bc1', borderRadius: 6 }] },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'Flights' }, grid: { color: '#eef3f8' } }, x: { grid: { display: false } } } }
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            onClick: (event, elements) => {
+                if (!elements.length) return;
+                const month = recentMonths[elements[0].index].month;
+                openFlightListModal('Recent months', filterFlightsForInsight('month', month));
+            },
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true, title: { display: true, text: 'Flights' }, grid: { color: '#eef3f8' } }, x: { grid: { display: false } } }
+        }
     });
     renderJourneyChart('distanceBucketChart', {
         type: 'doughnut',
         data: { labels: buckets.map(d => d.name), datasets: [{ data: buckets.map(d => d.count), backgroundColor: ['#1c70bf', '#00a0b5', '#6cae75', '#ef8b2c', '#c86c8f', '#aeb9c6'], borderWidth: 0 }] },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, cutout: '62%' }
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            onClick: (event, elements) => {
+                if (!elements.length) return;
+                const bucket = buckets[elements[0].index]?.name;
+                openFlightListModal('Route distance mix', filterFlightsForInsight('distanceBucket', bucket));
+            },
+            plugins: { legend: { position: 'bottom' } },
+            cutout: '62%'
+        }
     });
 }
 
@@ -2140,11 +2286,11 @@ const renderStatsDashboard = (stats, container) => {
     if (!container) return;
     container.innerHTML = '';
 
-    const makeRankRows = (items, emptyText = 'No data yet') => {
-        const rows = (items || []).slice(0, 4);
-        if (!rows.length) return `<div class="aviation-world-empty">${escapeHtml(emptyText)}</div>`;
+    const makeRankRows = (items, card) => {
+        const rows = (items || []).slice(0, 5);
+        if (!rows.length) return '<div class="aviation-world-empty">No data yet</div>';
         return rows.map((item, index) => `
-            <button class="aviation-world-rank" onclick="event.stopPropagation();">
+            <button class="aviation-world-rank" onclick="event.stopPropagation(); openFlightListModal('${escapeHtml(card.label)}', filterFlightsForInsight('${escapeHtml(item.kind)}', '${escapeHtml(item.value)}'))">
                 <span>${index + 1}</span>
                 <strong title="${escapeHtml(item.name || 'Unknown')}">${escapeHtml(item.name || 'Unknown')}</strong>
                 <em>${formatCompactNumber(item.count)}</em>
@@ -2152,61 +2298,63 @@ const renderStatsDashboard = (stats, container) => {
         `).join('');
     };
 
-    const allianceRows = Object.entries(stats.breakdowns.alliance || {})
-        .map(([name, count]) => ({ name, count }))
-        .sort((a, b) => b.count - a.count);
+    const airlineCategoryRows = ['SkyTeam', 'Star Alliance', 'Oneworld', 'Low-cost', 'Other']
+        .map(name => ({ name, value: name, kind: 'airlineCategory', count: stats.breakdowns.airline_categories?.[name] || 0 }));
     const manufacturerRows = Object.entries(stats.breakdowns.manufacturer || {})
-        .map(([name, count]) => ({ name, count }))
+        .map(([name, count]) => ({ name, value: name, kind: 'manufacturer', count }))
         .sort((a, b) => b.count - a.count);
 
     const cards = [
         {
+            label: 'Locations',
             title: 'Locations',
             icon: 'fa-earth-americas',
             total: stats.totals.airports,
             unit: 'airports',
             accent: 'teal',
+            allKind: 'locations',
+            allValue: 'all',
             rows: [
-                { name: 'Continents', count: stats.totals.continents },
-                { name: 'Countries', count: stats.totals.countries },
-                { name: 'Cities', count: stats.totals.cities },
-                { name: 'Routes', count: stats.totals.routes }
-            ],
-            modalTitle: 'Top Airports',
-            modalData: stats.top.airports
+                { name: 'Continents', count: stats.totals.continents, kind: 'locations', value: 'all' },
+                { name: 'Countries', count: stats.totals.countries, kind: 'locations', value: 'all' },
+                { name: 'Cities', count: stats.totals.cities, kind: 'locations', value: 'all' },
+                { name: 'Routes', count: stats.totals.routes, kind: 'locations', value: 'all' }
+            ]
         },
         {
+            label: 'Airlines',
             title: 'Airlines',
             icon: 'fa-building',
             total: stats.totals.airlines,
             unit: 'airlines',
             accent: 'amber',
-            rows: allianceRows.length ? allianceRows : stats.top.airlines,
-            modalTitle: 'Top Airlines',
-            modalData: stats.top.airlines
+            allKind: 'all',
+            allValue: 'all',
+            rows: airlineCategoryRows
         },
         {
+            label: 'Aircraft',
             title: 'Aircraft',
             icon: 'fa-plane-up',
             total: stats.totals.aircraft,
             unit: 'models',
             accent: 'rose',
-            rows: manufacturerRows.length ? manufacturerRows : stats.top.aircraft,
-            modalTitle: 'Top Aircraft',
-            modalData: stats.top.aircraft
+            allKind: 'all',
+            allValue: 'all',
+            rows: manufacturerRows
         }
     ];
 
     cards.forEach(card => {
         const el = document.createElement('article');
         el.className = `aviation-world-card aviation-world-${card.accent}`;
-        el.onclick = () => showStatsModal(card.modalTitle, card.modalData);
+        el.onclick = () => openFlightListModal(card.modalTitle || card.label, filterFlightsForInsight(card.allKind, card.allValue));
         el.innerHTML = `
             <div class="aviation-world-topline">
                 <span class="aviation-world-icon"><i class="fa-solid ${card.icon}"></i></span>
                 <div><span>${escapeHtml(card.title)}</span><strong>${formatCompactNumber(card.total)}</strong><small>${escapeHtml(card.unit)}</small></div>
             </div>
-            <div class="aviation-world-ranks">${makeRankRows(card.rows)}</div>
+            <div class="aviation-world-ranks">${makeRankRows(card.rows, card)}</div>
         `;
         container.appendChild(el);
     });
@@ -2267,6 +2415,7 @@ async function loadProfile() {
             API.get('stats'),
             API.get('flights/detailed')
         ]);
+        State.cache.flights = flights;
         console.log(`Data fetched: ${flights.length} flights`);
 
         // 1. Header Stats

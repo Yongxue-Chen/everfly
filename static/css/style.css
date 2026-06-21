@@ -1837,3 +1837,119 @@ tr:hover { background: #f5f9ff; }
         height: 132px;
     }
 }
+
+/* Clickable dashboard refinements */
+.journey-highlight-card {
+    width: 100%;
+    border: 1px solid #e1e9f2;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.journey-highlight-card:hover {
+    border-color: #aac8e7;
+    background: linear-gradient(180deg, #ffffff, #f1f7fe);
+    box-shadow: 0 12px 28px rgba(25, 55, 95, .1);
+}
+
+.journey-highlight-card .journey-highlight-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    transform: translateY(0);
+}
+
+.month-of-year-item {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    padding: 0;
+}
+
+.month-of-year-item:hover i {
+    filter: brightness(1.08);
+    box-shadow: 0 10px 22px rgba(43, 123, 193, .24);
+}
+
+.aviation-world-rank:hover,
+.aviation-world-rank:focus-visible {
+    border-color: #aac8e7;
+    background: #f2f8ff;
+    box-shadow: inset 3px 0 #2b7bc1;
+    outline: none;
+}
+
+.flight-list-modal {
+    display: grid;
+    gap: 9px;
+    max-height: 62vh;
+    overflow-y: auto;
+    padding-right: 6px;
+}
+
+.flight-list-row {
+    display: grid;
+    grid-template-columns: minmax(120px, .8fr) minmax(110px, .7fr) minmax(180px, 1fr);
+    gap: 12px;
+    align-items: center;
+    min-width: 0;
+    padding: 12px 14px;
+    border: 1px solid #e1e9f2;
+    border-radius: 12px;
+    background: #fff;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.flight-list-row:hover,
+.flight-list-row:focus-visible {
+    border-color: #aac8e7;
+    background: #f6faff;
+    outline: none;
+}
+
+.flight-list-row span {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+}
+
+.flight-list-row strong,
+.flight-list-row small,
+.flight-list-row em {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.flight-list-row strong {
+    color: #142943;
+}
+
+.flight-list-row small,
+.flight-list-row em {
+    color: #718096;
+    font-style: normal;
+}
+
+.flight-list-empty {
+    margin: 0;
+    padding: 16px;
+    color: #718096;
+    background: #f6f9fd;
+    border-radius: 12px;
+}
+
+@media (max-width: 768px) {
+    .flight-list-row {
+        grid-template-columns: 1fr;
+    }
+}

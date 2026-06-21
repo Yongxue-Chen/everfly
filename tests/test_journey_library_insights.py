@@ -66,6 +66,34 @@ class JourneyLibraryInsightsTest(unittest.TestCase):
         self.assertIn("align-self: center", self.css)
         self.assertIn("box-sizing: border-box", self.css)
 
+    def test_dashboard_items_and_charts_open_flight_lists(self):
+        self.assertIn("function openFlightListModal", self.js)
+        self.assertIn("filterFlightsForInsight", self.js)
+        self.assertIn("onClick", self.js)
+        self.assertIn("openFlightListModal('Recent months'", self.js)
+        self.assertIn("openFlightListModal('Yearly rhythm'", self.js)
+        self.assertIn("openFlightListModal('Route distance mix'", self.js)
+        self.assertIn("openFlightListModal('Month pattern'", self.js)
+        self.assertIn("openFlightListModal(card.modalTitle", self.js)
+        self.assertIn("openFlightListModal(card.label", self.js)
+
+    def test_trend_ranges_fill_missing_months_and_years(self):
+        self.assertIn("buildRecentTwelveMonths", self.js)
+        self.assertIn("buildContinuousYears", self.js)
+        self.assertIn("Array.from({ length: 12 }", self.js)
+        self.assertNotIn("months.slice(-18)", self.js)
+
+    def test_airline_stats_have_five_categories_and_detailed_airline_fields(self):
+        stats_section = self.app_source.split("def get_stats():", 1)[1].split("return jsonify(stats)", 1)[0]
+        detailed_section = self.app_source.split("def get_detailed_flights():", 1)[1].split("return jsonify(flights)", 1)[0]
+        self.assertIn("airline_categories", stats_section)
+        for label in ["SkyTeam", "Star Alliance", "Oneworld", "Low-cost", "Other"]:
+            self.assertIn(label, stats_section)
+        self.assertIn("'%%SkyTeam%%'", stats_section)
+        self.assertNotIn("'%SkyTeam%'", stats_section)
+        self.assertIn("al.alliance as airline_alliance", detailed_section)
+        self.assertIn("al.country as airline_country", detailed_section)
+
     def test_library_view_has_overview_and_quality_contract(self):
         self.assertIn('id="library-overview"', self.template)
         self.assertIn("renderLibraryOverview", self.js)

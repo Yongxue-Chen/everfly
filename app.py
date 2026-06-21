@@ -2001,6 +2001,27 @@ def get_stats():
         GROUP BY am.manufacturer
     """, (uid, uid)).fetchall()}
 
+    stats['breakdowns']['airline_categories'] = {r[0]: r[1] for r in conn.execute("""
+        SELECT
+            CASE
+                WHEN COALESCE(al.alliance, al.frequent_flyer_program, '') LIKE '%%SkyTeam%%'
+                  OR COALESCE(al.alliance, al.frequent_flyer_program, '') LIKE '%%天合%%' THEN 'SkyTeam'
+                WHEN COALESCE(al.alliance, al.frequent_flyer_program, '') LIKE '%%Star Alliance%%'
+                  OR COALESCE(al.alliance, al.frequent_flyer_program, '') LIKE '%%星空%%' THEN 'Star Alliance'
+                WHEN COALESCE(al.alliance, al.frequent_flyer_program, '') LIKE '%%Oneworld%%'
+                  OR COALESCE(al.alliance, al.frequent_flyer_program, '') LIKE '%%寰宇%%' THEN 'Oneworld'
+                WHEN LOWER(al.name) REGEXP 'ryanair|easyjet|airasia|southwest|jetstar|scoot|spring|vietjet|cebu|wizz|frontier|spirit|norse|peach|zipair|hk express|flynas|flydubai|low.?cost|廉航' THEN 'Low-cost'
+                ELSE 'Other'
+            END AS airline_category,
+            COUNT(*)
+        FROM flights f
+        JOIN airlines al ON f.airline_id = al.id AND al.user_id = ?
+        WHERE f.user_id = ?
+        GROUP BY airline_category
+    """, (uid, uid)).fetchall()}
+    for category in ['SkyTeam', 'Star Alliance', 'Oneworld', 'Low-cost', 'Other']:
+        stats['breakdowns']['airline_categories'].setdefault(category, 0)
+
     stats['records']['longest_distance'] = query_db("""
         SELECT f.flight_number, f.date, f.distance, a1.iata_code AS origin, a2.iata_code AS dest
         FROM flights f
@@ -2208,6 +2229,7 @@ def get_detailed_flights():
                oa.iata_code as origin_code, oa.name as origin_name, oa.lat as origin_lat, oa.lon as origin_lon, oa.city_id as origin_city_id,
                da.iata_code as dest_code, da.name as dest_name, da.lat as dest_lat, da.lon as dest_lon, da.city_id as dest_city_id,
                al.name as airline_name, al.iata_code as airline_iata_code, al.icao_code as airline_icao_code,
+               al.alliance as airline_alliance, al.country as airline_country, al.frequent_flyer_program as airline_ff_program,
                al.logo_url as airline_logo_url, al.logo_source_url as airline_logo_source_url,
                CONCAT(am.manufacturer, ' ', COALESCE(am.name, am.model)) as aircraft_model,
                am.manufacturer,
