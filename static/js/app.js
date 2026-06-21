@@ -120,7 +120,8 @@ const State = {
     profileMapMoveHandlerBound: false,
     profileMapResizeObserverBound: false,
     entityPanelHistory: [],
-    journeyCharts: {}
+    journeyCharts: {},
+    libraryViewMode: 'table'
 };
 
 // --- API Client ---
@@ -635,7 +636,21 @@ async function loadDataset(datasetKey) {
     // Reset sort/filter on new dataset load
     State.filter = '';
     State.sort = { key: null, dir: 'asc' };
-    document.getElementById('dataset-search').value = '';
+    const searchInput = document.getElementById('dataset-search');
+    if (searchInput) {
+        searchInput.value = '';
+        if (datasetKey === 'cities') {
+            searchInput.placeholder = 'Search city, country, continent...';
+        } else if (datasetKey === 'airports') {
+            searchInput.placeholder = 'Search airport, IATA, ICAO, city...';
+        } else if (datasetKey === 'airlines') {
+            searchInput.placeholder = 'Search airline, IATA, ICAO...';
+        } else if (datasetKey === 'aircraft_models') {
+            searchInput.placeholder = 'Search manufacturer, model, series...';
+        } else {
+            searchInput.placeholder = 'Search...';
+        }
+    }
 
     // --- Dynamic Toolbar Buttons ---
     const dynamicContainer = document.getElementById('dataset-dynamic-actions');
@@ -712,10 +727,219 @@ function sortDataset(key) {
     renderDatasetTable(config, State.cache[State.currentDataset]);
 }
 
+function switchLibraryView(mode) {
+    State.libraryViewMode = mode;
+    
+    // Update view toggle button classes
+    const btnTable = document.getElementById('btn-view-table');
+    const btnCard = document.getElementById('btn-view-card');
+    if (btnTable && btnCard) {
+        if (mode === 'table') {
+            btnTable.classList.add('active');
+            btnCard.classList.remove('active');
+        } else {
+            btnCard.classList.add('active');
+            btnTable.classList.remove('active');
+        }
+    }
+    
+    const config = DATASETS[State.currentDataset];
+    const data = State.cache[State.currentDataset] || [];
+    renderDatasetTable(config, data);
+}
+
+function renderDatasetCards(config, data) {
+    const container = document.getElementById('dataset-cards');
+    if (!container) return;
+    container.innerHTML = '';
+
+    // Process Data (Filter & Sort)
+    let processedData = [...data];
+
+    // 1. Filter
+    if (State.filter) {
+        processedData = processedData.filter(item => {
+            return Object.values(item).some(val =>
+                String(val).toLowerCase().includes(State.filter)
+            );
+        });
+    }
+
+    // 2. Sort
+    if (State.sort.key) {
+        processedData.sort((a, b) => {
+            let valA = a[State.sort.key];
+            let valB = b[State.sort.key];
+
+            const colDef = config.columns.find(c => c.key === State.sort.key);
+            if (colDef && colDef.type === 'lookup' && State.cache[colDef.lookup]) {
+                const lookupA = State.cache[colDef.lookup].find(i => i.id === valA);
+                const lookupB = State.cache[colDef.lookup].find(i => i.id === valB);
+                valA = lookupA ? lookupA[colDef.display] : valA;
+                valB = lookupB ? lookupB[colDef.display] : valB;
+            }
+
+            if (valA < valB) return State.sort.dir === 'asc' ? -1 : 1;
+            if (valA > valB) return State.sort.dir === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }
+
+    if (processedData.length === 0) {
+        container.innerHTML = '<div class="empty-state">No records found matching current criteria.</div>';
+        return;
+    }
+
+    processedData.forEach(item => {
+        const card = document.createElement('article');
+        card.className = 'library-card';
+        card.onclick = () => openEntityPanel(State.currentDataset, item.id);
+        
+        let cardHTML = '';
+        if (State.currentDataset === 'cities') {
+            const countryStr = item.country_code ? `${item.country} (${item.country_code})` : item.country;
+            cardHTML = `
+                <div class="library-card-header">
+                    <span class="library-card-icon"><i class="fa-solid fa-city"></i></span>
+                    <div class="library-card-title-group">
+                        <h4 class="library-card-title">${escapeHtml(item.name)}</h4>
+                        <span class="library-card-subtitle">${escapeHtml(countryStr || '-')}</span>
+                    </div>
+                </div>
+                <div class="library-card-body">
+                    <div class="library-card-info"><i class="fa-solid fa-globe"></i> ${escapeHtml(item.continent || '-')}</div>
+                    <div class="library-card-info"><i class="fa-solid fa-clock"></i> ${escapeHtml(item.timezone || '-')}</div>
+                </div>
+            `;
+        } else if (State.currentDataset === 'airports') {
+            let cityVal = item.city_id;
+            if (State.cache.cities) {
+                const cityItem = State.cache.cities.find(c => c.id === item.city_id);
+                if (cityItem) {
+                    cityVal = `${cityItem.name}, ${cityItem.country}`;
+                }
+            }
+            const iata = item.iata_code || '';
+            const icao = item.icao_code || '';
+            const codeDisplay = [iata, icao].filter(Boolean).join(' / ');
+            cardHTML = `
+                <div class="library-card-header">
+                    <div class="library-card-large-code">${escapeHtml(iata || icao || '???')}</div>
+                    <div class="library-card-title-group">
+                        <h4 class="library-card-title">${escapeHtml(item.name)}</h4>
+                        <span class="library-card-subtitle">${escapeHtml(cityVal || '-')}</span>
+                    </div>
+                </div>
+                <div class="library-card-body">
+                    <div class="library-card-info"><i class="fa-solid fa-plane-departure"></i> Code: ${escapeHtml(codeDisplay || '-')}</div>
+                    <div class="library-card-info"><i class="fa-solid fa-location-dot"></i> Lat: ${item.lat || '-'}, Lon: ${item.lon || '-'}</div>
+                    ${item.terminals ? `<div class="library-card-info"><i class="fa-solid fa-door-open"></i> Terminals: ${escapeHtml(item.terminals)}</div>` : ''}
+                </div>
+            `;
+        } else if (State.currentDataset === 'airlines') {
+            const codes = [item.iata_code, item.icao_code].filter(Boolean).join(' · ');
+            cardHTML = `
+                <div class="library-card-header">
+                    <div class="library-card-logo-box">
+                        ${airlineLogoMarkup(item.logo_url, item.logo_source_url, item.iata_code || item.icao_code || item.name)}
+                    </div>
+                    <div class="library-card-title-group">
+                        <h4 class="library-card-title">${escapeHtml(item.name)}</h4>
+                        <span class="library-card-subtitle">${escapeHtml(codes || '-')}</span>
+                    </div>
+                </div>
+                <div class="library-card-body">
+                    ${item.frequent_flyer_program ? `<div class="library-card-info"><i class="fa-solid fa-id-card"></i> Program: ${escapeHtml(item.frequent_flyer_program)}</div>` : ''}
+                    ${item.frequent_flyer_id ? `<div class="library-card-info"><i class="fa-solid fa-user"></i> ID: ${escapeHtml(item.frequent_flyer_id)}</div>` : ''}
+                    ${item.website_url ? `
+                        <div class="library-card-info">
+                            <i class="fa-solid fa-link"></i> 
+                            <a href="${normalizeWebsiteUrl(item.website_url)}" target="_blank" rel="noopener noreferrer" class="library-card-link" onclick="event.stopPropagation()">
+                                Official Website <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                            </a>
+                        </div>` : ''}
+                </div>
+            `;
+        } else if (State.currentDataset === 'aircraft_models') {
+            const tags = [];
+            if (item.tags_generation) tags.push(item.tags_generation);
+            if (item.tags_winglets) tags.push(item.tags_winglets);
+            if (item.tags_config) tags.push(item.tags_config);
+
+            const tagsMarkup = tags.length > 0 ? `
+                <div class="library-card-tags">
+                    ${tags.map(t => `<span class="library-card-tag-chip">${escapeHtml(t)}</span>`).join('')}
+                </div>
+            ` : '';
+
+            cardHTML = `
+                <div class="library-card-header">
+                    <span class="library-card-icon"><i class="fa-solid fa-plane"></i></span>
+                    <div class="library-card-title-group">
+                        <h4 class="library-card-title">${escapeHtml(item.manufacturer)} ${escapeHtml(item.model)}</h4>
+                        <span class="library-card-subtitle">Series: ${escapeHtml(item.series || '-')} ${item.subtype ? `(${escapeHtml(item.subtype)})` : ''}</span>
+                    </div>
+                </div>
+                <div class="library-card-body">
+                    <div class="library-card-info"><i class="fa-solid fa-tag"></i> Name: ${escapeHtml(item.name || '-')}</div>
+                    ${tagsMarkup}
+                </div>
+            `;
+        }
+
+        // Actions Footer
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'library-card-actions';
+        actionsDiv.onclick = (e) => e.stopPropagation();
+
+        const editBtn = document.createElement('button');
+        editBtn.className = 'btn btn-xs btn-outline-primary';
+        editBtn.innerHTML = '<i class="fa-solid fa-pen"></i> Edit';
+        editBtn.onclick = () => openEditDatasetModal(item);
+        actionsDiv.appendChild(editBtn);
+
+        if (State.currentDataset === 'airports') {
+            const upBtn = document.createElement('button');
+            upBtn.className = 'btn btn-xs btn-outline-info';
+            upBtn.innerHTML = '<i class="fas fa-sync"></i> Sync';
+            upBtn.onclick = async () => {
+                if (!confirm('Update this airport?')) return;
+                const res = await API.post(`airports/${item.id}/update`, {});
+                if (res.error) alert(res.error);
+                else loadDataset('airports');
+            };
+            actionsDiv.appendChild(upBtn);
+        }
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'btn btn-xs btn-outline-danger';
+        delBtn.innerHTML = '<i class="fa-solid fa-trash"></i> Delete';
+        delBtn.onclick = () => deleteDatasetItem(item.id);
+        actionsDiv.appendChild(delBtn);
+
+        card.innerHTML = cardHTML;
+        card.appendChild(actionsDiv);
+        container.appendChild(card);
+    });
+}
+
 function renderDatasetTable(config, data) {
     const table = document.getElementById('dataset-table');
-    table.className = 'data-table'; // Ensure class is set
-    table.innerHTML = '';
+    const cards = document.getElementById('dataset-cards');
+
+    if (State.libraryViewMode === 'card') {
+        if (table) table.style.display = 'none';
+        if (cards) cards.style.display = 'grid';
+        renderDatasetCards(config, data);
+        return;
+    }
+
+    if (cards) cards.style.display = 'none';
+    if (table) table.style.display = 'table';
+    if (table) {
+        table.className = 'data-table'; // Ensure class is set
+        table.innerHTML = '';
+    }
 
     // Process Data (Filter & Sort)
     let processedData = [...data];

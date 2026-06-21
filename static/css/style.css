@@ -1953,3 +1953,284 @@ tr:hover { background: #f5f9ff; }
         grid-template-columns: 1fr;
     }
 }
+
+/* Year Filter Custom styling */
+#year-filter {
+    padding: 6px 12px;
+    margin-right: 5px;
+    border: 1px solid #d7e2ed;
+    border-radius: 8px;
+    color: #1e3a5f;
+    background-color: #fff;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+#year-filter:focus {
+    outline: none;
+    border-color: #2b7bc1;
+    box-shadow: 0 0 0 3px rgba(43, 123, 193, 0.15);
+}
+
+/* Sortable table headers */
+th[onclick] {
+    cursor: pointer;
+}
+
+/* Library Toolbar styling & layouts */
+.dataset-content .toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding: 12px;
+    border: 1px solid #e1e9f2;
+    border-radius: 14px;
+    background: #f7fafe;
+}
+
+.toolbar-left, .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.toolbar-right {
+    margin-left: auto;
+}
+
+.dynamic-actions-container {
+    display: inline-block;
+}
+
+/* View toggle group button styling */
+.view-toggle-group {
+    display: flex;
+    gap: 4px;
+    background: #eef3f8;
+    padding: 3px;
+    border-radius: 10px;
+}
+
+.btn-view-toggle {
+    border: none !important;
+    background: transparent !important;
+    color: #65809c !important;
+    padding: 6px 10px !important;
+    border-radius: 8px !important;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+}
+
+.btn-view-toggle:hover {
+    background: #fff !important;
+    color: var(--primary-color) !important;
+}
+
+.btn-view-toggle.active {
+    background: #fff !important;
+    color: var(--primary-color) !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+/* Library Card view layouts */
+.dataset-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    margin-top: 16px;
+}
+
+.library-card {
+    background: #ffffff;
+    border: 1px solid #e1e9f2;
+    border-radius: 16px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 12px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(27, 61, 98, 0.03);
+    transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+    position: relative;
+}
+
+.library-card:hover {
+    transform: translateY(-2px);
+    border-color: #2b7bc1;
+    box-shadow: 0 8px 24px rgba(27, 61, 98, 0.08);
+}
+
+.library-card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.library-card-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: #eff6fd;
+    color: #2b7bc1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+.library-card-large-code {
+    width: 50px;
+    height: 40px;
+    border-radius: 10px;
+    background: #f1f5f9;
+    color: #0f172a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    flex-shrink: 0;
+    border: 1px solid #e2e8f0;
+}
+
+.library-card-logo-box {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #edf3fa;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.library-card-logo-box img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.library-card-title-group {
+    min-width: 0;
+}
+
+.library-card-title {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #1e293b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.library-card-subtitle {
+    font-size: 0.75rem;
+    color: #64748b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+    margin-top: 2px;
+}
+
+.library-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: #475569;
+}
+
+.library-card-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.library-card-info i {
+    color: #94a3b8;
+    width: 14px;
+    text-align: center;
+}
+
+.library-card-link {
+    color: #2b7bc1;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.library-card-link:hover {
+    text-decoration: underline;
+}
+
+.library-card-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.library-card-tag-chip {
+    padding: 2px 6px;
+    background: #eff6fd;
+    color: #2b7bc1;
+    border: 1px solid #cbdcf0;
+    border-radius: 999px;
+    font-size: 0.65rem;
+    font-weight: 700;
+}
+
+.library-card-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    border-top: 1px solid #f1f5f9;
+    padding-top: 12px;
+    margin-top: auto;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.library-card:hover .library-card-actions {
+    opacity: 1;
+}
+
+.btn-xs {
+    padding: 3px 8px !important;
+    font-size: 0.72rem !important;
+    min-height: 24px !important;
+    border-radius: 6px !important;
+}
+
+@media (max-width: 768px) {
+    .dataset-content .toolbar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+    .toolbar-left, .toolbar-right {
+        flex-direction: column;
+        width: 100%;
+        align-items: stretch;
+    }
+    .toolbar-left button, .toolbar-right input, .toolbar-right .view-toggle-group {
+        width: 100%;
+    }
+    .view-toggle-group {
+        margin-top: 6px;
+    }
+    .library-card-actions {
+        opacity: 1; /* Always visible on touch screens */
+    }
+}

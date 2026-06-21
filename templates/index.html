@@ -91,7 +91,7 @@
                     <div class="map-container">
                         <div id="flight-map"></div>
                         <div class="map-controls">
-                            <select id="year-filter" style="padding: 5px; margin-right: 5px;"><option value="all">All Years</option></select>
+                            <select id="year-filter"><option value="all">All Years</option></select>
                             <button onclick="setMapLayer('map')">Map</button>
                             <button onclick="setMapLayer('satellite')">Satellite</button>
                         </div>
@@ -130,21 +130,21 @@
                     <table class="flight-table" id="flights-table">
                         <thead>
                             <tr>
-                                <th onclick="sortFlights('date')" style="cursor:pointer">Date / Flight <i
+                                <th onclick="sortFlights('date')">Date / Flight <i
                                         class="fas fa-sort"></i></th>
-                                <th onclick="sortFlights('std')" style="cursor:pointer">Times <i
+                                <th onclick="sortFlights('std')">Times <i
                                         class="fas fa-sort"></i></th>
-                                <th onclick="sortFlights('origin_name')" style="cursor:pointer">From <i
+                                <th onclick="sortFlights('origin_name')">From <i
                                         class="fas fa-sort"></i></th>
-                                <th onclick="sortFlights('dest_name')" style="cursor:pointer">To <i
+                                <th onclick="sortFlights('dest_name')">To <i
                                         class="fas fa-sort"></i></th>
-                                <th onclick="sortFlights('distance')" style="cursor:pointer">Dist / Dur <i
+                                <th onclick="sortFlights('distance')">Dist / Dur <i
                                         class="fas fa-sort"></i></th>
-                                <th onclick="sortFlights('airline_name')" style="cursor:pointer">Airline <i
+                                <th onclick="sortFlights('airline_name')">Airline <i
                                         class="fas fa-sort"></i></th>
-                                <th onclick="sortFlights('aircraft_model')" style="cursor:pointer">Aircraft / Reg <i
+                                <th onclick="sortFlights('aircraft_model')">Aircraft / Reg <i
                                         class="fas fa-sort"></i></th>
-                                <th onclick="sortFlights('seat_number')" style="cursor:pointer">Seat / Class <i
+                                <th onclick="sortFlights('seat_number')">Seat / Class <i
                                         class="fas fa-sort"></i></th>
                                 <th>Note</th>
                             </tr>
@@ -184,10 +184,9 @@
                 </div>
 
                 <div class="dataset-content">
-                    <div class="toolbar"
-                        style="margin-bottom: 10px; display: flex; gap: 10px; align-items: center; justify-content: space-between;">
-                        <div style="display:flex; gap:10px;">
-                            <button class="btn btn-sm btn-secondary" onclick="openAddDatasetModal()">Add New</button>
+                    <div class="toolbar">
+                        <div class="toolbar-left">
+                            <button class="btn btn-sm btn-secondary" onclick="openAddDatasetModal()"><i class="fa-solid fa-plus"></i> Add</button>
                             <button class="btn btn-sm btn-secondary" disabled
                                 title="CSV import is currently disabled"
                                 style="opacity: 0.5; cursor: not-allowed;">
@@ -198,16 +197,28 @@
                                 style="color: var(--danger); border-color: var(--danger); opacity: 0.5; cursor: not-allowed;">
                                 <i class="fa-solid fa-trash-can"></i> Clear
                             </button>
-                            <div id="dataset-dynamic-actions" style="display:inline-block;"></div>
+                            <div id="dataset-dynamic-actions"></div>
                         </div>
-                        <div class="search-box">
-                            <input type="text" id="dataset-search" placeholder="Filter..." onkeyup="filterDataset()"
-                                style="padding: 5px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div class="toolbar-right">
+                            <div class="search-box">
+                                <input type="text" id="dataset-search" placeholder="Filter..." onkeyup="filterDataset()">
+                            </div>
+                            <div class="view-toggle-group">
+                                <button id="btn-view-table" class="btn btn-sm btn-view-toggle active" onclick="switchLibraryView('table')" title="Table View">
+                                    <i class="fa-solid fa-list"></i>
+                                </button>
+                                <button id="btn-view-card" class="btn btn-sm btn-view-toggle" onclick="switchLibraryView('card')" title="Card View">
+                                    <i class="fa-solid fa-table-cells"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <table class="data-table" id="dataset-table">
                         <!-- Dynamic columns and rows -->
                     </table>
+                    <div id="dataset-cards" class="dataset-cards-grid" style="display: none;">
+                        <!-- Dynamic cards -->
+                    </div>
                 </div>
             </div>
         </section>

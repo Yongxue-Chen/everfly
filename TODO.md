@@ -1,6 +1,6 @@
 # Everfly 规划与后续修改说明 (TODO)
 
-本项目已完成了 Cloud Premium 视觉重塑、首页指标基础模块（Milestone Cards）、年度组合趋势图（Yearly rhythm）、位置卡片（Locations）、航司卡片（Airlines）、机型卡片（Aircraft）的统计及弹窗重构，并且后端 `/api/stats` 已完全适配了结构化的数据输出。
+本项目已完成了 Cloud Premium 视觉重塑、首页指标基础模块（Milestone Cards）、年度组合趋势图（Yearly rhythm）、位置卡片（Locations）、航司卡片（Airlines）、机型卡片（Aircraft）的统计及弹窗重构，并且后端 `/api/stats` 已完全适配了结构化的数据输出。此外，第一阶段（视觉与交互统一）关于 Library 模块的 Table/Card 双视图切换、工具栏整理及项目内联样式的彻底清理也已全部完成。
 
 以下是接下来需要继续开发和优化的内容指南：
 
@@ -74,9 +74,9 @@
 
 ## 6. 优先级建议
 
-### 第一阶段（视觉与交互统一）
-1. Library 模块增加 Table / Card 视图切换及 Toolbar 模块整理。
-2. 彻底清理项目中的内联样式，统一按钮、Tab 选项卡、卡片和表格的视觉规范。
+### 第一阶段（视觉与交互统一）[已完成]
+- [x] Library 模块增加 Table / Card 视图切换及 Toolbar 模块整理。
+- [x] 彻底清理项目中的内联样式，统一按钮、Tab 选项卡、卡片和表格的视觉规范。
 
 ### 第二阶段（产品深度与图表）
 1. 开发月度飞行热力图、年度累计里程对比曲线、以及舱位/座位偏好 Donut 图。
