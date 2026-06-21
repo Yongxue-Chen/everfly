@@ -33,6 +33,13 @@ class JourneyLibraryInsightsTest(unittest.TestCase):
         self.assertIn("route_distance_buckets", stats_section)
         self.assertIn("missing_registration", stats_section)
 
+    def test_monthly_stats_sql_escapes_percent_literals_for_pymysql(self):
+        stats_section = self.app_source.split("def get_stats():", 1)[1].split("return jsonify(stats)", 1)[0]
+        self.assertIn("'%%Y-%%m-%%d'", stats_section)
+        self.assertIn("'%%Y-%%m'", stats_section)
+        self.assertNotIn("'%Y-%m-%d'", stats_section)
+        self.assertNotIn("'%Y-%m'", stats_section)
+
     def test_journey_view_has_insight_and_chart_regions(self):
         self.assertIn('id="journey-highlights"', self.template)
         self.assertIn('id="journey-trends"', self.template)

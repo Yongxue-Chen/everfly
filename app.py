@@ -1958,7 +1958,7 @@ def get_stats():
     stats['flights_by_month'] = [
         {'month': r[0], 'count': r[1]}
         for r in conn.execute(
-            "SELECT DATE_FORMAT(STR_TO_DATE(date, '%Y-%m-%d'), '%Y-%m') AS m, COUNT(*) FROM flights WHERE user_id = ? AND date IS NOT NULL AND date != '' GROUP BY m ORDER BY m ASC",
+            "SELECT DATE_FORMAT(STR_TO_DATE(date, '%%Y-%%m-%%d'), '%%Y-%%m') AS m, COUNT(*) FROM flights WHERE user_id = ? AND date IS NOT NULL AND date != '' GROUP BY m ORDER BY m ASC",
             (uid,)
         ).fetchall()
         if r[0]
