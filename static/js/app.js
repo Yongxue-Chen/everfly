@@ -119,7 +119,8 @@ const State = {
     profileMapSelectedYear: 'all',
     profileMapMoveHandlerBound: false,
     profileMapResizeObserverBound: false,
-    entityPanelHistory: []
+    entityPanelHistory: [],
+    journeyCharts: {}
 };
 
 // --- API Client ---
@@ -620,12 +621,16 @@ async function loadDataset(datasetKey) {
     const data = await API.get(config.endpoint);
     State.cache[datasetKey] = data; // Cache for lookups
 
-    // Fetch dependencies for lookups (simple approach: fetch all dependent tables)
-    // For production, we should optimize this.
+    // Fetch dependencies for lookups and overview counts.
     if (datasetKey === 'airports') await API.get('cities').then(d => State.cache.cities = d);
-    if (datasetKey === 'flights') {
-        // Flights view could use this generic logic too if we unified it
-    }
+    await Promise.all(Object.entries(DATASETS).map(async ([key, dataset]) => {
+        if (State.cache[key]?.length || key === datasetKey) return;
+        try {
+            State.cache[key] = await API.get(dataset.endpoint);
+        } catch (e) {
+            console.warn(`Failed to load ${key} overview`, e);
+        }
+    }));
 
     // Reset sort/filter on new dataset load
     State.filter = '';
@@ -658,6 +663,7 @@ async function loadDataset(datasetKey) {
     }
 
     renderDatasetTable(config, data);
+    renderLibraryOverview();
 }
 
 function switchDatasetTab(key) {
@@ -1962,6 +1968,146 @@ async function openAddFlightModal() {
 // --- Profile & Stats ---
 // --- Profile & Stats ---
 // --- Profile Stats Helpers ---
+
+const formatCompactNumber = (value) => Number(value || 0).toLocaleString();
+const formatKm = (value) => `${Math.round(Number(value || 0)).toLocaleString()} km`;
+const formatHours = (minutes) => `${Math.round(Number(minutes || 0) / 60).toLocaleString()}h`;
+
+function routeLabel(record) {
+    if (!record) return 'Not enough data';
+    const origin = record.origin || record.route?.split('-')[0] || '';
+    const dest = record.dest || record.route?.split('-')[1] || '';
+    return origin && dest ? `${origin} -> ${dest}` : (record.route || record.flight_number || 'Not enough data');
+}
+
+function renderJourneyHighlights(stats) {
+    const container = document.getElementById('journey-highlights');
+    if (!container) return;
+    const records = stats.records || {};
+    const quality = stats.quality || {};
+    const qualityTotal = Object.values(quality).reduce((sum, value) => sum + Number(value || 0), 0);
+    const cards = [
+        {
+            icon: 'fa-route',
+            label: 'Longest distance',
+            value: records.longest_distance?.distance ? formatKm(records.longest_distance.distance) : 'No distance yet',
+            meta: routeLabel(records.longest_distance)
+        },
+        {
+            icon: 'fa-clock',
+            label: 'Longest time',
+            value: records.longest_duration?.duration ? formatHours(records.longest_duration.duration) : 'No duration yet',
+            meta: routeLabel(records.longest_duration)
+        },
+        {
+            icon: 'fa-repeat',
+            label: 'Most repeated route',
+            value: records.most_frequent_route?.route || 'No repeat yet',
+            meta: records.most_frequent_route?.count ? `${records.most_frequent_route.count} flights` : 'Every journey is still unique'
+        },
+        {
+            icon: 'fa-screwdriver-wrench',
+            label: 'Data health',
+            value: qualityTotal ? `${formatCompactNumber(qualityTotal)} gaps` : 'All tidy',
+            meta: qualityTotal ? 'Missing fields across flights and Library' : 'No obvious missing metadata'
+        }
+    ];
+    container.innerHTML = cards.map(card => `
+        <article class="journey-highlight-card">
+            <span class="journey-highlight-icon"><i class="fa-solid ${card.icon}"></i></span>
+            <div><span>${escapeHtml(card.label)}</span><strong>${escapeHtml(card.value)}</strong><small>${escapeHtml(card.meta)}</small></div>
+        </article>
+    `).join('');
+}
+
+function destroyJourneyChart(key) {
+    if (State.journeyCharts[key]) {
+        State.journeyCharts[key].destroy();
+        delete State.journeyCharts[key];
+    }
+}
+
+function renderJourneyChart(key, config) {
+    const canvas = document.getElementById(key);
+    if (!canvas || typeof Chart === 'undefined') return;
+    destroyJourneyChart(key);
+    State.journeyCharts[key] = new Chart(canvas.getContext('2d'), config);
+}
+
+function renderJourneyTrends(stats) {
+    const container = document.getElementById('journey-trends');
+    if (!container) return;
+    const months = (stats.flights_by_month || []).slice(-18);
+    const buckets = stats.distributions?.route_distance_buckets || [];
+    container.innerHTML = `
+        <article class="journey-chart-card journey-chart-wide"><div class="stats-header">Yearly rhythm</div><div class="journey-chart-box"><canvas id="yearComboChart"></canvas></div></article>
+        <article class="journey-chart-card"><div class="stats-header">Recent months</div><div class="journey-chart-box"><canvas id="monthlyChart"></canvas></div></article>
+        <article class="journey-chart-card"><div class="stats-header">Route distance mix</div><div class="journey-chart-box"><canvas id="distanceBucketChart"></canvas></div></article>
+    `;
+    const years = Array.from(new Set([
+        ...(stats.flights_by_year || []).map(d => d.year),
+        ...(stats.distance_by_year || []).map(d => d.year),
+        ...(stats.duration_by_year || []).map(d => d.year)
+    ])).sort();
+    const byYear = (rows, key) => Object.fromEntries((rows || []).map(row => [row.year, Number(row[key] || 0)]));
+    const flightMap = byYear(stats.flights_by_year, 'count');
+    const distanceMap = byYear(stats.distance_by_year, 'distance');
+    const durationMap = byYear(stats.duration_by_year, 'duration');
+    renderJourneyChart('yearComboChart', {
+        type: 'bar',
+        data: {
+            labels: years,
+            datasets: [
+                { type: 'bar', label: 'Flights', data: years.map(y => flightMap[y] || 0), backgroundColor: 'rgba(28, 112, 191, .18)', borderColor: '#1c70bf', borderWidth: 1, yAxisID: 'y' },
+                { type: 'line', label: 'Distance km', data: years.map(y => distanceMap[y] || 0), borderColor: '#00a0b5', backgroundColor: 'rgba(0,160,181,.08)', tension: .35, pointRadius: 3, yAxisID: 'y1' },
+                { type: 'line', label: 'Hours', data: years.map(y => Math.round((durationMap[y] || 0) / 60)), borderColor: '#ef8b2c', backgroundColor: 'rgba(239,139,44,.08)', tension: .35, pointRadius: 3, yAxisID: 'y' }
+            ]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true, grid: { color: '#eef3f8' } }, y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false } }, x: { grid: { display: false } } } }
+    });
+    renderJourneyChart('monthlyChart', {
+        type: 'bar',
+        data: { labels: months.map(d => d.month), datasets: [{ label: 'Flights', data: months.map(d => d.count), backgroundColor: '#2b7bc1', borderRadius: 6 }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: '#eef3f8' } }, x: { grid: { display: false } } } }
+    });
+    renderJourneyChart('distanceBucketChart', {
+        type: 'doughnut',
+        data: { labels: buckets.map(d => d.name), datasets: [{ data: buckets.map(d => d.count), backgroundColor: ['#1c70bf', '#00a0b5', '#6cae75', '#ef8b2c', '#c86c8f', '#aeb9c6'], borderWidth: 0 }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, cutout: '62%' }
+    });
+}
+
+function datasetQualityFor(key, rows) {
+    const isMissing = value => value === null || value === undefined || value === '';
+    if (key === 'cities') return rows.filter(row => isMissing(row.country_code) || isMissing(row.timezone) || isMissing(row.continent)).length;
+    if (key === 'airports') return rows.filter(row => isMissing(row.iata_code) || isMissing(row.icao_code) || isMissing(row.lat) || isMissing(row.lon) || isMissing(row.timezone)).length;
+    if (key === 'airlines') return rows.filter(row => isMissing(row.iata_code) || isMissing(row.icao_code) || (isMissing(row.logo_url) && isMissing(row.logo_source_url))).length;
+    if (key === 'aircraft_models') return rows.filter(row => isMissing(row.manufacturer) || isMissing(row.model)).length;
+    return 0;
+}
+
+function renderLibraryOverview() {
+    const container = document.getElementById('library-overview');
+    if (!container) return;
+    const items = [
+        ['cities', 'Cities', 'fa-city'],
+        ['airports', 'Airports', 'fa-tower-observation'],
+        ['airlines', 'Airlines', 'fa-building'],
+        ['aircraft_models', 'Aircraft', 'fa-plane']
+    ];
+    container.innerHTML = items.map(([key, label, icon]) => {
+        const rows = State.cache[key] || [];
+        const gaps = datasetQualityFor(key, rows);
+        const active = State.currentDataset === key ? ' active' : '';
+        const health = gaps ? `${formatCompactNumber(gaps)} gaps` : 'Healthy';
+        return `<button class="library-overview-card${active}" onclick="switchDatasetTab('${key === 'aircraft_models' ? 'aircraft' : key}')">
+            <span class="library-overview-icon"><i class="fa-solid ${icon}"></i></span>
+            <span><strong>${formatCompactNumber(rows.length)}</strong><small>${escapeHtml(label)}</small></span>
+            <em class="library-health-pill ${gaps ? 'needs-work' : ''}">${escapeHtml(health)}</em>
+        </button>`;
+    }).join('');
+}
+
 const renderStatsDashboard = (stats, container) => {
     if (!container) return;
     container.innerHTML = '';
@@ -2212,6 +2358,8 @@ async function loadProfile() {
 
         // 2. Dashboard
         try {
+            renderJourneyHighlights(stats);
+            renderJourneyTrends(stats);
             renderStatsDashboard(stats, document.getElementById('profile-stats-dashboard'));
             console.log("Dashboard rendered");
         } catch (e) {

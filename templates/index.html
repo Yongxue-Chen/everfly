@@ -82,6 +82,10 @@
                     </div>
                     <div id="journey-metrics" class="journey-metrics"></div>
                 </section>
+                <section class="journey-highlight-panel" aria-label="Journey highlights">
+                    <div class="journey-section-heading"><div><span class="journey-eyebrow">Highlights</span><h2>Records and patterns</h2></div></div>
+                    <div id="journey-highlights" class="journey-highlights"></div>
+                </section>
                 <section class="journey-map-panel">
                     <div class="journey-section-heading"><div><span class="journey-eyebrow">Explore</span><h2>Your flight map</h2></div></div>
                     <div class="map-container">
@@ -92,6 +96,10 @@
                             <button onclick="setMapLayer('satellite')">Satellite</button>
                         </div>
                     </div>
+                </section>
+                <section class="journey-trends-panel" aria-label="Flight trends">
+                    <div class="journey-section-heading"><div><span class="journey-eyebrow">Trends</span><h2>How your flying changes</h2></div></div>
+                    <div id="journey-trends" class="journey-trends"></div>
                 </section>
                 <section class="journey-insights">
                     <div class="journey-section-heading"><div><span class="journey-eyebrow">Library insights</span><h2>Your aviation world</h2></div></div>
@@ -167,6 +175,7 @@
         <section id="view-datasets" class="view" style="display: none;">
             <div class="container">
                 <div class="library-heading"><div><span class="journey-eyebrow">Reference data</span><h2>Library</h2><p class="view-subtitle">Manage the places, airlines and aircraft behind your journeys.</p></div></div>
+                <div id="library-overview" class="library-overview"></div>
                 <div class="tabs">
                     <button class="tab-btn active" onclick="switchDatasetTab('cities')">Cities</button>
                     <button class="tab-btn" onclick="switchDatasetTab('airports')">Airports</button>

@@ -1420,3 +1420,199 @@ tr:hover { background: #f5f9ff; }
     #flights-table .flight-summary-main { align-items: center; }
     #flights-table .flight-summary-button-group .btn span { display: inline; font-size: .68rem; font-weight: 800; }
 }
+
+/* Journey insight upgrade */
+.journey-highlight-panel,
+.journey-trends-panel {
+    padding: 22px;
+    border: 1px solid var(--surface-border);
+    border-radius: 20px;
+    background: #fff;
+    box-shadow: var(--shadow-soft);
+}
+
+.journey-highlights {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.journey-highlight-card {
+    display: flex;
+    gap: 13px;
+    align-items: flex-start;
+    min-width: 0;
+    padding: 16px;
+    border: 1px solid #e1e9f2;
+    border-radius: 16px;
+    background: linear-gradient(180deg, #fbfdff, #f6f9fd);
+}
+
+.journey-highlight-icon,
+.library-overview-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #0b5faa;
+    background: #e7f2ff;
+    flex: 0 0 auto;
+}
+
+.journey-highlight-card span,
+.journey-highlight-card strong,
+.journey-highlight-card small {
+    display: block;
+}
+
+.journey-highlight-card div {
+    min-width: 0;
+}
+
+.journey-highlight-card div > span {
+    color: #718096;
+    font-size: .72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+}
+
+.journey-highlight-card strong {
+    margin-top: 5px;
+    color: #142943;
+    font-size: 1.15rem;
+    letter-spacing: -.035em;
+    overflow-wrap: anywhere;
+}
+
+.journey-highlight-card small {
+    margin-top: 4px;
+    color: #6f8299;
+    line-height: 1.35;
+}
+
+.journey-trends {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.journey-chart-card {
+    min-width: 0;
+    padding: 18px;
+    border: 1px solid #e1e9f2;
+    border-radius: 16px;
+    background: #fbfdff;
+}
+
+.journey-chart-wide {
+    grid-column: 1 / -1;
+}
+
+.journey-chart-box {
+    position: relative;
+    height: 280px;
+}
+
+.library-overview {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin: 0 0 18px;
+}
+
+.library-overview-card {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid var(--surface-border);
+    border-radius: 16px;
+    background: #fff;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    box-shadow: 0 6px 20px rgba(25, 55, 95, .06);
+    cursor: pointer;
+}
+
+.library-overview-card:hover,
+.library-overview-card.active {
+    border-color: #a9c6e8;
+    background: #f6faff;
+}
+
+.library-overview-card strong,
+.library-overview-card small {
+    display: block;
+}
+
+.library-overview-card strong {
+    color: #142943;
+    font-size: 1.35rem;
+    letter-spacing: -.04em;
+}
+
+.library-overview-card small {
+    color: #718096;
+    font-size: .76rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+}
+
+.library-health-pill {
+    justify-self: end;
+    padding: 5px 8px;
+    border-radius: 999px;
+    background: #eaf7ef;
+    color: #287044;
+    font-style: normal;
+    font-size: .68rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.library-health-pill.needs-work {
+    background: #fff3df;
+    color: #9a5a00;
+}
+
+@media (max-width: 1100px) {
+    .journey-highlights,
+    .library-overview {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 768px) {
+    .journey-highlight-panel,
+    .journey-trends-panel {
+        margin: 0 10px;
+        padding: 14px;
+        border-radius: 18px;
+    }
+
+    .journey-highlights,
+    .journey-trends,
+    .library-overview {
+        grid-template-columns: 1fr;
+    }
+
+    .journey-chart-box {
+        height: 240px;
+    }
+
+    .library-overview-card {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .library-health-pill {
+        grid-column: 2;
+        justify-self: start;
+    }
+}

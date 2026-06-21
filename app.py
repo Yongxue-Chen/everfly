@@ -1806,7 +1806,10 @@ def get_stats():
     stats = {
         'totals': {},
         'top': {},
-        'breakdowns': {}
+        'breakdowns': {},
+        'records': {},
+        'distributions': {},
+        'quality': {}
     }
 
     # Visited-cities subquery reused as CTE-style inline (MySQL-compatible, no TEMP TABLE)
@@ -1820,7 +1823,7 @@ def get_stats():
     """
 
     # Totals
-    stats['totals']['flights']  = conn.execute("SELECT COUNT(*) FROM flights WHERE user_id = ?", (uid,)).fetchone()[0]
+    stats['totals']['flights'] = conn.execute("SELECT COUNT(*) FROM flights WHERE user_id = ?", (uid,)).fetchone()[0]
     stats['totals']['airlines'] = conn.execute("SELECT COUNT(DISTINCT airline_id) FROM flights WHERE user_id = ?", (uid,)).fetchone()[0]
     stats['totals']['aircraft'] = conn.execute("""
         SELECT COUNT(DISTINCT CONCAT(am.model, ' ', am.series))
@@ -1829,7 +1832,6 @@ def get_stats():
         WHERE f.user_id = ?
     """, (uid,)).fetchone()[0]
     stats['totals']['routes'] = conn.execute("SELECT COUNT(DISTINCT CONCAT(origin_airport_id, '-', dest_airport_id)) FROM flights WHERE user_id = ?", (uid,)).fetchone()[0]
-
     stats['totals']['cities'] = conn.execute(
         f"SELECT COUNT(DISTINCT city_id) FROM ({_vc_subq}) AS vc", (uid, uid, uid)
     ).fetchone()[0]
@@ -1847,13 +1849,17 @@ def get_stats():
             SELECT dest_airport_id  FROM flights WHERE user_id = ?
         )
     """, (uid, uid, uid)).fetchone()[0]
+    stats['totals']['distance'] = conn.execute(
+        "SELECT COALESCE(SUM(distance), 0) FROM flights WHERE user_id = ?", (uid,)
+    ).fetchone()[0]
+    stats['totals']['duration'] = conn.execute(
+        "SELECT COALESCE(SUM(COALESCE(duration_actual, duration_scheduled, 0)), 0) FROM flights WHERE user_id = ?", (uid,)
+    ).fetchone()[0]
 
-    # Top Lists Helper
     def get_top(query, params=()):
         return [{'name': r[0], 'count': r[1], 'extra': r[2] if len(r) > 2 else None}
                 for r in conn.execute(query, params).fetchall()]
 
-    # Top Continents (Origin + Dest)
     stats['top']['continents'] = get_top("""
         SELECT c.continent, COUNT(*) as cnt
         FROM (
@@ -1867,8 +1873,6 @@ def get_stats():
         GROUP BY c.continent
         ORDER BY cnt DESC
     """, (uid, uid, uid, uid))
-
-    # Top Countries (Origin + Dest)
     stats['top']['countries'] = get_top("""
         SELECT c.country, COUNT(*) as cnt, c.country_code
         FROM (
@@ -1881,8 +1885,6 @@ def get_stats():
         GROUP BY c.country, c.country_code
         ORDER BY cnt DESC
     """, (uid, uid, uid, uid))
-
-    # Top Cities (Origin + Dest)
     stats['top']['cities'] = get_top("""
         SELECT c.name, COUNT(*) as cnt, c.country_code
         FROM (
@@ -1895,8 +1897,6 @@ def get_stats():
         GROUP BY c.id, c.name, c.country_code
         ORDER BY cnt DESC
     """, (uid, uid, uid, uid))
-
-    # Top Airports (Dep + Arr)
     stats['top']['airports'] = get_top("""
         SELECT a.iata_code, COUNT(*) as cnt, a.name
         FROM (
@@ -1908,19 +1908,15 @@ def get_stats():
         GROUP BY a.iata_code, a.name
         ORDER BY cnt DESC
     """, (uid, uid, uid))
-
-    # Top Routes
     stats['top']['routes'] = get_top("""
         SELECT CONCAT(a1.iata_code, '-', a2.iata_code), COUNT(*) as cnt
         FROM flights f
         JOIN airports a1 ON f.origin_airport_id = a1.id AND a1.user_id = ?
-        JOIN airports a2 ON f.dest_airport_id   = a2.id AND a2.user_id = ?
+        JOIN airports a2 ON f.dest_airport_id = a2.id AND a2.user_id = ?
         WHERE f.user_id = ?
         GROUP BY f.origin_airport_id, f.dest_airport_id, a1.iata_code, a2.iata_code
         ORDER BY cnt DESC
     """, (uid, uid, uid))
-
-    # Top Airlines
     stats['top']['airlines'] = get_top("""
         SELECT al.name, COUNT(*) as cnt, al.frequent_flyer_program
         FROM flights f
@@ -1929,17 +1925,6 @@ def get_stats():
         GROUP BY al.id, al.name, al.frequent_flyer_program
         ORDER BY cnt DESC
     """, (uid, uid))
-
-    # Flights by Year (for Chart) — MySQL YEAR() replaces SQLite strftime
-    stats['flights_by_year'] = [
-        {'year': r[0], 'count': r[1]}
-        for r in conn.execute(
-            "SELECT YEAR(date) as y, COUNT(*) FROM flights WHERE user_id = ? AND date IS NOT NULL AND date != '' GROUP BY y ORDER BY y ASC",
-            (uid,)
-        ).fetchall()
-    ]
-
-    # Top Aircraft (Model + Series)
     stats['top']['aircraft'] = get_top("""
         SELECT CONCAT(am.model, ' ', am.series), COUNT(*) as cnt, am.manufacturer
         FROM flights f
@@ -1949,20 +1934,171 @@ def get_stats():
         ORDER BY cnt DESC
     """, (uid, uid))
 
-    # Breakdowns
+    stats['flights_by_year'] = [
+        {'year': r[0], 'count': r[1]}
+        for r in conn.execute(
+            "SELECT YEAR(date) as y, COUNT(*) FROM flights WHERE user_id = ? AND date IS NOT NULL AND date != '' GROUP BY y ORDER BY y ASC",
+            (uid,)
+        ).fetchall()
+    ]
+    stats['distance_by_year'] = [
+        {'year': r[0], 'distance': r[1] or 0}
+        for r in conn.execute(
+            "SELECT YEAR(date) as y, COALESCE(SUM(distance), 0) FROM flights WHERE user_id = ? AND date IS NOT NULL AND date != '' GROUP BY y ORDER BY y ASC",
+            (uid,)
+        ).fetchall()
+    ]
+    stats['duration_by_year'] = [
+        {'year': r[0], 'duration': r[1] or 0}
+        for r in conn.execute(
+            "SELECT YEAR(date) as y, COALESCE(SUM(COALESCE(duration_actual, duration_scheduled, 0)), 0) FROM flights WHERE user_id = ? AND date IS NOT NULL AND date != '' GROUP BY y ORDER BY y ASC",
+            (uid,)
+        ).fetchall()
+    ]
+    stats['flights_by_month'] = [
+        {'month': r[0], 'count': r[1]}
+        for r in conn.execute(
+            "SELECT DATE_FORMAT(STR_TO_DATE(date, '%Y-%m-%d'), '%Y-%m') AS m, COUNT(*) FROM flights WHERE user_id = ? AND date IS NOT NULL AND date != '' GROUP BY m ORDER BY m ASC",
+            (uid,)
+        ).fetchall()
+        if r[0]
+    ]
+
+    yearly_airports = conn.execute("""
+        SELECT y, airport_id
+        FROM (
+            SELECT YEAR(date) AS y, origin_airport_id AS airport_id
+            FROM flights
+            WHERE user_id = ? AND date IS NOT NULL AND date != '' AND origin_airport_id IS NOT NULL
+            UNION
+            SELECT YEAR(date) AS y, dest_airport_id AS airport_id
+            FROM flights
+            WHERE user_id = ? AND date IS NOT NULL AND date != '' AND dest_airport_id IS NOT NULL
+        ) t
+        WHERE y IS NOT NULL
+        ORDER BY y ASC
+    """, (uid, uid)).fetchall()
+    seen_airports = set()
+    cumulative_by_year = {}
+    for year, airport_id in yearly_airports:
+        seen_airports.add(airport_id)
+        cumulative_by_year[year] = len(seen_airports)
+    stats['cumulative_airports_by_year'] = [
+        {'year': year, 'count': count}
+        for year, count in cumulative_by_year.items()
+    ]
+
     stats['breakdowns']['alliance'] = {r[0]: r[1] for r in conn.execute("""
         SELECT al.frequent_flyer_program, COUNT(*)
         FROM flights f JOIN airlines al ON f.airline_id = al.id AND al.user_id = ?
         WHERE f.user_id = ? AND al.frequent_flyer_program IS NOT NULL AND al.frequent_flyer_program != ''
         GROUP BY al.frequent_flyer_program
     """, (uid, uid)).fetchall()}
-
     stats['breakdowns']['manufacturer'] = {r[0]: r[1] for r in conn.execute("""
         SELECT am.manufacturer, COUNT(*)
         FROM flights f JOIN aircraft_models am ON f.aircraft_model_id = am.id AND am.user_id = ?
         WHERE f.user_id = ?
         GROUP BY am.manufacturer
     """, (uid, uid)).fetchall()}
+
+    stats['records']['longest_distance'] = query_db("""
+        SELECT f.flight_number, f.date, f.distance, a1.iata_code AS origin, a2.iata_code AS dest
+        FROM flights f
+        LEFT JOIN airports a1 ON f.origin_airport_id = a1.id AND a1.user_id = ?
+        LEFT JOIN airports a2 ON f.dest_airport_id = a2.id AND a2.user_id = ?
+        WHERE f.user_id = ? AND f.distance IS NOT NULL
+        ORDER BY f.distance DESC
+        LIMIT 1
+    """, (uid, uid, uid), one=True) or {}
+    stats['records']['longest_duration'] = query_db("""
+        SELECT f.flight_number, f.date, COALESCE(f.duration_actual, f.duration_scheduled, 0) AS duration,
+               a1.iata_code AS origin, a2.iata_code AS dest
+        FROM flights f
+        LEFT JOIN airports a1 ON f.origin_airport_id = a1.id AND a1.user_id = ?
+        LEFT JOIN airports a2 ON f.dest_airport_id = a2.id AND a2.user_id = ?
+        WHERE f.user_id = ? AND COALESCE(f.duration_actual, f.duration_scheduled) IS NOT NULL
+        ORDER BY duration DESC
+        LIMIT 1
+    """, (uid, uid, uid), one=True) or {}
+    stats['records']['most_frequent_route'] = query_db("""
+        SELECT CONCAT(a1.iata_code, '-', a2.iata_code) AS route, COUNT(*) AS count
+        FROM flights f
+        JOIN airports a1 ON f.origin_airport_id = a1.id AND a1.user_id = ?
+        JOIN airports a2 ON f.dest_airport_id = a2.id AND a2.user_id = ?
+        WHERE f.user_id = ?
+        GROUP BY f.origin_airport_id, f.dest_airport_id, a1.iata_code, a2.iata_code
+        ORDER BY count DESC
+        LIMIT 1
+    """, (uid, uid, uid), one=True) or {}
+
+    stats['distributions']['route_distance_buckets'] = [
+        {'name': r[0], 'count': r[1]}
+        for r in conn.execute("""
+            SELECT
+                CASE
+                    WHEN distance IS NULL THEN 'Unknown'
+                    WHEN distance < 500 THEN '<500 km'
+                    WHEN distance < 1500 THEN '500-1,499 km'
+                    WHEN distance < 4000 THEN '1,500-3,999 km'
+                    WHEN distance < 7000 THEN '4,000-6,999 km'
+                    ELSE '7,000+ km'
+                END AS bucket,
+                COUNT(*)
+            FROM flights
+            WHERE user_id = ?
+            GROUP BY bucket
+            ORDER BY MIN(COALESCE(distance, 999999)) ASC
+        """, (uid,)).fetchall()
+    ]
+    stats['distributions']['flight_class'] = [
+        {'name': r[0] or 'Unknown', 'count': r[1]}
+        for r in conn.execute("""
+            SELECT COALESCE(NULLIF(flight_class, ''), 'Unknown'), COUNT(*)
+            FROM flights
+            WHERE user_id = ?
+            GROUP BY COALESCE(NULLIF(flight_class, ''), 'Unknown')
+            ORDER BY COUNT(*) DESC
+        """, (uid,)).fetchall()
+    ]
+    stats['distributions']['domestic_international'] = [
+        {'name': r[0], 'count': r[1]}
+        for r in conn.execute("""
+            SELECT
+                CASE
+                    WHEN oc.country_code IS NULL OR dc.country_code IS NULL THEN 'Unknown'
+                    WHEN oc.country_code = dc.country_code THEN 'Domestic'
+                    ELSE 'International'
+                END AS route_type,
+                COUNT(*)
+            FROM flights f
+            LEFT JOIN airports oa ON f.origin_airport_id = oa.id AND oa.user_id = ?
+            LEFT JOIN airports da ON f.dest_airport_id = da.id AND da.user_id = ?
+            LEFT JOIN cities oc ON oa.city_id = oc.id AND oc.user_id = ?
+            LEFT JOIN cities dc ON da.city_id = dc.id AND dc.user_id = ?
+            WHERE f.user_id = ?
+            GROUP BY route_type
+            ORDER BY COUNT(*) DESC
+        """, (uid, uid, uid, uid, uid)).fetchall()
+    ]
+
+    stats['quality']['missing_aircraft'] = conn.execute(
+        "SELECT COUNT(*) FROM flights WHERE user_id = ? AND aircraft_model_id IS NULL", (uid,)
+    ).fetchone()[0]
+    stats['quality']['missing_registration'] = conn.execute(
+        "SELECT COUNT(*) FROM flights WHERE user_id = ? AND (registration IS NULL OR registration = '')", (uid,)
+    ).fetchone()[0]
+    stats['quality']['missing_actual_times'] = conn.execute(
+        "SELECT COUNT(*) FROM flights WHERE user_id = ? AND ((atd IS NULL OR atd = '') OR (ata IS NULL OR ata = ''))", (uid,)
+    ).fetchone()[0]
+    stats['quality']['missing_distance'] = conn.execute(
+        "SELECT COUNT(*) FROM flights WHERE user_id = ? AND distance IS NULL", (uid,)
+    ).fetchone()[0]
+    stats['quality']['missing_airport_coordinates'] = conn.execute(
+        "SELECT COUNT(*) FROM airports WHERE user_id = ? AND (lat IS NULL OR lon IS NULL)", (uid,)
+    ).fetchone()[0]
+    stats['quality']['missing_airline_logos'] = conn.execute(
+        "SELECT COUNT(*) FROM airlines WHERE user_id = ? AND (logo_url IS NULL OR logo_url = '') AND (logo_source_url IS NULL OR logo_source_url = '')", (uid,)
+    ).fetchone()[0]
 
     return jsonify(stats)
 
