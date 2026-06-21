@@ -2010,7 +2010,7 @@ def get_stats():
                   OR COALESCE(al.alliance, al.frequent_flyer_program, '') LIKE '%%星空%%' THEN 'Star Alliance'
                 WHEN COALESCE(al.alliance, al.frequent_flyer_program, '') LIKE '%%Oneworld%%'
                   OR COALESCE(al.alliance, al.frequent_flyer_program, '') LIKE '%%寰宇%%' THEN 'Oneworld'
-                WHEN LOWER(al.name) REGEXP 'ryanair|easyjet|airasia|southwest|jetstar|scoot|spring|vietjet|cebu|wizz|frontier|spirit|norse|peach|zipair|hk express|flynas|flydubai|low.?cost|廉航' THEN 'Low-cost'
+                WHEN LOWER(al.name) REGEXP 'ryanair|easyjet|airasia|southwest|jetstar|scoot|spring|vietjet|cebu|wizz|frontier|spirit|norse|peach|zipair|hk express|flynas|flydubai|low cost|low-cost|lowcost|廉航' THEN 'Low-cost'
                 ELSE 'Other'
             END AS airline_category,
             COUNT(*)

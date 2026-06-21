@@ -2025,7 +2025,7 @@ function buildContinuousYears(stats) {
 
 function isLowCostAirline(flight) {
     const name = String(flight.airline_name || '').toLowerCase();
-    return /ryanair|easyjet|airasia|southwest|jetstar|scoot|spring|vietjet|cebu|wizz|frontier|spirit|norse|peach|zipair|hk express|flynas|flydubai|low.?cost|廉航/.test(name);
+    return /ryanair|easyjet|airasia|southwest|jetstar|scoot|spring|vietjet|cebu|wizz|frontier|spirit|norse|peach|zipair|hk express|flynas|flydubai|low cost|low-cost|lowcost|廉航/.test(name);
 }
 
 function airlineCategoryForFlight(flight) {

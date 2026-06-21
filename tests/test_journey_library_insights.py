@@ -91,6 +91,7 @@ class JourneyLibraryInsightsTest(unittest.TestCase):
             self.assertIn(label, stats_section)
         self.assertIn("'%%SkyTeam%%'", stats_section)
         self.assertNotIn("'%SkyTeam%'", stats_section)
+        self.assertNotIn("low.?cost", stats_section)
         self.assertIn("al.alliance as airline_alliance", detailed_section)
         self.assertIn("al.country as airline_country", detailed_section)
 
