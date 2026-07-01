@@ -13,6 +13,7 @@ import re
 import socket
 import ipaddress
 import uuid
+import hmac
 from urllib.parse import urlparse
 import werkzeug.security
 from flask_limiter import Limiter
@@ -368,6 +369,75 @@ def index():
 @limiter.exempt
 def health():
     return jsonify({"status": "ok"})
+
+def _internal_bearer_token_matches():
+    expected = os.environ.get('INTERNAL_SERVICE_TOKEN', '').strip()
+    if not expected:
+        return False
+    header = request.headers.get('Authorization', '')
+    prefix = 'Bearer '
+    if not header.startswith(prefix):
+        return False
+    return hmac.compare_digest(header[len(prefix):], expected)
+
+def _normalize_internal_flight_payload(data):
+    flight_number = re.sub(r'\s+', '', str(data.get('flightNumber') or data.get('flight_number') or '')).upper()
+    date_value = str(data.get('date') or '').strip()
+    if not flight_number:
+        return None, 'flightNumber is required'
+    if not date_value:
+        return None, 'date is required'
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date_value):
+        return None, 'date must be YYYY-MM-DD'
+    try:
+        datetime.strptime(date_value, '%Y-%m-%d')
+    except ValueError:
+        return None, 'date must be a valid YYYY-MM-DD date'
+    return {'flight_number': flight_number, 'date': date_value}, None
+
+def _configured_internal_username():
+    return os.environ.get('EVERFLY_INTERNAL_USERNAME', 'yongxue').strip()
+
+def create_internal_flight_record(conn, payload, username):
+    cur = conn.execute("SELECT id FROM users WHERE username = ? LIMIT 1", (username,))
+    user_row = cur.fetchone()
+    if not user_row:
+        raise LookupError(f"Configured everfly user not found: {username}")
+    user_id = user_row['id'] if isinstance(user_row, dict) else user_row[0]
+    cur = conn.execute(
+        "INSERT INTO flights (user_id, date, flight_number) VALUES (?, ?, ?)",
+        (user_id, payload['date'], payload['flight_number']),
+    )
+    conn.commit()
+    return {
+        'id': cur.lastrowid,
+        'user_id': user_id,
+        'date': payload['date'],
+        'flight_number': payload['flight_number'],
+    }
+
+@app.route('/api/internal/flights', methods=['POST'])
+@csrf.exempt
+@limiter.exempt
+def create_internal_flight():
+    if not _internal_bearer_token_matches():
+        return jsonify({'ok': False, 'error': 'unauthorized'}), 401
+    payload, error = _normalize_internal_flight_payload(request.get_json(silent=True) or {})
+    if error:
+        return jsonify({'ok': False, 'error': error}), 400
+    username = _configured_internal_username()
+    if not username:
+        return jsonify({'ok': False, 'error': 'EVERFLY_INTERNAL_USERNAME is required'}), 500
+    conn = database.get_db()
+    try:
+        flight = create_internal_flight_record(conn, payload, username)
+        return jsonify({'ok': True, 'flight': flight}), 201
+    except LookupError as e:
+        conn.rollback()
+        return jsonify({'ok': False, 'error': str(e)}), 404
+    except Exception as e:
+        conn.rollback()
+        return safe_jsonify_error(e)
 
 # --- Helper Functions ---
 def query_db(query, args=(), one=False):
