@@ -190,11 +190,41 @@ def migrate_airline_logo_metadata():
         if getattr(e, 'args', [None])[0] != 1060:
             print(f"migrate_airline_logo_metadata error: {e}")
 
+def migrate_flight_aeroapi_jobs():
+    try:
+        raw_conn = database._raw_connect()
+        cur = raw_conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS flight_aeroapi_jobs (
+                id                  INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                user_id             INT NOT NULL,
+                flight_id           INT NOT NULL,
+                job_type            VARCHAR(40) NOT NULL,
+                run_at_utc          DATETIME NOT NULL,
+                status              VARCHAR(30) NOT NULL DEFAULT 'pending',
+                attempt_count       INT NOT NULL DEFAULT 0,
+                last_error          TEXT,
+                last_result_summary TEXT,
+                created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_aeroapi_job_flight_type (flight_id, job_type),
+                INDEX idx_aeroapi_jobs_due (status, run_at_utc),
+                INDEX idx_aeroapi_jobs_user (user_id),
+                CONSTRAINT fk_aeroapi_jobs_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE RESTRICT,
+                CONSTRAINT fk_aeroapi_jobs_flight_tenant FOREIGN KEY (flight_id, user_id) REFERENCES flights (id, user_id) ON DELETE RESTRICT
+            ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+        """)
+        raw_conn.commit()
+        raw_conn.close()
+    except Exception as e:
+        print(f"migrate_flight_aeroapi_jobs error: {e}")
+
 # --- Migrate users DB at startup ---
 with app.app_context():
     database.migrate_users_db()
     migrate_airlines_website_url()
     migrate_airline_logo_metadata()
+    migrate_flight_aeroapi_jobs()
 
 # --- Auth Middleware ---
 @app.before_request
@@ -408,9 +438,14 @@ def create_internal_flight_record(conn, payload, username):
         "INSERT INTO flights (user_id, date, flight_number) VALUES (?, ?, ?)",
         (user_id, payload['date'], payload['flight_number']),
     )
+    flight_id = cur.lastrowid
+    try:
+        schedule_flight_aeroapi_jobs(conn, user_id, flight_id)
+    except Exception as e:
+        print(f"schedule_flight_aeroapi_jobs error for internal flight {flight_id}: {e}")
     conn.commit()
     return {
-        'id': cur.lastrowid,
+        'id': flight_id,
         'user_id': user_id,
         'date': payload['date'],
         'flight_number': payload['flight_number'],
@@ -551,6 +586,8 @@ def create_crud_routes(endpoint, table_name, columns):
         try:
             validate_tenant_relationships(database.get_db(), table_name, valid_data, g.user['id'])
             new_id = execute_db(f"INSERT INTO {table_name} ({cols}) VALUES ({placeholders})", values)
+            if table_name == 'flights':
+                safely_schedule_flight_aeroapi_jobs(database.get_db(), g.user['id'], new_id)
             new_item = query_db(f"SELECT * FROM {table_name} WHERE id = ? AND user_id = ?", (new_id, g.user['id']), one=True)
             return jsonify(new_item), 201
         except ValueError as e:
@@ -611,6 +648,8 @@ def create_crud_routes(endpoint, table_name, columns):
         try:
             validate_tenant_relationships(database.get_db(), table_name, valid_data, g.user['id'])
             execute_db(f"UPDATE {table_name} SET {set_clause} WHERE id = ? AND user_id = ?", values)
+            if table_name == 'flights':
+                safely_schedule_flight_aeroapi_jobs(database.get_db(), g.user['id'], id)
             updated_item = query_db(f"SELECT * FROM {table_name} WHERE id = ? AND user_id = ?", (id, g.user['id']), one=True)
             return jsonify(updated_item)
         except ValueError as e:
@@ -1547,6 +1586,132 @@ def _as_utc(dt):
         return pytz.utc.localize(dt)
     return dt.astimezone(pytz.utc)
 
+def calculate_preflight_aeroapi_run_at(f_date):
+    departure_date = dateutil.parser.parse(f_date).date()
+    earliest_worldwide_midnight_utc = pytz.utc.localize(
+        datetime.combine(departure_date, time.min) - timedelta(hours=14)
+    )
+    return earliest_worldwide_midnight_utc - timedelta(minutes=30)
+
+def build_aeroapi_unknown_timezone_window(f_date, now_utc=None):
+    departure_date = dateutil.parser.parse(f_date).date()
+    start_utc = pytz.utc.localize(datetime.combine(departure_date, time.min) - timedelta(hours=14))
+    end_utc = pytz.utc.localize(datetime.combine(departure_date + timedelta(days=1), time.min) + timedelta(hours=12))
+
+    now_utc = _as_utc(now_utc or datetime.now(pytz.utc))
+    future_limit = now_utc + timedelta(days=2)
+    if end_utc > future_limit:
+        end_utc = future_limit
+    if end_utc <= start_utc:
+        raise ValueError("Flight date exceeds AeroAPI future limit")
+
+    return (
+        start_utc.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        end_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+    )
+
+def next_post_arrival_retry_at(base_utc, attempt_count):
+    base_utc = _as_utc(base_utc)
+    delay_hours = 1 if attempt_count <= 1 else 2 if attempt_count == 2 else 4
+    return base_utc + timedelta(hours=delay_hours)
+
+def calculate_post_arrival_aeroapi_run_at(arrival_time, dest_tz_name):
+    arrival_dt = dateutil.parser.parse(arrival_time)
+    if arrival_dt.tzinfo is None:
+        dest_tz = _timezone_or_utc(dest_tz_name)
+        arrival_dt = dest_tz.localize(arrival_dt)
+    return arrival_dt.astimezone(pytz.utc) + timedelta(hours=1)
+
+def build_aeroapi_job_specs(flight):
+    f_date = flight.get('date')
+    flight_id = flight.get('id')
+    user_id = flight.get('user_id')
+    if not f_date or not flight_id or not user_id:
+        return []
+
+    specs = [{
+        'flight_id': flight_id,
+        'user_id': user_id,
+        'job_type': 'preflight_fill',
+        'run_at_utc': calculate_preflight_aeroapi_run_at(f_date),
+    }]
+
+    arrival_time = flight.get('sta') or flight.get('arr_time_scheduled')
+    if arrival_time:
+        specs.append({
+            'flight_id': flight_id,
+            'user_id': user_id,
+            'job_type': 'post_arrival_fill',
+            'run_at_utc': calculate_post_arrival_aeroapi_run_at(arrival_time, flight.get('dest_timezone')),
+        })
+
+    return specs
+
+def _mysql_datetime(dt):
+    return _as_utc(dt).strftime('%Y-%m-%d %H:%M:%S')
+
+def _load_flight_for_aeroapi_jobs(conn, uid, flight_id):
+    row = conn.execute("""
+        SELECT f.id, f.user_id, f.date, f.sta, f.arr_time_scheduled, a.timezone
+        FROM flights f
+        LEFT JOIN airports a ON f.dest_airport_id = a.id AND a.user_id = f.user_id
+        WHERE f.id = ? AND f.user_id = ?
+    """, (flight_id, uid)).fetchone()
+    if not row:
+        return None
+    return {
+        'id': row[0],
+        'user_id': row[1],
+        'date': row[2],
+        'sta': row[3],
+        'arr_time_scheduled': row[4],
+        'dest_timezone': row[5],
+    }
+
+def schedule_flight_aeroapi_jobs(conn, uid, flight_id):
+    flight = _load_flight_for_aeroapi_jobs(conn, uid, flight_id)
+    if not flight:
+        return 0
+
+    try:
+        flight_date = dateutil.parser.parse(flight['date']).date()
+    except Exception:
+        return 0
+    if flight_date < datetime.now(pytz.utc).date():
+        return 0
+
+    specs = build_aeroapi_job_specs(flight)
+    for spec in specs:
+        conn.execute("""
+            INSERT INTO flight_aeroapi_jobs
+                (user_id, flight_id, job_type, run_at_utc, status, attempt_count, last_error, last_result_summary)
+            VALUES (?, ?, ?, ?, 'pending', 0, NULL, NULL)
+            ON DUPLICATE KEY UPDATE
+                run_at_utc = VALUES(run_at_utc),
+                status = IF(status IN ('done', 'running'), status, 'pending'),
+                last_error = NULL,
+                updated_at = CURRENT_TIMESTAMP
+        """, (
+            spec['user_id'],
+            spec['flight_id'],
+            spec['job_type'],
+            _mysql_datetime(spec['run_at_utc']),
+        ))
+    return len(specs)
+
+def safely_schedule_flight_aeroapi_jobs(conn, uid, flight_id):
+    try:
+        scheduled = schedule_flight_aeroapi_jobs(conn, uid, flight_id)
+        conn.commit()
+        return scheduled
+    except Exception as e:
+        print(f"schedule_flight_aeroapi_jobs error for flight {flight_id}: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return 0
+
 def build_aeroapi_departure_day_window(f_date, origin_tz_name, now_utc=None):
     origin_tz = _timezone_or_utc(origin_tz_name)
     departure_date = dateutil.parser.parse(f_date).date()
@@ -1556,7 +1721,7 @@ def build_aeroapi_departure_day_window(f_date, origin_tz_name, now_utc=None):
     start_utc = local_start.astimezone(pytz.utc)
     end_utc = local_end.astimezone(pytz.utc)
 
-    now_utc = _as_utc(now_utc or datetime.utcnow())
+    now_utc = _as_utc(now_utc or datetime.now(pytz.utc))
     future_limit = now_utc + timedelta(days=2)
     if end_utc > future_limit:
         end_utc = future_limit
@@ -1573,10 +1738,16 @@ def flight_matches_departure_local_date(api_flight, target_date_str, origin_tz_n
     if not t_str:
         return False
 
-    origin_tz = _timezone_or_utc(origin_tz_name)
     target_date = dateutil.parser.parse(target_date_str).date()
     departure_utc = _as_utc(dateutil.parser.parse(t_str))
-    return departure_utc.astimezone(origin_tz).date() == target_date
+    candidate_tz_name = origin_tz_name or (api_flight.get('origin') or {}).get('timezone')
+    if candidate_tz_name:
+        origin_tz = _timezone_or_utc(candidate_tz_name)
+        return departure_utc.astimezone(origin_tz).date() == target_date
+
+    start_utc = pytz.utc.localize(datetime.combine(target_date, time.min) - timedelta(hours=14))
+    end_utc = pytz.utc.localize(datetime.combine(target_date + timedelta(days=1), time.min) + timedelta(hours=12))
+    return start_utc <= departure_utc < end_utc
 
 def _airport_code_set(airport):
     if not airport:
@@ -2561,7 +2732,10 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
     origin_tz_name = _get_airport_timezone(conn, flight[2], uid)
 
     try:
-        start_window, end_window = build_aeroapi_departure_day_window(f_date, origin_tz_name)
+        if origin_tz_name:
+            start_window, end_window = build_aeroapi_departure_day_window(f_date, origin_tz_name)
+        else:
+            start_window, end_window = build_aeroapi_unknown_timezone_window(f_date)
     except ValueError as e:
         return {'error': str(e)}
     
@@ -2734,7 +2908,10 @@ def _resolve_aeroapi_selection_for_flight(flight, conn, uid, selected_candidate_
         raise ValueError('Missing flight number or date')
 
     origin_tz_name = _get_airport_timezone(conn, flight[2], uid)
-    start_window, end_window = build_aeroapi_departure_day_window(f_date, origin_tz_name)
+    if origin_tz_name:
+        start_window, end_window = build_aeroapi_departure_day_window(f_date, origin_tz_name)
+    else:
+        start_window, end_window = build_aeroapi_unknown_timezone_window(f_date)
     raw_flights = fetch_aeroapi_data(f_num.replace(' ', ''), start_window, end_window)
     if not raw_flights:
         raise ValueError('No data found in AeroAPI')
@@ -3037,6 +3214,119 @@ def update_missing_flights_aeroapi():
             # errors.append(f"Flight {fid}: {res['error']}")
             
     return jsonify({'updated': updated_count, 'total_candidates': len(rows)})
+
+def _flight_has_actual_arrival(conn, uid, flight_id):
+    row = conn.execute("SELECT ata FROM flights WHERE id = ? AND user_id = ?", (flight_id, uid)).fetchone()
+    return bool(row and row[0])
+
+def _load_user_for_job(uid):
+    conn = database.get_users_db()
+    try:
+        return conn.execute('SELECT * FROM users WHERE id = ?', (uid,)).fetchone()
+    finally:
+        conn.close()
+
+def _finish_aeroapi_job(conn, job_id, status, attempt_count, summary=None, error=None, next_run_at=None):
+    if next_run_at:
+        conn.execute("""
+            UPDATE flight_aeroapi_jobs
+            SET status = ?, attempt_count = ?, last_result_summary = ?, last_error = ?, run_at_utc = ?
+            WHERE id = ?
+        """, (status, attempt_count, summary, error, _mysql_datetime(next_run_at), job_id))
+    else:
+        conn.execute("""
+            UPDATE flight_aeroapi_jobs
+            SET status = ?, attempt_count = ?, last_result_summary = ?, last_error = ?
+            WHERE id = ?
+        """, (status, attempt_count, summary, error, job_id))
+
+def run_due_aeroapi_jobs(limit=10, now_utc=None):
+    conn = database.get_db()
+    now_utc = _as_utc(now_utc or datetime.now(pytz.utc))
+    cur = conn.execute("""
+        SELECT id, user_id, flight_id, job_type, attempt_count
+        FROM flight_aeroapi_jobs
+        WHERE status IN ('pending', 'retry') AND run_at_utc <= ?
+        ORDER BY run_at_utc ASC
+        LIMIT ?
+    """, (_mysql_datetime(now_utc), int(limit)))
+    rows = cur.fetchall()
+    processed = 0
+    updated = 0
+    manual_required = 0
+    retried = 0
+    failed = 0
+
+    previous_user = getattr(g, 'user', None)
+    try:
+        for row in rows:
+            job_id, uid, flight_id, job_type, attempt_count = row
+            attempt_count = (attempt_count or 0) + 1
+            conn.execute("UPDATE flight_aeroapi_jobs SET status = 'running', attempt_count = ? WHERE id = ?", (attempt_count, job_id))
+            conn.commit()
+
+            user = _load_user_for_job(uid)
+            if not user:
+                _finish_aeroapi_job(conn, job_id, 'failed', attempt_count, error='User not found')
+                conn.commit()
+                failed += 1
+                processed += 1
+                continue
+
+            g.user = user
+            result = update_single_flight_from_aeroapi(flight_id, force=False)
+            summary = json.dumps(result, ensure_ascii=False)[:2000]
+
+            if result.get('ambiguous'):
+                _finish_aeroapi_job(conn, job_id, 'manual_required', attempt_count, summary=summary, error=result.get('message'))
+                manual_required += 1
+            elif result.get('error'):
+                _finish_aeroapi_job(conn, job_id, 'failed', attempt_count, summary=summary, error=result.get('error'))
+                failed += 1
+            elif job_type == 'post_arrival_fill' and not _flight_has_actual_arrival(conn, uid, flight_id):
+                if attempt_count >= 8:
+                    _finish_aeroapi_job(conn, job_id, 'manual_required', attempt_count, summary=summary, error='Actual arrival still missing after retry limit')
+                    manual_required += 1
+                else:
+                    _finish_aeroapi_job(
+                        conn,
+                        job_id,
+                        'retry',
+                        attempt_count,
+                        summary=summary,
+                        error='Actual arrival not available yet',
+                        next_run_at=next_post_arrival_retry_at(now_utc, attempt_count),
+                    )
+                    retried += 1
+            else:
+                _finish_aeroapi_job(conn, job_id, 'done', attempt_count, summary=summary)
+                if result.get('success'):
+                    updated += 1
+            conn.commit()
+            processed += 1
+    finally:
+        g.user = previous_user
+
+    return {
+        'processed': processed,
+        'updated': updated,
+        'manual_required': manual_required,
+        'retried': retried,
+        'failed': failed,
+    }
+
+@app.route('/api/internal/aeroapi_jobs/run', methods=['POST'])
+@csrf.exempt
+@limiter.exempt
+def run_internal_aeroapi_jobs():
+    if not _internal_bearer_token_matches():
+        return jsonify({'ok': False, 'error': 'unauthorized'}), 401
+    data = request.get_json(silent=True) or {}
+    try:
+        limit = int(data.get('limit') or 10)
+    except (TypeError, ValueError):
+        limit = 10
+    return jsonify({'ok': True, **run_due_aeroapi_jobs(limit=max(1, min(limit, 50)))})
 
 if __name__ == '__main__':
     debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'

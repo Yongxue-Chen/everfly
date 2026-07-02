@@ -128,3 +128,22 @@ CREATE TABLE IF NOT EXISTS flights (
     CONSTRAINT fk_flights_origin_tenant FOREIGN KEY (origin_airport_id, user_id) REFERENCES airports (id, user_id) ON DELETE RESTRICT,
     CONSTRAINT fk_flights_dest_tenant FOREIGN KEY (dest_airport_id, user_id) REFERENCES airports (id, user_id) ON DELETE RESTRICT
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS flight_aeroapi_jobs (
+    id                  INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id             INT NOT NULL,
+    flight_id           INT NOT NULL,
+    job_type            VARCHAR(40) NOT NULL,
+    run_at_utc          DATETIME NOT NULL,
+    status              VARCHAR(30) NOT NULL DEFAULT 'pending',
+    attempt_count       INT NOT NULL DEFAULT 0,
+    last_error          TEXT,
+    last_result_summary TEXT,
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_aeroapi_job_flight_type (flight_id, job_type),
+    INDEX idx_aeroapi_jobs_due (status, run_at_utc),
+    INDEX idx_aeroapi_jobs_user (user_id),
+    CONSTRAINT fk_aeroapi_jobs_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE RESTRICT,
+    CONSTRAINT fk_aeroapi_jobs_flight_tenant FOREIGN KEY (flight_id, user_id) REFERENCES flights (id, user_id) ON DELETE RESTRICT
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

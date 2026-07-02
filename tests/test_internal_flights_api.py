@@ -35,6 +35,8 @@ class FakeConnection:
             return FakeCursor((7,))
         if query.startswith("INSERT INTO flights"):
             return FakeCursor(lastrowid=42)
+        if "FROM flights f" in query:
+            return FakeCursor((42, 7, "2026-07-03", None, None, None))
         return FakeCursor()
 
     def commit(self):
@@ -95,12 +97,14 @@ class InternalFlightsApiTest(unittest.TestCase):
             },
         }, response.get_json())
         self.assertEqual(
-            [
-                ("SELECT id FROM users WHERE username = ? LIMIT 1", ("yongxue",)),
-                ("INSERT INTO flights (user_id, date, flight_number) VALUES (?, ?, ?)", (7, "2026-07-03", "CX251")),
-            ],
-            self.fake_conn.queries,
+            ("SELECT id FROM users WHERE username = ? LIMIT 1", ("yongxue",)),
+            self.fake_conn.queries[0],
         )
+        self.assertEqual(
+            ("INSERT INTO flights (user_id, date, flight_number) VALUES (?, ?, ?)", (7, "2026-07-03", "CX251")),
+            self.fake_conn.queries[1],
+        )
+        self.assertTrue(any("INSERT INTO flight_aeroapi_jobs" in query for query, _ in self.fake_conn.queries))
         self.assertTrue(self.fake_conn.committed)
 
     def test_rejects_missing_required_fields(self):
