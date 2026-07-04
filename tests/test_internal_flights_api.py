@@ -36,7 +36,7 @@ class FakeConnection:
         if query.startswith("INSERT INTO flights"):
             return FakeCursor(lastrowid=42)
         if "FROM flights f" in query:
-            return FakeCursor((42, 7, "2026-07-03", None, None, None))
+            return FakeCursor((42, 7, "2026-07-05", None, None, None))
         return FakeCursor()
 
     def commit(self):
@@ -72,7 +72,7 @@ class InternalFlightsApiTest(unittest.TestCase):
     def test_rejects_missing_bearer_token(self):
         response = self.client.post("/api/internal/flights", json={
             "flightNumber": "cx 251",
-            "date": "2026-07-03",
+            "date": "2026-07-05",
         })
 
         self.assertEqual(401, response.status_code)
@@ -82,7 +82,7 @@ class InternalFlightsApiTest(unittest.TestCase):
     def test_creates_minimal_flight_for_configured_user(self):
         response = self.client.post(
             "/api/internal/flights",
-            json={"flightNumber": "cx 251", "date": "2026-07-03"},
+            json={"flightNumber": "cx 251", "date": "2026-07-05"},
             headers={"Authorization": "Bearer shared-secret"},
         )
 
@@ -92,7 +92,7 @@ class InternalFlightsApiTest(unittest.TestCase):
             "flight": {
                 "id": 42,
                 "user_id": 7,
-                "date": "2026-07-03",
+                "date": "2026-07-05",
                 "flight_number": "CX251",
             },
         }, response.get_json())
@@ -101,7 +101,7 @@ class InternalFlightsApiTest(unittest.TestCase):
             self.fake_conn.queries[0],
         )
         self.assertEqual(
-            ("INSERT INTO flights (user_id, date, flight_number) VALUES (?, ?, ?)", (7, "2026-07-03", "CX251")),
+            ("INSERT INTO flights (user_id, date, flight_number) VALUES (?, ?, ?)", (7, "2026-07-05", "CX251")),
             self.fake_conn.queries[1],
         )
         self.assertTrue(any("INSERT INTO flight_aeroapi_jobs" in query for query, _ in self.fake_conn.queries))

@@ -90,6 +90,14 @@ class AeroApiSchedulerTest(unittest.TestCase):
         self.assertIn("def run_due_aeroapi_jobs", source)
         self.assertIn("/api/internal/aeroapi_jobs/run", source)
 
+
+    def test_runner_reschedules_jobs_after_aeroapi_update(self):
+        with open(os.path.join(ROOT, "app.py"), encoding="utf-8") as fh:
+            source = fh.read()
+
+        runner = source.split("def run_due_aeroapi_jobs", 1)[1].split("@app.route('/api/internal/aeroapi_jobs/run'", 1)[0]
+        self.assertIn("schedule_flight_aeroapi_jobs(conn, uid, flight_id)", runner)
+
     def test_post_arrival_retry_uses_limited_progressive_delays(self):
         base = pytz.utc.localize(datetime(2026, 7, 3, 15, 0, 0))
 

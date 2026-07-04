@@ -3299,6 +3299,8 @@ def run_due_aeroapi_jobs(limit=10, now_utc=None):
                     )
                     retried += 1
             else:
+                if result.get('success'):
+                    schedule_flight_aeroapi_jobs(conn, uid, flight_id)
                 _finish_aeroapi_job(conn, job_id, 'done', attempt_count, summary=summary)
                 if result.get('success'):
                     updated += 1
