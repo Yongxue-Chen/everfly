@@ -58,6 +58,14 @@ class AeroApiFieldDiffsTest(unittest.TestCase):
         self.assertIn("flight[16]", source)
 
 
+
+    def test_automatic_update_defaults_empty_flight_class_to_economy(self):
+        with open(os.path.join(ROOT, "app.py"), encoding="utf-8") as fh:
+            source = fh.read()
+        section = source.split("def update_single_flight_from_aeroapi", 1)[1].split("def _load_flight_for_aeroapi", 1)[0]
+
+        self.assertIn("add_update('flight_class', 'Economy', flight[16])", section)
+
     def test_empty_flight_class_gets_economy_default_from_aeroapi_update(self):
         diffs = build_aeroapi_field_diffs(
             {"flight_class": None},

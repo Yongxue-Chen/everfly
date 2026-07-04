@@ -2859,6 +2859,7 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
     # Terminals
     add_update('origin_terminal', api_origin_term, flight[14])
     add_update('dest_terminal', api_dest_term, flight[15])
+    add_update('flight_class', 'Economy', flight[16])
 
     
     related_fields, related_values = collect_aeroapi_related_updates(best_match, flight, conn, uid)
