@@ -10,7 +10,7 @@ if ROOT not in sys.path:
 os.environ.setdefault("FLASK_SECRET_KEY", "test-secret")
 os.environ.setdefault("MASTER_SECRET_KEY", "yQfOtmNHMhk_0T_Bq0ZyJPBC5nTrwT4GrIaeAt1CexM=")
 
-from app import build_aeroapi_field_diffs  # noqa: E402
+from app import build_aeroapi_field_diffs, _aeroapi_remote_values  # noqa: E402
 
 
 class AeroApiFieldDiffsTest(unittest.TestCase):
@@ -65,6 +65,21 @@ class AeroApiFieldDiffsTest(unittest.TestCase):
         section = source.split("def update_single_flight_from_aeroapi", 1)[1].split("def _load_flight_for_aeroapi", 1)[0]
 
         self.assertIn("add_update('flight_class', 'Economy', flight[16])", section)
+
+
+    def test_remote_values_fall_back_to_actual_off_on_for_actual_times(self):
+        values = _aeroapi_remote_values({
+            "actual_out": None,
+            "actual_off": "2026-07-05T08:11:34Z",
+            "actual_on": "2026-07-05T08:46:05Z",
+            "actual_in": None,
+            "origin": {"timezone": "Europe/London"},
+            "destination": {"timezone": "Europe/London"},
+        })
+
+        self.assertEqual("2026-07-05 09:11:34", values["atd"])
+        self.assertEqual("2026-07-05 09:46:05", values["ata"])
+        self.assertEqual(34, values["duration_actual"])
 
     def test_empty_flight_class_gets_economy_default_from_aeroapi_update(self):
         diffs = build_aeroapi_field_diffs(

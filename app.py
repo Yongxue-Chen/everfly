@@ -2773,9 +2773,9 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
     print(f"DEBUG: Best match for {f_num} on {f_date}: {best_match.get('ident')} at {best_match.get('scheduled_out')}")
         
     api_std = best_match.get('scheduled_out')
-    api_atd = best_match.get('actual_out')
+    api_atd = best_match.get('actual_out') or best_match.get('actual_off')
     api_sta = best_match.get('scheduled_in')
-    api_ata = best_match.get('actual_in')
+    api_ata = best_match.get('actual_in') or best_match.get('actual_on')
     api_reg = best_match.get('registration')
     
     # Calculate Durations (UTC diff)
@@ -2940,9 +2940,9 @@ def _find_aeroapi_match_for_flight(flight, conn, uid, selected_candidate_index=N
 
 def _aeroapi_remote_values(best_match):
     api_std = best_match.get('scheduled_out')
-    api_atd = best_match.get('actual_out')
+    api_atd = best_match.get('actual_out') or best_match.get('actual_off')
     api_sta = best_match.get('scheduled_in')
-    api_ata = best_match.get('actual_in')
+    api_ata = best_match.get('actual_in') or best_match.get('actual_on')
     api_origin_tz = best_match.get('origin', {}).get('timezone')
     api_dest_tz = best_match.get('destination', {}).get('timezone')
 
