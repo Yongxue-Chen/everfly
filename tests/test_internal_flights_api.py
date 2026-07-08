@@ -107,6 +107,20 @@ class InternalFlightsApiTest(unittest.TestCase):
         self.assertTrue(any("INSERT INTO flight_aeroapi_jobs" in query for query, _ in self.fake_conn.queries))
         self.assertTrue(self.fake_conn.committed)
 
+    def test_normalizes_icao_airline_prefix_to_iata_for_internal_import(self):
+        response = self.client.post(
+            "/api/internal/flights",
+            json={"flightNumber": "ezy 2106", "date": "2099-07-05"},
+            headers={"Authorization": "Bearer shared-secret"},
+        )
+
+        self.assertEqual(201, response.status_code)
+        self.assertEqual("U22106", response.get_json()["flight"]["flight_number"])
+        self.assertEqual(
+            ("INSERT INTO flights (user_id, date, flight_number) VALUES (?, ?, ?)", (7, "2099-07-05", "U22106")),
+            self.fake_conn.queries[1],
+        )
+
     def test_rejects_missing_required_fields(self):
         response = self.client.post(
             "/api/internal/flights",
