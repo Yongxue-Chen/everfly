@@ -2483,14 +2483,17 @@ function renderJourneyTrends(stats) {
             <div class="journey-chart-box"><canvas id="footprintGrowthChart"></canvas></div>
         </article>
         
-        <article class="journey-chart-card journey-chart-wide">
-            <div class="stats-header">Monthly flight heatmap (Contribution Graph)</div>
-            <p class="journey-chart-note">Grid color intensity represents flight frequency per month across years.</p>
-            ${renderFlightHeatmap(months)}
-        </article>
-
-        <article class="journey-chart-card"><div class="stats-header">Recent months</div><div class="journey-chart-box"><canvas id="monthlyChart"></canvas></div></article>
-        <article class="journey-chart-card"><div class="stats-header">Month pattern</div><p class="journey-chart-note">Flights grouped by calendar month, January through December.</p>${renderMonthOfYearStats(months)}</article>
+        <div class="journey-heatmap-row">
+            <article class="journey-chart-card">
+                <div class="stats-header">Monthly flight heatmap (Contribution Graph)</div>
+                <p class="journey-chart-note">Grid color intensity represents flight frequency per month across years.</p>
+                ${renderFlightHeatmap(months)}
+            </article>
+            <div class="journey-heatmap-side">
+                <article class="journey-chart-card"><div class="stats-header">Recent months</div><div class="journey-chart-box"><canvas id="monthlyChart"></canvas></div></article>
+                <article class="journey-chart-card"><div class="stats-header">Month pattern</div><p class="journey-chart-note">Flights grouped by calendar month, January through December.</p>${renderMonthOfYearStats(months)}</article>
+            </div>
+        </div>
         
         <article class="journey-chart-card journey-chart-wide">
             <div class="stats-header">Flight Profile Insights (Preferences & Distributions)</div>
@@ -2770,7 +2773,6 @@ const renderStatsDashboard = (stats, container) => {
         { label: 'Continents', count: stats.totals.continents, topKey: 'continents', title: 'Top Continents' },
         { label: 'Countries', count: stats.totals.countries, topKey: 'countries', title: 'Top Countries' },
         { label: 'Cities', count: stats.totals.cities, topKey: 'cities', title: 'Top Cities' },
-        { label: 'Total Airports', count: stats.totals.airports, topKey: 'airports', title: 'Top Airports (Total Visits)' },
         { label: 'Departure Airports', count: stats.totals.airports_departure || 0, topKey: 'airports_departure', title: 'Top Departure Airports' },
         { label: 'Arrival Airports', count: stats.totals.airports_arrival || 0, topKey: 'airports_arrival', title: 'Top Arrival Airports' },
         { label: 'Routes', count: stats.totals.routes, topKey: 'routes', title: 'Top Routes' }

@@ -1515,6 +1515,33 @@ tr:hover { background: #f5f9ff; }
     grid-column: 1 / -1;
 }
 
+/* Heatmap row layout */
+.journey-heatmap-row {
+    display: flex;
+    gap: 20px;
+    grid-column: 1 / -1;
+}
+
+.journey-heatmap-row > .journey-chart-card:first-child {
+    flex: 2;
+    min-width: 0;
+    overflow-x: auto;
+}
+
+.journey-heatmap-side {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    min-width: 0;
+}
+
+@media (max-width: 768px) {
+    .journey-heatmap-row {
+        flex-direction: column;
+    }
+}
+
 .journey-chart-box {
     position: relative;
     height: 280px;
@@ -2385,6 +2412,7 @@ th[onclick] {
     align-items: center;
     flex: 1;
     min-width: 0;
+    min-height: 280px;
 }
 
 .donut-chart-title {
