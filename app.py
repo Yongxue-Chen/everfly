@@ -20,6 +20,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFProtect, CSRFError
 from werkzeug.middleware.proxy_fix import ProxyFix
+from airlines_data import AIRLINES_ICAO_TO_IATA
 
 load_dotenv()
 
@@ -386,6 +387,9 @@ def logout():
     return redirect(url_for('login'))
 
 @app.route('/')
+@app.route('/profile')
+@app.route('/flights')
+@app.route('/library')
 @login_required
 def index():
     # Pass user info to template for profile display
@@ -410,8 +414,18 @@ def _internal_bearer_token_matches():
         return False
     return hmac.compare_digest(header[len(prefix):], expected)
 
+def _normalize_internal_flight_number(value):
+    flight_number = re.sub(r'\s+', '', str(value or '')).upper()
+    match = re.fullmatch(r'([A-Z]{3})([0-9][A-Z0-9]*)', flight_number)
+    if match:
+        iata_prefix = AIRLINES_ICAO_TO_IATA.get(match.group(1))
+        if iata_prefix:
+            return f"{iata_prefix}{match.group(2)}"
+    return flight_number
+
+
 def _normalize_internal_flight_payload(data):
-    flight_number = re.sub(r'\s+', '', str(data.get('flightNumber') or data.get('flight_number') or '')).upper()
+    flight_number = _normalize_internal_flight_number(data.get('flightNumber') or data.get('flight_number'))
     date_value = str(data.get('date') or '').strip()
     if not flight_number:
         return None, 'flightNumber is required'

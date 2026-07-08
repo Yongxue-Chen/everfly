@@ -488,9 +488,31 @@ function renderEntityPanel(payload) {
 }
 
 // --- View Management ---
-function navigateTo(viewName) {
+// Route mapping for URL paths
+const ROUTE_MAP = {
+    'profile': '/profile',
+    'flights': '/flights',
+    'datasets': '/library'
+};
+
+// Reverse mapping: URL path -> view name
+const PATH_TO_VIEW = {
+    '/profile': 'profile',
+    '/flights': 'flights',
+    '/library': 'datasets'
+};
+
+function navigateTo(viewName, updateHistory = true) {
     // Update State
     State.currentView = viewName;
+
+    // Update URL if needed
+    if (updateHistory && ROUTE_MAP[viewName]) {
+        const newPath = ROUTE_MAP[viewName];
+        if (window.location.pathname !== newPath) {
+            history.pushState({ view: viewName }, '', newPath);
+        }
+    }
 
     // Update Navbar
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
@@ -517,6 +539,18 @@ function navigateTo(viewName) {
         loadDataset(State.currentDataset);
     }
 }
+
+// Get initial view from URL path
+function getViewFromPath() {
+    const path = window.location.pathname;
+    return PATH_TO_VIEW[path] || 'profile';
+}
+
+// Handle browser back/forward buttons
+window.addEventListener('popstate', (e) => {
+    const viewName = e.state?.view || getViewFromPath();
+    navigateTo(viewName, false);
+});
 
 // --- Map Logic ---
 function initMap() {
@@ -3430,8 +3464,11 @@ window.addEventListener('DOMContentLoaded', () => {
         console.log("FlightLog: App Initializing...");
         initMap();
         console.log("FlightLog: Map Initialized");
-        navigateTo('profile');
-        console.log("FlightLog: Navigated to Profile");
+        
+        // Initialize view based on current URL
+        const initialView = getViewFromPath();
+        navigateTo(initialView, false);
+        console.log("FlightLog: Navigated to", initialView);
     } catch (e) {
         console.error("FlightLog Init Error:", e);
         alert("App Initialization Failed: " + e.message);
