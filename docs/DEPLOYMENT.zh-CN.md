@@ -88,7 +88,7 @@ cd ~/everfly
 git checkout main          # 正常情况下你不需要这条 —— 但万一漂移了，这就是修复方式
 git pull
 # 编辑、测试、提交
-python -m pytest tests/ -q
+python -m unittest discover -s tests
 git push origin main
 ```
 
@@ -100,7 +100,7 @@ git push origin main
 
 ```bash
 cd ~/everfly
-python -m pytest tests/ -q            # 打 tag 前先跑绿
+python -m unittest discover -s tests            # 打 tag 前先跑绿
 git tag -a v1.1.0 -m "这次发布改了什么"
 git push origin v1.1.0
 

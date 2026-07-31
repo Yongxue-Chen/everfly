@@ -129,11 +129,13 @@ builds from a **separate checkout pinned to a tag**, driven by `deploy.sh`.
 
 ```bash
 source venv/bin/activate
-python -m pytest tests/ -q
+python -m unittest discover -s tests
 ```
 
-Tests live in `tests/` and cover the API surface, tenant isolation, AeroAPI
-scheduling and frontend hardening. Run them before tagging a release.
+98 tests live in `tests/`, covering the API surface, tenant isolation, AeroAPI
+scheduling and frontend hardening. They use only the standard library's
+`unittest` — no extra test dependency to install — and do not need a running
+MySQL server. Run them before tagging a release.
 
 Working on the code:
 

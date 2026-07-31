@@ -126,10 +126,10 @@ docker compose -f docker-compose.example.yml up -d --build
 
 ```bash
 source venv/bin/activate
-python -m pytest tests/ -q
+python -m unittest discover -s tests
 ```
 
-测试位于 `tests/`，覆盖 API 接口、租户隔离、AeroAPI 调度和前端加固。打 tag 发布前请先跑通。
+`tests/` 下有 98 个测试，覆盖 API 接口、租户隔离、AeroAPI 调度和前端加固。它们只用标准库的 `unittest`——不需要额外安装测试依赖——也不需要运行中的 MySQL。打 tag 发布前请先跑通。
 
 日常改代码：
 

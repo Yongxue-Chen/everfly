@@ -39,3 +39,8 @@ docs/superpowers/
 
 # deploy state
 .deploy-last-ref
+
+# Host-specific operations runbook (deployment paths, service wiring).
+# Kept locally so it is available on the box, but never published.
+AGENTS.md
+CLAUDE.md

@@ -1,0 +1,49 @@
+# Keep the build context small and keep source history out of the image.
+# Without this, `COPY . .` bakes the entire .git directory — and any local
+# venv or .env — into the production image.
+
+.git
+.gitignore
+.github
+
+# Local environments
+venv/
+env/
+.env
+*.env
+!.env.example
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Local databases — these must never reach an image
+*.db
+*.sqlite
+*.sqlite3
+instance/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Not needed at runtime
+tests/
+archive/
+docs/
+*.md
+!README.md
+deploy.sh
+docker-compose*.yml
+.deploy-last-ref
+*.log
+
+# Agent / tooling scratch
+.superpowers/
+.claude/
+AGENTS.md

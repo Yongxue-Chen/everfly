@@ -96,7 +96,7 @@ cd ~/everfly
 git checkout main          # you should never need this — but it is the fix if you drift
 git pull
 # edit, test, commit
-python -m pytest tests/ -q
+python -m unittest discover -s tests
 git push origin main
 ```
 
@@ -111,7 +111,7 @@ running service; you decide when to upgrade.
 
 ```bash
 cd ~/everfly
-python -m pytest tests/ -q            # green before tagging
+python -m unittest discover -s tests            # green before tagging
 git tag -a v1.1.0 -m "What changed in this release"
 git push origin v1.1.0
 
