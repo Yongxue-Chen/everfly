@@ -763,7 +763,7 @@ async function loadAndRenderFlightTrack(flightId) {
         // Create animated plane marker
         const planeIcon = L.divIcon({
             className: 'mini-plane-icon-wrapper',
-            html: `<div class="plane-icon-inner" style="color:#10b981;font-size:18px;transition:transform 0.1s linear;transform:rotate(${initialHeading - 45}deg);"><i class="fa-solid fa-plane"></i></div>`,
+            html: `<div class="plane-icon-inner" style="color:#d97706;font-size:18px;transition:transform 0.1s linear;transform:rotate(${initialHeading - 45}deg);"><i class="fa-solid fa-plane"></i></div>`,
             iconSize: [20, 20],
             iconAnchor: [10, 10]
         });
@@ -1119,7 +1119,7 @@ async function renderFocusedFlightTrackOnMap(flightId, options = {}) {
         const initialHeading = latLngs.length > 1 ? calculateBearing(latLngs[0][0], latLngs[0][1], latLngs[1][0], latLngs[1][1]) : 45;
         const mainPlaneIcon = L.divIcon({
             className: 'main-plane-icon-wrapper',
-            html: `<div class="plane-icon-inner" style="color:#10b981;font-size:24px;transition:transform 0.1s linear;transform:rotate(${initialHeading - 45}deg);"><i class="fa-solid fa-plane"></i></div>`,
+            html: `<div class="plane-icon-inner" style="color:#d97706;font-size:24px;transition:transform 0.1s linear;transform:rotate(${initialHeading - 45}deg);"><i class="fa-solid fa-plane"></i></div>`,
             iconSize: [26, 26],
             iconAnchor: [13, 13]
         });

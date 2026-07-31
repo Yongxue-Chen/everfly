@@ -3114,11 +3114,11 @@ th[onclick] {
 
 /* Plane Icon Styling */
 .plane-icon-inner {
-    color: #10b981;
-    filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.35));
+    color: #d97706;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
     display: inline-block;
 }
 .plane-icon-inner i {
-    filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.9));
+    filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.6));
 }
 
