@@ -463,6 +463,25 @@ function entityRelationshipLinks(type, entity) {
     return links.join('');
 }
 
+function formatFlightTime(str) {
+    if (!str) return '—';
+    const s = String(str).trim();
+    const match = s.match(/(\d{2}:\d{2})/);
+    if (match) return match[1];
+    if (/^\d{4}$/.test(s)) return `${s.slice(0, 2)}:${s.slice(2)}`;
+    return s;
+}
+
+function formatFlightDate(str) {
+    if (!str) return '';
+    const s = String(str).trim();
+    const parts = s.split('-');
+    if (parts.length === 3) {
+        return `${parts[0]}年${Number(parts[1])}月${Number(parts[2])}日`;
+    }
+    return s;
+}
+
 function renderFlightDetailPanel(entity, stats = {}, related = {}) {
     const title = entity.flight_number || 'Flight';
     document.getElementById('entity-panel-title').textContent = 'Flight Details';
@@ -472,10 +491,11 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
     const originName = entity.origin_name || '';
     const destName = entity.dest_name || '';
 
-    const std = entity.std || entity.dep_time_scheduled || '';
-    const sta = entity.sta || entity.arr_time_scheduled || '';
-    const atd = entity.atd || entity.dep_time_actual || '';
-    const ata = entity.ata || entity.arr_time_actual || '';
+    const stdTime = formatFlightTime(entity.std || entity.dep_time_scheduled);
+    const staTime = formatFlightTime(entity.sta || entity.arr_time_scheduled);
+    const atdTime = formatFlightTime(entity.atd || entity.dep_time_actual);
+    const ataTime = formatFlightTime(entity.ata || entity.arr_time_actual);
+    const formattedDate = formatFlightDate(entity.date);
 
     // Duration & Distance
     const durationMins = entity.duration_actual || entity.duration_scheduled;
@@ -483,12 +503,12 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
     if (durationMins) {
         const hrs = Math.floor(durationMins / 60);
         const mins = durationMins % 60;
-        durationText = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+        durationText = hrs > 0 ? `${hrs}小时${mins > 0 ? ` ${mins}分钟` : ''}` : `${mins}分钟`;
     }
     const distanceText = entity.distance ? `${Number(entity.distance).toLocaleString()} km` : '';
 
     // Seat & Cabin
-    const seatNo = entity.seat_number ? `Seat ${entity.seat_number}` : '';
+    const seatNo = entity.seat_number ? `座位 ${entity.seat_number}` : '';
     const seatClass = entity.flight_class || entity.seat_type || '';
     const seatInfo = [seatNo, seatClass].filter(Boolean).join(' · ');
 
@@ -500,21 +520,21 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
     // Weather container HTML
     let weatherHtml = '';
     if (entity.origin_icao || entity.dest_icao) {
-        weatherHtml = `<section><h3>Weather</h3><div id="weather-panel-container">
-            ${entity.origin_icao ? `<div class="weather-card" id="weather-dep"><div class="weather-card-header"><span class="weather-label">Departure</span><span class="weather-airport">${escapeHtml(entity.origin_code || '')} (${escapeHtml(entity.origin_icao)})</span></div><div class="weather-card-body weather-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div></div>` : ''}
-            ${entity.dest_icao ? `<div class="weather-card" id="weather-arr"><div class="weather-card-header"><span class="weather-label">Arrival</span><span class="weather-airport">${escapeHtml(entity.dest_code || '')} (${escapeHtml(entity.dest_icao)})</span></div><div class="weather-card-body weather-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div></div>` : ''}
+        weatherHtml = `<section><h3>Weather · 机场实况</h3><div id="weather-panel-container">
+            ${entity.origin_icao ? `<div class="weather-card" id="weather-dep"><div class="weather-card-header"><span class="weather-label">出发地 Departure</span><span class="weather-airport">${escapeHtml(entity.origin_code || '')} (${escapeHtml(entity.origin_icao)})</span></div><div class="weather-card-body weather-loading"><i class="fa-solid fa-spinner fa-spin"></i> 加载天气数据…</div></div>` : ''}
+            ${entity.dest_icao ? `<div class="weather-card" id="weather-arr"><div class="weather-card-header"><span class="weather-label">目的地 Arrival</span><span class="weather-airport">${escapeHtml(entity.dest_code || '')} (${escapeHtml(entity.dest_icao)})</span></div><div class="weather-card-body weather-loading"><i class="fa-solid fa-spinner fa-spin"></i> 加载天气数据…</div></div>` : ''}
         </div></section>`;
     }
 
     // Notes
     let notesHtml = '';
     if (entity.note && entity.note.trim()) {
-        notesHtml = `<section><div class="flight-notes-card"><div class="flight-notes-title"><i class="fa-solid fa-sticky-note"></i> Note</div><div>${escapeHtml(entity.note)}</div></div></section>`;
+        notesHtml = `<section><div class="flight-notes-card"><div class="flight-notes-title"><i class="fa-solid fa-sticky-note"></i> 个人备注</div><div>${escapeHtml(entity.note)}</div></div></section>`;
     }
 
     // Related Connections
     const relationshipLinks = entityRelationshipLinks('flights', entity);
-    const connectionsHtml = relationshipLinks ? `<section><h3>Connections</h3>${relationshipLinks}</section>` : '';
+    const connectionsHtml = relationshipLinks ? `<section><h3>Connections · 关联查看</h3>${relationshipLinks}</section>` : '';
 
     const html = `
         <div class="flight-hero">
@@ -522,11 +542,11 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
                 ${entity.airline_id ? airlineLogoMarkup(entity.airline_logo_url, entity.airline_logo_source_url, entity.airline_name || title, 'list') : '<div class="entity-mark" style="width:40px;height:40px;border-radius:10px;font-size:0.9rem;"><i class="fa-solid fa-plane"></i></div>'}
                 <div class="flight-hero-main">
                     <div class="flight-hero-number">${escapeHtml(title)}</div>
-                    <div class="flight-hero-meta">${escapeHtml(entity.airline_name || '')}${entity.date ? ` · ${escapeHtml(entity.date)}` : ''}</div>
+                    <div class="flight-hero-meta">${escapeHtml(entity.airline_name || '')}${formattedDate ? ` · ${escapeHtml(formattedDate)}` : ''}</div>
                 </div>
             </div>
             <div class="flight-hero-actions">
-                <button class="btn btn-sm btn-primary" onclick="editCurrentEntityPanel()"><i class="fa-solid fa-pen"></i> Edit</button>
+                <button class="btn btn-sm btn-primary" onclick="editCurrentEntityPanel()"><i class="fa-solid fa-pen"></i> 编辑</button>
                 <button class="btn btn-sm action-danger" onclick="deleteCurrentEntityPanel()"><i class="fa-solid fa-trash"></i></button>
             </div>
         </div>
@@ -548,23 +568,23 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
 
             <div class="flight-times-grid">
                 <div class="flight-time-col">
-                    <div class="flight-time-heading">Departure</div>
-                    ${std ? `<div class="flight-time-row"><span class="flight-time-label">STD</span><span class="flight-time-val">${escapeHtml(std)}</span></div>` : ''}
-                    ${atd ? `<div class="flight-time-row"><span class="flight-time-label">ATD</span><span class="flight-time-val">${escapeHtml(atd)}</span></div>` : ''}
-                    ${entity.origin_terminal ? `<div class="flight-gate-badge">T${escapeHtml(entity.origin_terminal)}</div>` : ''}
+                    <div class="flight-time-heading"><i class="fa-solid fa-plane-departure"></i> 出发 Departure</div>
+                    ${stdTime !== '—' ? `<div class="flight-time-row"><span class="flight-time-label">计划 (STD)</span><span class="flight-time-val">${escapeHtml(stdTime)}</span></div>` : ''}
+                    ${atdTime !== '—' ? `<div class="flight-time-row"><span class="flight-time-label">实际 (ATD)</span><span class="flight-time-val highlight-atd">${escapeHtml(atdTime)}</span></div>` : ''}
+                    ${entity.origin_terminal ? `<div class="flight-gate-badge">航站楼 T${escapeHtml(entity.origin_terminal)}</div>` : ''}
                 </div>
                 <div class="flight-time-col">
-                    <div class="flight-time-heading">Arrival</div>
-                    ${sta ? `<div class="flight-time-row"><span class="flight-time-label">STA</span><span class="flight-time-val">${escapeHtml(sta)}</span></div>` : ''}
-                    ${ata ? `<div class="flight-time-row"><span class="flight-time-label">ATA</span><span class="flight-time-val">${escapeHtml(ata)}</span></div>` : ''}
-                    ${entity.dest_terminal ? `<div class="flight-gate-badge">T${escapeHtml(entity.dest_terminal)}</div>` : ''}
+                    <div class="flight-time-heading"><i class="fa-solid fa-plane-arrival"></i> 到达 Arrival</div>
+                    ${staTime !== '—' ? `<div class="flight-time-row"><span class="flight-time-label">计划 (STA)</span><span class="flight-time-val">${escapeHtml(staTime)}</span></div>` : ''}
+                    ${ataTime !== '—' ? `<div class="flight-time-row"><span class="flight-time-label">实际 (ATA)</span><span class="flight-time-val highlight-ata">${escapeHtml(ataTime)}</span></div>` : ''}
+                    ${entity.dest_terminal ? `<div class="flight-gate-badge">航站楼 T${escapeHtml(entity.dest_terminal)}</div>` : ''}
                 </div>
             </div>
 
             ${(durationText || distanceText) ? `
             <div class="flight-meta-bar">
-                ${durationText ? `<div class="flight-meta-item"><i class="fa-solid fa-clock"></i> ${escapeHtml(durationText)}</div>` : ''}
-                ${distanceText ? `<div class="flight-meta-item"><i class="fa-solid fa-route"></i> ${escapeHtml(distanceText)}</div>` : ''}
+                ${durationText ? `<div class="flight-meta-item"><i class="fa-solid fa-clock"></i> 飞行时长: ${escapeHtml(durationText)}</div>` : ''}
+                ${distanceText ? `<div class="flight-meta-item"><i class="fa-solid fa-route"></i> 航程距离: ${escapeHtml(distanceText)}</div>` : ''}
             </div>` : ''}
         </div>
 
@@ -574,7 +594,7 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
             <div class="flight-detail-card">
                 <div class="flight-detail-icon"><i class="fa-solid fa-chair"></i></div>
                 <div class="flight-detail-info">
-                    <div class="flight-detail-label">Seat / Cabin</div>
+                    <div class="flight-detail-label">座位与舱位</div>
                     <div class="flight-detail-value" title="${escapeHtml(seatInfo)}">${escapeHtml(seatInfo)}</div>
                 </div>
             </div>` : ''}
@@ -583,7 +603,7 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
             <div class="flight-detail-card">
                 <div class="flight-detail-icon"><i class="fa-solid fa-plane-up"></i></div>
                 <div class="flight-detail-info">
-                    <div class="flight-detail-label">Aircraft</div>
+                    <div class="flight-detail-label">执飞机型 / 编号</div>
                     <div class="flight-detail-value" title="${escapeHtml(aircraftInfo)}">${escapeHtml(aircraftInfo)}</div>
                 </div>
             </div>` : ''}
@@ -592,7 +612,7 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
             <div class="flight-detail-card">
                 <div class="flight-detail-icon"><i class="fa-solid fa-compass"></i></div>
                 <div class="flight-detail-info">
-                    <div class="flight-detail-label">Reason</div>
+                    <div class="flight-detail-label">出行目的</div>
                     <div class="flight-detail-value" title="${escapeHtml(entity.reason)}">${escapeHtml(entity.reason)}</div>
                 </div>
             </div>` : ''}
@@ -678,27 +698,35 @@ function _fetchWeather(icao, containerId) {
         });
 }
 
+const FLIGHT_RULES_LABELS = {
+    'vfr': 'VFR · 目视飞行 (天气晴朗/能见度好)',
+    'mvfr': 'MVFR · 临界目视 (能见度一般)',
+    'ifr': 'IFR · 仪表飞行 (云低/复杂气象)',
+    'lifr': 'LIFR · 低级仪表 (恶劣天气)'
+};
+
 function _renderWeatherBody(w) {
     const temp = w.temperature != null ? `${Math.round(w.temperature)}°C` : '—';
     const windDir = w.wind_direction != null ? `${Math.round(w.wind_direction)}°` : 'VRB';
     const windSpd = w.wind_speed != null ? `${Math.round(w.wind_speed)}kt` : '—';
-    const gust = w.wind_gust ? ` G${Math.round(w.wind_gust)}kt` : '';
+    const gust = w.wind_gust ? ` 阵风${Math.round(w.wind_gust)}kt` : '';
     const vis = w.visibility_m != null ? (w.visibility_m >= 9999 ? '10+ km' : `${(w.visibility_m / 1000).toFixed(1)} km`) : '—';
-    const frClass = (w.flight_rules || '').toLowerCase();
+    const frRaw = (w.flight_rules || '').toLowerCase();
+    const frLabel = FLIGHT_RULES_LABELS[frRaw] || w.flight_rules || '—';
 
     return `
         <div class="weather-main">
             <span class="weather-emoji">${escapeHtml(w.condition_emoji || '🌤️')}</span>
             <span class="weather-temp">${escapeHtml(temp)}</span>
-            <span class="weather-condition">${escapeHtml(w.condition || 'Unknown')}</span>
+            <span class="weather-condition">${escapeHtml(w.condition || '未知')}</span>
         </div>
         <div class="weather-details">
-            <div class="weather-detail"><i class="fa-solid fa-wind"></i> ${escapeHtml(windDir)} @ ${escapeHtml(windSpd)}${escapeHtml(gust)}</div>
-            <div class="weather-detail"><i class="fa-solid fa-eye"></i> ${escapeHtml(vis)}</div>
-            <div class="weather-detail"><i class="fa-solid fa-gauge-high"></i> ${w.pressure != null ? escapeHtml(Math.round(w.pressure * 33.8639) + ' hPa') : '—'}</div>
-            <div class="weather-detail weather-fr weather-fr-${escapeHtml(frClass)}">${escapeHtml(w.flight_rules_emoji || '')} ${escapeHtml(w.flight_rules || '—')}</div>
+            <div class="weather-detail" title="风向与风速"><i class="fa-solid fa-wind"></i> 风速: ${escapeHtml(windDir)} @ ${escapeHtml(windSpd)}${escapeHtml(gust)}</div>
+            <div class="weather-detail" title="能见度 (Visibility)"><i class="fa-solid fa-eye"></i> 能见度: ${escapeHtml(vis)}</div>
+            <div class="weather-detail" title="海平面气压"><i class="fa-solid fa-gauge-high"></i> 气压: ${w.pressure != null ? escapeHtml(Math.round(w.pressure * 33.8639) + ' hPa') : '—'}</div>
+            <div class="weather-detail weather-fr weather-fr-${escapeHtml(frRaw)}" title="飞行规则 (Flight Rules)"><i class="fa-solid fa-shield-halved"></i> ${escapeHtml(w.flight_rules_emoji || '')} ${escapeHtml(frLabel)}</div>
         </div>
-        <details class="weather-raw"><summary>Raw METAR</summary><code>${escapeHtml(w.raw || '—')}</code></details>`;
+        <details class="weather-raw"><summary>查看原始 METAR 报文</summary><code>${escapeHtml(w.raw || '—')}</code></details>`;
 }
 
 // --- View Management ---
