@@ -470,7 +470,13 @@ function formatTerminal(term) {
     if (/^t?\d+[a-z]?$/i.test(t)) {
         return `T${t.replace(/^t/i, '')}`;
     }
-    return t.toUpperCase().startsWith('T') ? t : `T${t}`;
+    if (t.toUpperCase().startsWith('T')) {
+        return t;
+    }
+    if (/^[a-z]$/i.test(t)) {
+        return `T${t}`;
+    }
+    return t;
 }
 
 function parseDateTime(val, defaultDate) {
