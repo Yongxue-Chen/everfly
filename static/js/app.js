@@ -909,15 +909,86 @@ function updatePlanePosition(flightId) {
     updateTrackHUD(flightId, alt, spd, pct);
 }
 
-async function renderFocusedFlightTrackOnMap(flightId) {
+function buildFocusedMapOverlay(flightId) {
+    const mapContainer = document.querySelector('.journey-map-panel .map-container') || document.getElementById('flight-map');
+    if (!mapContainer) return;
+
+    let banner = document.getElementById('main-map-focused-banner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'main-map-focused-banner';
+        banner.className = 'main-map-focused-banner';
+        mapContainer.appendChild(banner);
+
+        L.DomEvent.disableClickPropagation(banner);
+        L.DomEvent.disableScrollPropagation(banner);
+    }
+
+    const flightNum = State.entityPanelCurrent?.entity?.flight_number || '航班';
+    banner.innerHTML = `<span><i class="fa-solid fa-crosshairs"></i> 正在独占高亮航班 <strong>${escapeHtml(flightNum)}</strong> 的航线轨迹</span> <button class="btn-reset-map-focus" id="btn-reset-map-focus-el"><i class="fa-solid fa-xmark"></i> 返回全量地图</button>`;
+    banner.style.display = 'flex';
+
+    const resetBtn = document.getElementById('btn-reset-map-focus-el');
+    if (resetBtn) {
+        resetBtn.onclick = (e) => {
+            if (e) { e.preventDefault(); e.stopPropagation(); }
+            resetMainMapFocus();
+        };
+    }
+
+    let panel = document.getElementById('main-map-track-panel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'main-map-track-panel';
+        panel.className = 'main-map-track-panel';
+        mapContainer.appendChild(panel);
+
+        L.DomEvent.disableClickPropagation(panel);
+        L.DomEvent.disableScrollPropagation(panel);
+    }
+
+    if (panel.dataset.flightId !== String(flightId)) {
+        panel.dataset.flightId = String(flightId);
+        panel.innerHTML = `
+            <div class="track-controls-row">
+                <button class="track-btn" id="main-btn-play-${flightId}" title="播放/暂停"><i class="fa-solid fa-play"></i></button>
+                <button class="track-btn" id="main-btn-restart-${flightId}" title="重头播放"><i class="fa-solid fa-rotate-left"></i></button>
+                <input type="range" class="track-progress-slider" id="main-slider-${flightId}" min="0" max="100" value="0">
+                <select class="track-speed-select" id="main-speed-${flightId}">
+                    <option value="1">1x</option>
+                    <option value="2">2x</option>
+                    <option value="5" selected>5x</option>
+                    <option value="10">10x</option>
+                </select>
+            </div>
+            <div class="flight-track-hud">
+                <span class="hud-item"><i class="fa-solid fa-mountain"></i> 高度: <strong id="main-hud-alt-${flightId}">0 m</strong></span>
+                <span class="hud-item"><i class="fa-solid fa-gauge"></i> 速度: <strong id="main-hud-spd-${flightId}">0 km/h</strong></span>
+                <span class="hud-item"><i class="fa-solid fa-clock"></i> 进度: <strong id="main-hud-pct-${flightId}">0%</strong></span>
+            </div>`;
+
+        const playBtn = document.getElementById(`main-btn-play-${flightId}`);
+        if (playBtn) playBtn.onclick = (e) => { e.stopPropagation(); toggleTrackAnimation(flightId); };
+
+        const restartBtn = document.getElementById(`main-btn-restart-${flightId}`);
+        if (restartBtn) restartBtn.onclick = (e) => { e.stopPropagation(); restartTrackAnimation(flightId); };
+
+        const slider = document.getElementById(`main-slider-${flightId}`);
+        if (slider) slider.oninput = (e) => { e.stopPropagation(); seekTrackAnimation(flightId, e.target.value); };
+
+        const speedSelect = document.getElementById(`main-speed-${flightId}`);
+        if (speedSelect) speedSelect.onchange = (e) => { e.stopPropagation(); setTrackSpeed(flightId, e.target.value); };
+    }
+    panel.style.display = 'block';
+}
+
+async function renderFocusedFlightTrackOnMap(flightId, options = {}) {
     if (!State.map) initMap();
     if (!State.map) return;
 
-    // Clear existing profile layers
-    if (State.profileLayers) {
-        State.profileLayers.forEach(l => l.remove());
-    }
-    State.profileLayers = [];
+    const isAlreadyFocused = State.currentFocusedFlightId === flightId;
+    State.focusedFlightId = flightId;
+    State.currentFocusedFlightId = flightId;
 
     let points = (State.cacheTrackPoints && State.cacheTrackPoints[flightId]) || [];
     if (!points || points.length === 0) {
@@ -935,110 +1006,79 @@ async function renderFocusedFlightTrackOnMap(flightId) {
 
     if (!points || points.length === 0) return;
 
-    const latLngs = points.map(p => [p.lat, p.lon]);
-    const flightNum = State.entityPanelCurrent?.entity?.flight_number || '航班';
+    if (!isAlreadyFocused) {
+        // Clear existing profile layers
+        if (State.profileLayers) {
+            State.profileLayers.forEach(l => l.remove());
+        }
+        State.profileLayers = [];
 
-    // Draw focused polyline track with popups
-    const focusedLine = L.polyline(latLngs, {
-        color: '#0284c7',
-        weight: 5,
-        opacity: 0.95
-    }).addTo(State.map);
+        const latLngs = points.map(p => [p.lat, p.lon]);
+        const flightNum = State.entityPanelCurrent?.entity?.flight_number || '航班';
 
-    focusedLine.bindPopup(`
-        <div style="font-family:sans-serif;padding:6px;min-width:180px;">
-            <h4 style="margin:0 0 6px 0;color:#0284c7;font-size:0.95rem;"><i class="fa-solid fa-plane"></i> 航班 ${escapeHtml(flightNum)} 轨迹</h4>
-            <div style="font-size:0.82rem;color:#334155;line-height:1.6;">
-                <div>📍 <strong>航迹总点数:</strong> ${latLngs.length} 个航路点</div>
-                <div>✈ <strong>巡航高度:</strong> ~10,660 米 (35,000 ft)</div>
-                <div>⚡ <strong>平均速度:</strong> ~870 km/h</div>
+        // Draw focused polyline track with popups
+        const focusedLine = L.polyline(latLngs, {
+            color: '#0284c7',
+            weight: 5,
+            opacity: 0.95
+        }).addTo(State.map);
+
+        focusedLine.bindPopup(`
+            <div style="font-family:sans-serif;padding:6px;min-width:180px;">
+                <h4 style="margin:0 0 6px 0;color:#0284c7;font-size:0.95rem;"><i class="fa-solid fa-plane"></i> 航班 ${escapeHtml(flightNum)} 轨迹</h4>
+                <div style="font-size:0.82rem;color:#334155;line-height:1.6;">
+                    <div>📍 <strong>航迹总点数:</strong> ${latLngs.length} 个航路点</div>
+                    <div>✈ <strong>巡航高度:</strong> ~10,660 米 (35,000 ft)</div>
+                    <div>⚡ <strong>平均速度:</strong> ~870 km/h</div>
+                </div>
             </div>
-        </div>
-    `);
-    State.profileLayers.push(focusedLine);
+        `);
+        State.profileLayers.push(focusedLine);
 
-    // Draw Start & End markers
-    const startMarker = L.circleMarker(latLngs[0], { radius: 7, color: '#0369a1', fillColor: '#0284c7', fillOpacity: 1 }).addTo(State.map).bindPopup(`<b>${escapeHtml(flightNum)} - 出发 Departure</b>`);
-    const endMarker = L.circleMarker(latLngs[latLngs.length - 1], { radius: 7, color: '#0369a1', fillColor: '#10b981', fillOpacity: 1 }).addTo(State.map).bindPopup(`<b>${escapeHtml(flightNum)} - 到达 Arrival</b>`);
-    State.profileLayers.push(startMarker);
-    State.profileLayers.push(endMarker);
+        // Draw Start & End markers
+        const startMarker = L.circleMarker(latLngs[0], { radius: 7, color: '#0369a1', fillColor: '#0284c7', fillOpacity: 1 }).addTo(State.map).bindPopup(`<b>${escapeHtml(flightNum)} - 出发 Departure</b>`);
+        const endMarker = L.circleMarker(latLngs[latLngs.length - 1], { radius: 7, color: '#0369a1', fillColor: '#10b981', fillOpacity: 1 }).addTo(State.map).bindPopup(`<b>${escapeHtml(flightNum)} - 到达 Arrival</b>`);
+        State.profileLayers.push(startMarker);
+        State.profileLayers.push(endMarker);
 
-    // Main plane marker on State.map
-    const mainPlaneIcon = L.divIcon({
-        className: 'main-plane-icon',
-        html: `<div style="color:#0284c7;font-size:24px;transform:rotate(45deg);"><i class="fa-solid fa-plane"></i></div>`,
-        iconSize: [26, 26],
-        iconAnchor: [13, 13]
-    });
-    const mainPlaneMarker = L.marker(latLngs[0], { icon: mainPlaneIcon }).addTo(State.map);
-    State.profileLayers.push(mainPlaneMarker);
+        // Main plane marker on State.map
+        const mainPlaneIcon = L.divIcon({
+            className: 'main-plane-icon',
+            html: `<div style="color:#0284c7;font-size:24px;transform:rotate(45deg);"><i class="fa-solid fa-plane"></i></div>`,
+            iconSize: [26, 26],
+            iconAnchor: [13, 13]
+        });
+        const mainPlaneMarker = L.marker(latLngs[0], { icon: mainPlaneIcon }).addTo(State.map);
+        State.profileLayers.push(mainPlaneMarker);
 
-    if (State.trackAnimState && State.trackAnimState[flightId]) {
-        State.trackAnimState[flightId].mainPlaneMarker = mainPlaneMarker;
+        if (State.trackAnimState && State.trackAnimState[flightId]) {
+            State.trackAnimState[flightId].mainPlaneMarker = mainPlaneMarker;
+        }
+
+        buildFocusedMapOverlay(flightId);
+
+        if (options.fitBounds !== false) {
+            invalidateProfileMapSize();
+            setTimeout(() => {
+                invalidateProfileMapSize();
+                if (State.map) State.map.fitBounds(focusedLine.getBounds(), { padding: [70, 70] });
+            }, 150);
+        }
     }
-
-    // Show floating focus banner & disable Leaflet click propagation!
-    let banner = document.getElementById('main-map-focused-banner');
-    if (!banner) {
-        banner = document.createElement('div');
-        banner.id = 'main-map-focused-banner';
-        banner.className = 'main-map-focused-banner';
-        const mapContainer = document.getElementById('flight-map');
-        if (mapContainer) mapContainer.appendChild(banner);
-    }
-    L.DomEvent.disableClickPropagation(banner);
-    L.DomEvent.disableScrollPropagation(banner);
-
-    banner.innerHTML = `<span><i class="fa-solid fa-crosshairs"></i> 正在独占高亮航班 <strong>${escapeHtml(flightNum)}</strong> 的航线轨迹</span> <button class="btn-reset-map-focus" onclick="resetMainMapFocus()"><i class="fa-solid fa-xmark"></i> 返回全量地图</button>`;
-    banner.style.display = 'flex';
-
-    // Show floating main map track controls & HUD panel
-    let panel = document.getElementById('main-map-track-panel');
-    if (!panel) {
-        panel = document.createElement('div');
-        panel.id = 'main-map-track-panel';
-        panel.className = 'main-map-track-panel';
-        const mapContainer = document.getElementById('flight-map');
-        if (mapContainer) mapContainer.appendChild(panel);
-    }
-    L.DomEvent.disableClickPropagation(panel);
-    L.DomEvent.disableScrollPropagation(panel);
-
-    panel.innerHTML = `
-        <div class="track-controls-row">
-            <button class="track-btn" id="main-btn-play-${flightId}" onclick="toggleTrackAnimation(${flightId})" title="播放/暂停"><i class="fa-solid fa-play"></i></button>
-            <button class="track-btn" onclick="restartTrackAnimation(${flightId})" title="重头播放"><i class="fa-solid fa-rotate-left"></i></button>
-            <input type="range" class="track-progress-slider" id="main-slider-${flightId}" min="0" max="100" value="0" oninput="seekTrackAnimation(${flightId}, this.value)">
-            <select class="track-speed-select" onchange="setTrackSpeed(${flightId}, this.value)">
-                <option value="1">1x</option>
-                <option value="2">2x</option>
-                <option value="5" selected>5x</option>
-                <option value="10">10x</option>
-            </select>
-        </div>
-        <div class="flight-track-hud">
-            <span class="hud-item"><i class="fa-solid fa-mountain"></i> 高度: <strong id="main-hud-alt-${flightId}">0 m</strong></span>
-            <span class="hud-item"><i class="fa-solid fa-gauge"></i> 速度: <strong id="main-hud-spd-${flightId}">0 km/h</strong></span>
-            <span class="hud-item"><i class="fa-solid fa-clock"></i> 进度: <strong id="main-hud-pct-${flightId}">0%</strong></span>
-        </div>`;
-    panel.style.display = 'block';
-
-    invalidateProfileMapSize();
-    setTimeout(() => {
-        invalidateProfileMapSize();
-        if (State.map) State.map.fitBounds(focusedLine.getBounds(), { padding: [70, 70] });
-    }, 150);
 }
 
 async function focusFlightTrackOnMainMap(flightId) {
     State.focusedFlightId = flightId;
+    State.currentFocusedFlightId = null;
     navigateTo('profile');
     closeEntityPanel();
-    await renderFocusedFlightTrackOnMap(flightId);
+    await renderFocusedFlightTrackOnMap(flightId, { fitBounds: true });
 }
 
 function resetMainMapFocus() {
     State.focusedFlightId = null;
+    State.currentFocusedFlightId = null;
+
     const banner = document.getElementById('main-map-focused-banner');
     if (banner) banner.style.display = 'none';
 
