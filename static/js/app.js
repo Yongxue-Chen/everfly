@@ -574,6 +574,22 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
     const relationshipLinks = entityRelationshipLinks('flights', entity);
     const connectionsHtml = relationshipLinks ? `<section><h3>Connections · 关联查看</h3>${relationshipLinks}</section>` : '';
 
+    // Track section HTML
+    const trackHtml = `
+        <section class="flight-track-section">
+            <div class="flight-track-header">
+                <h3>Track · 飞行航迹</h3>
+                <button class="btn btn-sm btn-secondary" onclick="focusFlightTrackOnMainMap(${entity.id})" title="在主地图放大查看航迹">
+                    <i class="fa-solid fa-expand"></i> 在主地图查看
+                </button>
+            </div>
+            <div class="flight-mini-map-container">
+                <div id="flight-mini-map-${entity.id}" class="flight-mini-map">
+                    <div class="flight-mini-map-empty"><i class="fa-solid fa-spinner fa-spin"></i> 加载航迹地图…</div>
+                </div>
+            </div>
+        </section>`;
+
     const html = `
         <div class="flight-hero">
             <div class="flight-hero-brand">
@@ -658,6 +674,7 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
             </div>` : ''}
         </div>` : ''}
 
+        ${trackHtml}
         ${weatherHtml}
         ${notesHtml}
         ${connectionsHtml}
@@ -665,9 +682,93 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
 
     document.getElementById('entity-panel-body').innerHTML = html;
 
-    // Fetch weather data after rendering
+    // Trigger asynchronous track fetch & weather fetch after rendering
+    setTimeout(() => loadAndRenderFlightTrack(entity.id), 120);
     if (entity.origin_icao) _fetchWeather(entity.origin_icao, 'weather-dep');
     if (entity.dest_icao) _fetchWeather(entity.dest_icao, 'weather-arr');
+}
+
+State.miniMaps = State.miniMaps || {};
+State.cacheTrackPoints = State.cacheTrackPoints || {};
+
+async function loadAndRenderFlightTrack(flightId) {
+    const container = document.getElementById(`flight-mini-map-${flightId}`);
+    if (!container) return;
+
+    try {
+        const res = await fetch(`/api/flights/${flightId}/track`);
+        if (!res.ok) throw new Error('Track unavailable');
+        const data = await res.json();
+        const points = data.points || [];
+        State.cacheTrackPoints[flightId] = points;
+
+        if (!points || points.length === 0) {
+            container.innerHTML = '<div class="flight-mini-map-empty"><i class="fa-solid fa-route"></i> 暂无详细航迹坐标</div>';
+            return;
+        }
+
+        // Clean up previous Leaflet instance if present
+        if (State.miniMaps[flightId]) {
+            State.miniMaps[flightId].remove();
+            delete State.miniMaps[flightId];
+        }
+
+        container.innerHTML = '';
+        const miniMap = L.map(container, {
+            zoomControl: false,
+            attributionControl: false,
+            dragging: true,
+            scrollWheelZoom: false
+        });
+
+        State.miniMaps[flightId] = miniMap;
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 18
+        }).addTo(miniMap);
+
+        const latLngs = points.map(p => [p.lat, p.lon]);
+        const isFallback = points.length <= 2;
+        const polyline = L.polyline(latLngs, {
+            color: '#0284c7',
+            weight: 3,
+            opacity: 0.9,
+            dashArray: isFallback ? '5, 8' : null
+        }).addTo(miniMap);
+
+        // Add markers
+        L.circleMarker(latLngs[0], { radius: 5, color: '#0369a1', fillColor: '#0284c7', fillOpacity: 1 }).addTo(miniMap);
+        L.circleMarker(latLngs[latLngs.length - 1], { radius: 5, color: '#0369a1', fillColor: '#10b981', fillOpacity: 1 }).addTo(miniMap);
+
+        miniMap.fitBounds(polyline.getBounds(), { padding: [18, 18] });
+
+        setTimeout(() => miniMap.invalidateSize(), 200);
+
+    } catch (e) {
+        if (container) {
+            container.innerHTML = '<div class="flight-mini-map-empty"><i class="fa-solid fa-route"></i> 暂无航迹地图数据</div>';
+        }
+    }
+}
+
+function focusFlightTrackOnMainMap(flightId) {
+    const points = (State.cacheTrackPoints && State.cacheTrackPoints[flightId]) || [];
+    navigateTo('profile');
+    closeEntityPanel();
+
+    if (window.flightMap && points.length > 0) {
+        const latLngs = points.map(p => [p.lat, p.lon]);
+        if (window.currentTrackPolyline) {
+            window.flightMap.removeLayer(window.currentTrackPolyline);
+        }
+        window.currentTrackPolyline = L.polyline(latLngs, {
+            color: '#0284c7',
+            weight: 4,
+            opacity: 0.95
+        }).addTo(window.flightMap);
+
+        window.flightMap.fitBounds(window.currentTrackPolyline.getBounds(), { padding: [40, 40] });
+    }
 }
 
 function renderEntityPanel(payload) {

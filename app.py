@@ -222,11 +222,29 @@ def migrate_flight_aeroapi_jobs():
         print(f"migrate_flight_aeroapi_jobs error: {e}")
 
 # --- Migrate users DB at startup ---
+def migrate_flights_track_data():
+    try:
+        raw_conn = database._raw_connect()
+        cur = raw_conn.cursor()
+        cur.execute("""
+            SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'flights' AND COLUMN_NAME = 'track_data'
+        """)
+        if not cur.fetchone():
+            cur.execute("ALTER TABLE flights ADD COLUMN track_data MEDIUMTEXT")
+            raw_conn.commit()
+            print("Migrated flights table: added track_data column")
+        raw_conn.close()
+    except Exception as e:
+        if getattr(e, 'args', [None])[0] != 1060:
+            print(f"migrate_flights_track_data error: {e}")
+
 with app.app_context():
     database.migrate_users_db()
     migrate_airlines_website_url()
     migrate_airline_logo_metadata()
     migrate_flight_aeroapi_jobs()
+    migrate_flights_track_data()
 
 # --- Auth Middleware ---
 @app.before_request
@@ -2621,6 +2639,75 @@ def get_flight_entity(id):
         WHERE f.id = ? AND f.user_id = ?
     ''', (uid, uid, uid, uid, id, uid), one=True)
     return _entity_response('flights', entity)
+
+
+@app.route('/api/flights/<int:id>/track', methods=['GET'])
+@login_required
+def get_flight_track(id):
+    uid = g.user['id']
+    flight = query_db('''
+        SELECT f.id, f.flight_number, f.date, f.track_data,
+               oa.lat AS origin_lat, oa.lon AS origin_lon, oa.iata_code AS origin_code,
+               da.lat AS dest_lat, da.lon AS dest_lon, da.iata_code AS dest_code
+        FROM flights f
+        LEFT JOIN airports oa ON f.origin_airport_id = oa.id AND oa.user_id = ?
+        LEFT JOIN airports da ON f.dest_airport_id = da.id AND da.user_id = ?
+        WHERE f.id = ? AND f.user_id = ?
+    ''', (uid, uid, id, uid), one=True)
+
+    if not flight:
+        return safe_jsonify_error('Flight not found', 404)
+
+    # 1. Return cached track_data if available
+    if flight.get('track_data'):
+        try:
+            points = json.loads(flight['track_data'])
+            if points and len(points) > 0:
+                return jsonify({'id': id, 'source': 'cache', 'points': points})
+        except Exception:
+            pass
+
+    # 2. Try AeroAPI if API key is configured
+    api_key = _get_user_api_key()
+    points = []
+    if api_key:
+        try:
+            ident = flight['flight_number']
+            resp = requests.get(
+                f"https://aeroapi.flightaware.com/aeroapi/flights/{ident}/track",
+                headers={'x-apikey': api_key},
+                timeout=4
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                positions = data.get('positions', [])
+                for p in positions:
+                    if p.get('latitude') is not None and p.get('longitude') is not None:
+                        points.append({
+                            'lat': float(p['latitude']),
+                            'lon': float(p['longitude']),
+                            'alt': p.get('altitude'),
+                            'spd': p.get('groundspeed'),
+                            'timestamp': p.get('timestamp')
+                        })
+        except Exception as e:
+            current_app.logger.warning(f"AeroAPI track fetch error for flight {id}: {e}")
+
+    # 3. Fallback to origin and destination coordinates
+    if not points and flight.get('origin_lat') is not None and flight.get('dest_lat') is not None:
+        points = [
+            {'lat': float(flight['origin_lat']), 'lon': float(flight['origin_lon']), 'name': flight.get('origin_code')},
+            {'lat': float(flight['dest_lat']), 'lon': float(flight['dest_lon']), 'name': flight.get('dest_code')}
+        ]
+
+    # Save to cache if points generated
+    if points:
+        try:
+            execute_db("UPDATE flights SET track_data = ? WHERE id = ? AND user_id = ?", (json.dumps(points), id, uid))
+        except Exception:
+            pass
+
+    return jsonify({'id': id, 'source': 'live', 'points': points})
 
 
 @app.route('/api/entities/airlines/<int:id>', methods=['GET'])
