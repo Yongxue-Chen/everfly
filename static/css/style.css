@@ -2817,6 +2817,17 @@ th[onclick] {
     margin-bottom: 6px;
     font-weight: 700;
 }
+.flight-time-date {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #334155;
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px dashed #e2e8f0;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
 .flight-time-row {
     display: flex;
     justify-content: space-between;
@@ -2873,8 +2884,8 @@ th[onclick] {
 
 /* Details Grid */
 .flight-details-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    display: flex;
+    flex-direction: column;
     gap: 10px;
     margin-bottom: 20px;
 }
@@ -2882,37 +2893,41 @@ th[onclick] {
     background: #f8fafc;
     border: 1px solid #e2e8f0;
     border-radius: 12px;
-    padding: 10px 12px;
+    padding: 10px 14px;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
+    width: 100%;
 }
 .flight-detail-icon {
-    width: 34px;
-    height: 34px;
-    border-radius: 8px;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
     background: #e2e8f0;
-    color: #475569;
+    color: #0284c7;
     display: grid;
     place-items: center;
-    font-size: 0.9rem;
+    font-size: 1rem;
     flex-shrink: 0;
 }
 .flight-detail-info {
+    flex: 1;
     min-width: 0;
 }
 .flight-detail-label {
-    font-size: 0.7rem;
+    font-size: 0.72rem;
     color: #64748b;
     text-transform: uppercase;
+    font-weight: 600;
+    margin-bottom: 2px;
 }
 .flight-detail-value {
-    font-size: 0.88rem;
+    font-size: 0.9rem;
     font-weight: 700;
-    color: #1e293b;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    color: #0f172a;
+    line-height: 1.4;
+    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 /* Notes Section */

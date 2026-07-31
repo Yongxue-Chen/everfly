@@ -463,6 +463,39 @@ function entityRelationshipLinks(type, entity) {
     return links.join('');
 }
 
+function formatTerminal(term) {
+    if (!term) return '';
+    let t = String(term).trim();
+    t = t.replace(/^航站楼\s*/i, '');
+    if (/^t?\d+[a-z]?$/i.test(t)) {
+        return `T${t.replace(/^t/i, '')}`;
+    }
+    return t.toUpperCase().startsWith('T') ? t : `T${t}`;
+}
+
+function parseDateTime(val, defaultDate) {
+    if (!val) return { dateStr: defaultDate || '', formattedDate: formatFlightDate(defaultDate), timeStr: '—' };
+    const s = String(val).trim();
+    const dateMatch = s.match(/(\d{4}-\d{2}-\d{2})/);
+    const timeMatch = s.match(/(\d{2}:\d{2})/);
+
+    let dateStr = dateMatch ? dateMatch[1] : (defaultDate || '');
+    let timeStr = '—';
+    if (timeMatch) {
+        timeStr = timeMatch[1];
+    } else if (/^\d{4}$/.test(s)) {
+        timeStr = `${s.slice(0, 2)}:${s.slice(2)}`;
+    } else if (!dateMatch && s.length <= 8 && s.includes(':')) {
+        timeStr = s;
+    }
+
+    return {
+        dateStr,
+        formattedDate: formatFlightDate(dateStr),
+        timeStr
+    };
+}
+
 function formatFlightTime(str) {
     if (!str) return '—';
     const s = String(str).trim();
@@ -491,11 +524,16 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
     const originName = entity.origin_name || '';
     const destName = entity.dest_name || '';
 
-    const stdTime = formatFlightTime(entity.std || entity.dep_time_scheduled);
-    const staTime = formatFlightTime(entity.sta || entity.arr_time_scheduled);
-    const atdTime = formatFlightTime(entity.atd || entity.dep_time_actual);
-    const ataTime = formatFlightTime(entity.ata || entity.arr_time_actual);
-    const formattedDate = formatFlightDate(entity.date);
+    const baseDate = entity.date || '';
+    const depInfo = parseDateTime(entity.std || entity.dep_time_scheduled || entity.atd || entity.dep_time_actual, baseDate);
+    const arrInfo = parseDateTime(entity.sta || entity.arr_time_scheduled || entity.ata || entity.arr_time_actual, baseDate);
+
+    const stdTime = parseDateTime(entity.std || entity.dep_time_scheduled, depInfo.dateStr).timeStr;
+    const atdTime = parseDateTime(entity.atd || entity.dep_time_actual, depInfo.dateStr).timeStr;
+    const staTime = parseDateTime(entity.sta || entity.arr_time_scheduled, arrInfo.dateStr).timeStr;
+    const ataTime = parseDateTime(entity.ata || entity.arr_time_actual, arrInfo.dateStr).timeStr;
+
+    const mainHeaderDate = depInfo.formattedDate || formatFlightDate(baseDate);
 
     // Duration & Distance
     const durationMins = entity.duration_actual || entity.duration_scheduled;
@@ -542,7 +580,7 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
                 ${entity.airline_id ? airlineLogoMarkup(entity.airline_logo_url, entity.airline_logo_source_url, entity.airline_name || title, 'list') : '<div class="entity-mark" style="width:40px;height:40px;border-radius:10px;font-size:0.9rem;"><i class="fa-solid fa-plane"></i></div>'}
                 <div class="flight-hero-main">
                     <div class="flight-hero-number">${escapeHtml(title)}</div>
-                    <div class="flight-hero-meta">${escapeHtml(entity.airline_name || '')}${formattedDate ? ` · ${escapeHtml(formattedDate)}` : ''}</div>
+                    <div class="flight-hero-meta">${escapeHtml(entity.airline_name || '')}${mainHeaderDate ? ` · ${escapeHtml(mainHeaderDate)}` : ''}</div>
                 </div>
             </div>
             <div class="flight-hero-actions">
@@ -569,15 +607,17 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
             <div class="flight-times-grid">
                 <div class="flight-time-col">
                     <div class="flight-time-heading"><i class="fa-solid fa-plane-departure"></i> 出发 Departure</div>
+                    ${depInfo.formattedDate ? `<div class="flight-time-date"><i class="fa-regular fa-calendar-days"></i> ${escapeHtml(depInfo.formattedDate)}</div>` : ''}
                     ${stdTime !== '—' ? `<div class="flight-time-row"><span class="flight-time-label">计划 (STD)</span><span class="flight-time-val">${escapeHtml(stdTime)}</span></div>` : ''}
                     ${atdTime !== '—' ? `<div class="flight-time-row"><span class="flight-time-label">实际 (ATD)</span><span class="flight-time-val highlight-atd">${escapeHtml(atdTime)}</span></div>` : ''}
-                    ${entity.origin_terminal ? `<div class="flight-gate-badge">航站楼 T${escapeHtml(entity.origin_terminal)}</div>` : ''}
+                    ${entity.origin_terminal ? `<div class="flight-gate-badge">航站楼 ${escapeHtml(formatTerminal(entity.origin_terminal))}</div>` : ''}
                 </div>
                 <div class="flight-time-col">
                     <div class="flight-time-heading"><i class="fa-solid fa-plane-arrival"></i> 到达 Arrival</div>
+                    ${arrInfo.formattedDate ? `<div class="flight-time-date"><i class="fa-regular fa-calendar-days"></i> ${escapeHtml(arrInfo.formattedDate)}</div>` : ''}
                     ${staTime !== '—' ? `<div class="flight-time-row"><span class="flight-time-label">计划 (STA)</span><span class="flight-time-val">${escapeHtml(staTime)}</span></div>` : ''}
                     ${ataTime !== '—' ? `<div class="flight-time-row"><span class="flight-time-label">实际 (ATA)</span><span class="flight-time-val highlight-ata">${escapeHtml(ataTime)}</span></div>` : ''}
-                    ${entity.dest_terminal ? `<div class="flight-gate-badge">航站楼 T${escapeHtml(entity.dest_terminal)}</div>` : ''}
+                    ${entity.dest_terminal ? `<div class="flight-gate-badge">航站楼 ${escapeHtml(formatTerminal(entity.dest_terminal))}</div>` : ''}
                 </div>
             </div>
 
