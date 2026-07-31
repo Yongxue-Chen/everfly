@@ -2990,3 +2990,99 @@ th[onclick] {
     padding: 16px;
 }
 
+/* Animation Controls & Playback HUD */
+.flight-track-controls {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 10px;
+    margin-top: 8px;
+}
+.track-controls-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.track-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #0284c7;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+}
+.track-btn:hover {
+    background: #e0f2fe;
+    border-color: #0284c7;
+}
+.track-speed-select {
+    padding: 4px 6px;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #334155;
+}
+.track-progress-slider {
+    flex: 1;
+    accent-color: #0284c7;
+    cursor: pointer;
+    height: 4px;
+}
+.flight-track-hud {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px dashed #e2e8f0;
+    font-size: 0.72rem;
+    color: #475569;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.hud-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* Floating Focus Banner on Main Map */
+.main-map-focused-banner {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    background: rgba(15, 23, 42, 0.9);
+    color: #ffffff;
+    padding: 8px 16px;
+    border-radius: 20px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.85rem;
+    backdrop-filter: blur(8px);
+}
+.btn-reset-map-focus {
+    background: #38bdf8;
+    color: #0f172a;
+    border: none;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.btn-reset-map-focus:hover {
+    background: #7dd3fc;
+}
+

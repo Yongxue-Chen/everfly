@@ -579,13 +579,31 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
         <section class="flight-track-section">
             <div class="flight-track-header">
                 <h3>Track · 飞行航迹</h3>
-                <button class="btn btn-sm btn-secondary" onclick="focusFlightTrackOnMainMap(${entity.id})" title="在主地图放大查看航迹">
-                    <i class="fa-solid fa-expand"></i> 在主地图查看
+                <button class="btn btn-sm btn-secondary" onclick="focusFlightTrackOnMainMap(${entity.id})" title="在主地图独占聚焦查看航迹">
+                    <i class="fa-solid fa-expand"></i> 独占聚焦查看
                 </button>
             </div>
             <div class="flight-mini-map-container">
                 <div id="flight-mini-map-${entity.id}" class="flight-mini-map">
                     <div class="flight-mini-map-empty"><i class="fa-solid fa-spinner fa-spin"></i> 加载航迹地图…</div>
+                </div>
+            </div>
+            <div class="flight-track-controls" id="track-controls-${entity.id}" style="display:none;">
+                <div class="track-controls-row">
+                    <button class="track-btn" id="btn-play-${entity.id}" onclick="toggleTrackAnimation(${entity.id})" title="播放/暂停"><i class="fa-solid fa-play"></i></button>
+                    <button class="track-btn" onclick="restartTrackAnimation(${entity.id})" title="重头播放"><i class="fa-solid fa-rotate-left"></i></button>
+                    <input type="range" class="track-progress-slider" id="slider-${entity.id}" min="0" max="100" value="0" oninput="seekTrackAnimation(${entity.id}, this.value)">
+                    <select class="track-speed-select" onchange="setTrackSpeed(${entity.id}, this.value)">
+                        <option value="1">1x</option>
+                        <option value="2">2x</option>
+                        <option value="5" selected>5x</option>
+                        <option value="10">10x</option>
+                    </select>
+                </div>
+                <div class="flight-track-hud">
+                    <span class="hud-item"><i class="fa-solid fa-mountain"></i> 高度: <strong id="hud-alt-${entity.id}">0 m</strong></span>
+                    <span class="hud-item"><i class="fa-solid fa-gauge"></i> 速度: <strong id="hud-spd-${entity.id}">0 km/h</strong></span>
+                    <span class="hud-item"><i class="fa-solid fa-clock"></i> 进度: <strong id="hud-pct-${entity.id}">0%</strong></span>
                 </div>
             </div>
         </section>`;
@@ -690,6 +708,7 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
 
 State.miniMaps = State.miniMaps || {};
 State.cacheTrackPoints = State.cacheTrackPoints || {};
+State.trackAnimState = State.trackAnimState || {};
 
 async function loadAndRenderFlightTrack(flightId) {
     const container = document.getElementById(`flight-mini-map-${flightId}`);
@@ -728,21 +747,43 @@ async function loadAndRenderFlightTrack(flightId) {
         }).addTo(miniMap);
 
         const latLngs = points.map(p => [p.lat, p.lon]);
-        const isFallback = points.length <= 2;
         const polyline = L.polyline(latLngs, {
             color: '#0284c7',
-            weight: 3,
-            opacity: 0.9,
-            dashArray: isFallback ? '5, 8' : null
+            weight: 4,
+            opacity: 0.9
         }).addTo(miniMap);
 
-        // Add markers
-        L.circleMarker(latLngs[0], { radius: 5, color: '#0369a1', fillColor: '#0284c7', fillOpacity: 1 }).addTo(miniMap);
-        L.circleMarker(latLngs[latLngs.length - 1], { radius: 5, color: '#0369a1', fillColor: '#10b981', fillOpacity: 1 }).addTo(miniMap);
+        // Add start and destination markers
+        L.circleMarker(latLngs[0], { radius: 6, color: '#0369a1', fillColor: '#0284c7', fillOpacity: 1 }).addTo(miniMap);
+        L.circleMarker(latLngs[latLngs.length - 1], { radius: 6, color: '#0369a1', fillColor: '#10b981', fillOpacity: 1 }).addTo(miniMap);
+
+        // Create animated plane marker
+        const planeIcon = L.divIcon({
+            className: 'mini-plane-icon',
+            html: `<div style="color:#0284c7;font-size:18px;transform:rotate(45deg);"><i class="fa-solid fa-plane"></i></div>`,
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+        });
+        const planeMarker = L.marker(latLngs[0], { icon: planeIcon }).addTo(miniMap);
 
         miniMap.fitBounds(polyline.getBounds(), { padding: [18, 18] });
-
         setTimeout(() => miniMap.invalidateSize(), 200);
+
+        // Show playback controls and initialize animation state
+        const controls = document.getElementById(`track-controls-${flightId}`);
+        if (controls) controls.style.display = 'block';
+
+        State.trackAnimState[flightId] = {
+            points,
+            currentIndex: 0,
+            speed: 5,
+            isPlaying: false,
+            animFrame: null,
+            planeMarker,
+            mainPlaneMarker: null
+        };
+
+        updateTrackHUD(flightId, points[0].alt || 0, points[0].spd || 0, 0);
 
     } catch (e) {
         if (container) {
@@ -751,23 +792,183 @@ async function loadAndRenderFlightTrack(flightId) {
     }
 }
 
+function updateTrackHUD(flightId, alt, spd, pct) {
+    const altEl = document.getElementById(`hud-alt-${flightId}`);
+    const spdEl = document.getElementById(`hud-spd-${flightId}`);
+    const pctEl = document.getElementById(`hud-pct-${flightId}`);
+    const slider = document.getElementById(`slider-${flightId}`);
+    if (altEl) altEl.textContent = `${alt ? Math.round(alt * 0.3048) : 0} m`;
+    if (spdEl) spdEl.textContent = `${spd ? Math.round(spd) : 0} km/h`;
+    if (pctEl) pctEl.textContent = `${Math.round(pct)}%`;
+    if (slider) slider.value = Math.round(pct);
+}
+
+function toggleTrackAnimation(flightId) {
+    const anim = State.trackAnimState[flightId];
+    if (!anim) return;
+    if (anim.isPlaying) {
+        pauseTrackAnimation(flightId);
+    } else {
+        startTrackAnimation(flightId);
+    }
+}
+
+function startTrackAnimation(flightId) {
+    const anim = State.trackAnimState[flightId];
+    if (!anim || !anim.points.length) return;
+    anim.isPlaying = true;
+    const btn = document.getElementById(`btn-play-${flightId}`);
+    if (btn) btn.innerHTML = '<i class="fa-solid fa-pause"></i>';
+
+    function step() {
+        if (!anim.isPlaying) return;
+        anim.currentIndex += 0.08 * anim.speed;
+        if (anim.currentIndex >= anim.points.length - 1) {
+            anim.currentIndex = anim.points.length - 1;
+            pauseTrackAnimation(flightId);
+        }
+        updatePlanePosition(flightId);
+        if (anim.isPlaying) {
+            anim.animFrame = requestAnimationFrame(step);
+        }
+    }
+    anim.animFrame = requestAnimationFrame(step);
+}
+
+function pauseTrackAnimation(flightId) {
+    const anim = State.trackAnimState[flightId];
+    if (!anim) return;
+    anim.isPlaying = false;
+    if (anim.animFrame) cancelAnimationFrame(anim.animFrame);
+    const btn = document.getElementById(`btn-play-${flightId}`);
+    if (btn) btn.innerHTML = '<i class="fa-solid fa-play"></i>';
+}
+
+function restartTrackAnimation(flightId) {
+    const anim = State.trackAnimState[flightId];
+    if (!anim) return;
+    anim.currentIndex = 0;
+    updatePlanePosition(flightId);
+    startTrackAnimation(flightId);
+}
+
+function setTrackSpeed(flightId, speedVal) {
+    const anim = State.trackAnimState[flightId];
+    if (anim) anim.speed = parseFloat(speedVal) || 1;
+}
+
+function seekTrackAnimation(flightId, percent) {
+    const anim = State.trackAnimState[flightId];
+    if (!anim || !anim.points.length) return;
+    const idx = (parseFloat(percent) / 100) * (anim.points.length - 1);
+    anim.currentIndex = idx;
+    updatePlanePosition(flightId);
+}
+
+function updatePlanePosition(flightId) {
+    const anim = State.trackAnimState[flightId];
+    if (!anim || !anim.points.length) return;
+    const idx = Math.min(Math.floor(anim.currentIndex), anim.points.length - 1);
+    const nextIdx = Math.min(idx + 1, anim.points.length - 1);
+    const fraction = anim.currentIndex - idx;
+
+    const p1 = anim.points[idx];
+    const p2 = anim.points[nextIdx];
+
+    const lat = p1.lat + (p2.lat - p1.lat) * fraction;
+    const lon = p1.lon + (p2.lon - p1.lon) * fraction;
+    const alt = (p1.alt || 0) + ((p2.alt || 0) - (p1.alt || 0)) * fraction;
+    const spd = (p1.spd || 0) + ((p2.spd || 0) - (p1.spd || 0)) * fraction;
+    const pct = (anim.currentIndex / (anim.points.length - 1)) * 100;
+
+    if (anim.planeMarker) {
+        anim.planeMarker.setLatLng([lat, lon]);
+    }
+    if (anim.mainPlaneMarker) {
+        anim.mainPlaneMarker.setLatLng([lat, lon]);
+    }
+
+    updateTrackHUD(flightId, alt, spd, pct);
+}
+
 function focusFlightTrackOnMainMap(flightId) {
     const points = (State.cacheTrackPoints && State.cacheTrackPoints[flightId]) || [];
+    State.focusedFlightId = flightId;
     navigateTo('profile');
     closeEntityPanel();
 
-    if (window.flightMap && points.length > 0) {
-        const latLngs = points.map(p => [p.lat, p.lon]);
-        if (window.currentTrackPolyline) {
-            window.flightMap.removeLayer(window.currentTrackPolyline);
+    if (!window.flightMap) return;
+
+    // Clear all other layers from main map
+    window.flightMap.eachLayer(layer => {
+        if (layer instanceof L.Polyline || layer instanceof L.Marker || layer instanceof L.CircleMarker) {
+            window.flightMap.removeLayer(layer);
         }
-        window.currentTrackPolyline = L.polyline(latLngs, {
+    });
+
+    if (points.length > 0) {
+        const latLngs = points.map(p => [p.lat, p.lon]);
+        window.focusedPolyline = L.polyline(latLngs, {
             color: '#0284c7',
-            weight: 4,
+            weight: 5,
             opacity: 0.95
         }).addTo(window.flightMap);
 
-        window.flightMap.fitBounds(window.currentTrackPolyline.getBounds(), { padding: [40, 40] });
+        // Add Start & End markers
+        L.circleMarker(latLngs[0], { radius: 7, color: '#0369a1', fillColor: '#0284c7', fillOpacity: 1 }).addTo(window.flightMap);
+        L.circleMarker(latLngs[latLngs.length - 1], { radius: 7, color: '#0369a1', fillColor: '#10b981', fillOpacity: 1 }).addTo(window.flightMap);
+
+        // Plane marker on main map
+        const mainPlaneIcon = L.divIcon({
+            className: 'main-plane-icon',
+            html: `<div style="color:#0284c7;font-size:24px;transform:rotate(45deg);"><i class="fa-solid fa-plane"></i></div>`,
+            iconSize: [26, 26],
+            iconAnchor: [13, 13]
+        });
+        window.mainPlaneMarker = L.marker(latLngs[0], { icon: mainPlaneIcon }).addTo(window.flightMap);
+
+        if (State.trackAnimState[flightId]) {
+            State.trackAnimState[flightId].mainPlaneMarker = window.mainPlaneMarker;
+        }
+
+        // Add Floating Top Focus Banner to Main Map
+        let banner = document.getElementById('main-map-focused-banner');
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = 'main-map-focused-banner';
+            banner.className = 'main-map-focused-banner';
+            const mapContainer = document.getElementById('flight-map');
+            if (mapContainer) mapContainer.appendChild(banner);
+        }
+        const flightNum = State.entityPanelCurrent?.entity?.flight_number || '航班';
+        banner.innerHTML = `<span><i class="fa-solid fa-crosshairs"></i> 正在独占高亮航班 <strong>${escapeHtml(flightNum)}</strong> 的真实航迹</span> <button class="btn-reset-map-focus" onclick="resetMainMapFocus()"><i class="fa-solid fa-xmark"></i> 返回全量地图</button>`;
+        banner.style.display = 'flex';
+
+        setTimeout(() => {
+            window.flightMap.invalidateSize();
+            window.flightMap.fitBounds(window.focusedPolyline.getBounds(), { padding: [60, 60] });
+        }, 150);
+    }
+}
+
+function resetMainMapFocus() {
+    State.focusedFlightId = null;
+    const banner = document.getElementById('main-map-focused-banner');
+    if (banner) banner.style.display = 'none';
+
+    if (window.focusedPolyline) {
+        window.flightMap.removeLayer(window.focusedPolyline);
+        window.focusedPolyline = null;
+    }
+    if (window.mainPlaneMarker) {
+        window.flightMap.removeLayer(window.mainPlaneMarker);
+        window.mainPlaneMarker = null;
+    }
+
+    if (State.cache && State.cache.profile) {
+        renderProfileMap(State.cache.profile.flights || []);
+    } else {
+        loadProfile();
     }
 }
 

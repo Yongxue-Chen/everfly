@@ -2641,6 +2641,50 @@ def get_flight_entity(id):
     return _entity_response('flights', entity)
 
 
+def generate_geodesic_points(lat1, lon1, lat2, lon2, num_points=35):
+    """Generates Great Circle geodesic waypoints with realistic altitude and groundspeed profiles."""
+    lat1_r, lon1_r = math.radians(lat1), math.radians(lon1)
+    lat2_r, lon2_r = math.radians(lat2), math.radians(lon2)
+
+    d = 2 * math.asin(math.sqrt(
+        math.sin((lat2_r - lat1_r) / 2) ** 2 +
+        math.cos(lat1_r) * math.cos(lat2_r) * math.sin((lon2_r - lon1_r) / 2) ** 2
+    ))
+
+    if d < 1e-6:
+        return [{'lat': lat1, 'lon': lon1, 'alt': 0, 'spd': 0}]
+
+    points = []
+    for i in range(num_points):
+        f = i / (num_points - 1)
+        a = math.sin((1 - f) * d) / math.sin(d)
+        b = math.sin(f * d) / math.sin(d)
+        x = a * math.cos(lat1_r) * math.cos(lon1_r) + b * math.cos(lat2_r) * math.cos(lon2_r)
+        y = a * math.cos(lat1_r) * math.sin(lon1_r) + b * math.cos(lat2_r) * math.sin(lon2_r)
+        z = a * math.sin(lat1_r) + b * math.sin(lat2_r)
+
+        lat_i = math.degrees(math.atan2(z, math.sqrt(x ** 2 + y ** 2)))
+        lon_i = math.degrees(math.atan2(y, x))
+
+        if f < 0.2:
+            alt = int((f / 0.2) * 35000)
+            spd = int(300 + (f / 0.2) * 550)
+        elif f > 0.8:
+            alt = int(((1 - f) / 0.2) * 35000)
+            spd = int(250 + ((1 - f) / 0.2) * 600)
+        else:
+            alt = 35000 + int(math.sin(f * math.pi * 5) * 500)
+            spd = 880 + int(math.sin(f * math.pi * 3) * 30)
+
+        points.append({
+            'lat': round(lat_i, 5),
+            'lon': round(lon_i, 5),
+            'alt': alt,
+            'spd': spd
+        })
+    return points
+
+
 @app.route('/api/flights/<int:id>/track', methods=['GET'])
 @login_required
 def get_flight_track(id):
@@ -2658,11 +2702,11 @@ def get_flight_track(id):
     if not flight:
         return safe_jsonify_error('Flight not found', 404)
 
-    # 1. Return cached track_data if available
+    # 1. Return cached track_data ONLY if it contains more than 2 points (geodesic curve or real ADS-B)
     if flight.get('track_data'):
         try:
             points = json.loads(flight['track_data'])
-            if points and len(points) > 0:
+            if points and len(points) > 2:
                 return jsonify({'id': id, 'source': 'cache', 'points': points})
         except Exception:
             pass
@@ -2693,15 +2737,16 @@ def get_flight_track(id):
         except Exception as e:
             current_app.logger.warning(f"AeroAPI track fetch error for flight {id}: {e}")
 
-    # 3. Fallback to origin and destination coordinates
-    if not points and flight.get('origin_lat') is not None and flight.get('dest_lat') is not None:
-        points = [
-            {'lat': float(flight['origin_lat']), 'lon': float(flight['origin_lon']), 'name': flight.get('origin_code')},
-            {'lat': float(flight['dest_lat']), 'lon': float(flight['dest_lon']), 'name': flight.get('dest_code')}
-        ]
+    # 3. If AeroAPI returned <= 2 points or was unavailable, generate Great Circle geodesic curve!
+    if len(points) <= 2 and flight.get('origin_lat') is not None and flight.get('dest_lat') is not None:
+        points = generate_geodesic_points(
+            float(flight['origin_lat']), float(flight['origin_lon']),
+            float(flight['dest_lat']), float(flight['dest_lon']),
+            num_points=35
+        )
 
-    # Save to cache if points generated
-    if points:
+    # Cache high-quality track points in DB
+    if points and len(points) > 2:
         try:
             execute_db("UPDATE flights SET track_data = ? WHERE id = ? AND user_id = ?", (json.dumps(points), id, uid))
         except Exception:
