@@ -2,25 +2,33 @@
 #
 # everfly deployment helper.
 #
+# This script always deploys from the *production* checkout, never from your
+# development tree. Run it from anywhere; it does not care where it lives.
+#
 # Usage:
-#   ./deploy.sh              # deploy the latest commit on the current branch
-#   ./deploy.sh v1.2.0       # deploy a specific tag (recommended for production)
+#   ./deploy.sh v1.2.0       # deploy a specific tag (this is the normal path)
+#   ./deploy.sh              # deploy the tip of the production checkout's branch
 #   ./deploy.sh --rollback   # redeploy the previously deployed ref
 #
 # Configuration (override via environment variables):
-#   EVERFLY_SRC_DIR          source checkout            (default: this script's directory)
-#   EVERFLY_COMPOSE_FILE     compose file to drive      (default: $EVERFLY_SRC_DIR/docker-compose.yml)
-#   EVERFLY_COMPOSE_PROJECT  compose project name       (default: everfly)
+#   EVERFLY_SRC_DIR          production checkout        (default: /opt/everfly)
+#   EVERFLY_COMPOSE_FILE     compose file to drive
+#                            (default: /opt/1panel/docker/compose/flightlog/docker-compose.yml)
+#   EVERFLY_COMPOSE_PROJECT  compose project name       (default: flightlog)
 #   EVERFLY_CONTAINER        container name             (default: everfly-app)
 #   EVERFLY_HEALTH_URL       health endpoint            (default: http://127.0.0.1:5000/api/health)
 #   EVERFLY_HEALTH_TIMEOUT   seconds to wait for health (default: 120)
+#
+# The compose project is still named "flightlog" for historical reasons: it is
+# the directory 1Panel created before the rename, and renaming it would recreate
+# the container. It is a label only — the service, image and container are all
+# named everfly.
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_DIR="${EVERFLY_SRC_DIR:-$SCRIPT_DIR}"
-COMPOSE_FILE="${EVERFLY_COMPOSE_FILE:-$SRC_DIR/docker-compose.yml}"
-COMPOSE_PROJECT="${EVERFLY_COMPOSE_PROJECT:-everfly}"
+SRC_DIR="${EVERFLY_SRC_DIR:-/opt/everfly}"
+COMPOSE_FILE="${EVERFLY_COMPOSE_FILE:-/opt/1panel/docker/compose/flightlog/docker-compose.yml}"
+COMPOSE_PROJECT="${EVERFLY_COMPOSE_PROJECT:-flightlog}"
 CONTAINER="${EVERFLY_CONTAINER:-everfly-app}"
 HEALTH_URL="${EVERFLY_HEALTH_URL:-http://127.0.0.1:5000/api/health}"
 HEALTH_TIMEOUT="${EVERFLY_HEALTH_TIMEOUT:-120}"
@@ -62,7 +70,9 @@ PREVIOUS_REF="$(git -C "$SRC_DIR" rev-parse HEAD)"
 
 # --- 2. Fetch and check out the requested ref --------------------------------
 log "fetching from origin"
-git -C "$SRC_DIR" fetch --tags --prune origin
+# --force so a moved tag (e.g. after a history rewrite) is picked up instead of
+# silently keeping the stale local one.
+git -C "$SRC_DIR" fetch --tags --force --prune origin
 
 if [ -n "$TARGET" ]; then
   git -C "$SRC_DIR" rev-parse --verify "$TARGET^{commit}" >/dev/null 2>&1 \
@@ -71,9 +81,14 @@ if [ -n "$TARGET" ]; then
   git -C "$SRC_DIR" checkout --quiet --detach "$TARGET"
 else
   BRANCH="$(git -C "$SRC_DIR" rev-parse --abbrev-ref HEAD)"
-  [ "$BRANCH" != "HEAD" ] || die "detached HEAD; pass an explicit tag or branch"
-  log "fast-forwarding $BRANCH"
-  git -C "$SRC_DIR" pull --ff-only origin "$BRANCH"
+  if [ "$BRANCH" = "HEAD" ]; then
+    # Normal state for the production checkout: pinned to a tag. Nothing to
+    # fast-forward, so just rebuild whatever is already checked out.
+    log "detached at $(git -C "$SRC_DIR" describe --tags --always); rebuilding current ref"
+  else
+    log "fast-forwarding $BRANCH"
+    git -C "$SRC_DIR" pull --ff-only origin "$BRANCH"
+  fi
 fi
 
 NEW_REF="$(git -C "$SRC_DIR" rev-parse HEAD)"

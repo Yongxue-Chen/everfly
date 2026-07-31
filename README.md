@@ -1,73 +1,56 @@
 # everfly
 
-everfly 是一个用于记录、管理和可视化个人飞行记录的 Flask Web 应用。
+*[中文文档](README.zh-CN.md)*
 
-## 项目介绍
+everfly is a self-hosted Flask web application for recording, managing and visualising your personal flight history.
 
-这个应用主要提供以下能力：
+It turns a list of flights into something worth looking at: a map of every route you have flown, milestone counters, yearly rhythm charts, and browsable cards for the airlines, aircraft, airports and cities behind the numbers.
 
-- 邀请码注册、登录、登出和用户资料管理。
-- 多用户数据隔离：业务数据统一存储在 MySQL 中，并通过 `user_id` 区分不同用户。
-- 航班记录管理：航班号、日期、航司、机型、起降机场、航站楼、计划/实际时间、座位、舱位、备注等。
-- 基础数据管理：城市、机场、航司、飞机型号的增删改查。
-- CSV 批量导入：支持导入城市、机场、航司、机型和航班记录。
-- 自动补全：基于 `airportsdata` 补全机场 ICAO、经纬度、城市和时区等信息。
-- 时区感知的飞行时长计算：根据出发地和到达地时区计算计划/实际飞行时长。
-- 统计和可视化：飞行总数、航司、机型、航线、城市、国家、大洲统计，地图航线展示和年度图表。
-- FlightAware AeroAPI 集成：用户可以在 Profile 页面保存自己的 API Key，应用会用 `MASTER_SECRET_KEY` 加密后保存。
+## Features
 
-## 技术栈
+- **Flight log** — flight number, date, airline, aircraft type, origin/destination airports and terminals, scheduled and actual times, seat, cabin class and notes.
+- **Reference data** — full CRUD for cities, airports, airlines and aircraft models.
+- **Autocompletion** — airport ICAO codes, coordinates, city and timezone filled in automatically from [`airportsdata`](https://pypi.org/project/airportsdata/).
+- **Timezone-aware durations** — scheduled and actual flight time computed from the origin and destination timezones, not from naive clock arithmetic.
+- **Statistics and visualisation** — totals by airline, aircraft, route, city, country and continent; a route map and yearly charts.
+- **CSV bulk import** — for cities, airports, airlines, aircraft models and flights.
+- **FlightAware AeroAPI integration** — each user stores their own API key, encrypted at rest with the server's `MASTER_SECRET_KEY`.
+- **Multi-tenant** — all business data lives in a shared MySQL database, partitioned by `user_id`. Registration is gated by an invitation code.
 
-- 后端：Python、Flask、Gunicorn
-- 数据库：MySQL、PyMySQL
-- 前端：Jinja 模板、原生 JavaScript、Leaflet、Chart.js
-- 容器：Docker、Docker Compose
-- 可选部署管理：1Panel
+## Tech stack
 
-主要文件：
+| Layer | Choice |
+| --- | --- |
+| Backend | Python, Flask, Gunicorn |
+| Database | MySQL (PyMySQL) |
+| Frontend | Jinja templates, vanilla JavaScript, Leaflet, Chart.js |
+| Container | Docker, Docker Compose |
+| Optional ops | 1Panel |
 
-- `app.py`：Flask 主程序，包含路由、API、认证、导入、统计、AeroAPI 逻辑。
-- `database.py`：MySQL 连接封装。
-- `schema_mysql.sql`：MySQL 数据表结构。
-- `templates/`：HTML 模板。
-- `static/`：CSS、JavaScript 和图片资源。
-- `Dockerfile`：生产容器镜像构建文件，使用 Gunicorn 启动应用。
+Key files:
 
-## 环境变量
+| Path | Purpose |
+| --- | --- |
+| `app.py` | Flask application: routes, APIs, auth, import, statistics, AeroAPI |
+| `database.py` | MySQL connection wrapper |
+| `schema_mysql.sql` | Source of truth for the database schema |
+| `migrations/` | Explicit, hand-run SQL migrations |
+| `templates/`, `static/` | HTML templates and frontend assets |
+| `Dockerfile` | Production image, served by Gunicorn |
+| `deploy.sh` | Tag-based deployment helper |
 
-本地运行或 Docker 部署都需要配置以下环境变量。可以从 `.env.example` 复制一份 `.env` 后填写，不要把真实密钥提交到 Git。
-
-```env
-MASTER_SECRET_KEY=
-FLASK_SECRET_KEY=
-INVITATION_CODE=
-FLASK_DEBUG=false
-
-MYSQL_HOST=localhost
-MYSQL_PORT=3306
-MYSQL_USER=everfly
-MYSQL_PASSWORD=
-MYSQL_DB=everfly
-
-# Optional: airline logo import and CDN delivery
-IMAGEKIT_PRIVATE_KEY=
-IMAGEKIT_URL_ENDPOINT=
-```
-
-生成密钥：
+## Quick start
 
 ```bash
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-python -c "import secrets; print(secrets.token_hex(32))"
+git clone https://github.com/Yongxue-Chen/everfly.git
+cd everfly
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # then fill it in — see below
 ```
 
-注意：`MASTER_SECRET_KEY` 用于加密用户保存的 FlightAware API Key。部署后必须保持稳定；如果更换，旧的 API Key 密文将无法解密，需要用户重新填写。
-
-航空公司 Logo 可以使用外部公开 URL。配置 ImageKit 后，服务会尝试将 Logo 导入 ImageKit；未配置、导入失败或免费套餐额度耗尽时，会依次回退到原始 URL 和航司代码占位图，不影响其他功能。`IMAGEKIT_PRIVATE_KEY` 只能保存在服务端环境变量中。
-
-## 数据库准备
-
-创建数据库和用户：
+Create the database and load the schema:
 
 ```sql
 CREATE DATABASE everfly CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -76,298 +59,103 @@ GRANT ALL PRIVILEGES ON everfly.* TO 'everfly'@'%';
 FLUSH PRIVILEGES;
 ```
 
-导入表结构：
-
 ```bash
 mysql -h <mysql-host> -u everfly -p everfly < schema_mysql.sql
 ```
 
-当前应用不会在启动时自动创建完整业务表。`schema_mysql.sql` 是数据库结构的来源。
+The application does **not** create business tables at startup. `schema_mysql.sql` is the only source of schema truth.
 
-## 本地部署
-
-适用于不使用 Docker、直接在服务器或开发机上运行的情况。
-
-```bash
-cd /home/ubuntu/everfly
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-```
-
-编辑 `.env`，确认 MySQL 可访问，并导入 `schema_mysql.sql` 后启动：
+Then run it:
 
 ```bash
 python app.py
 ```
 
-访问：
+and open <http://127.0.0.1:5000>.
 
-```text
-http://127.0.0.1:5000
-```
-
-生产环境不建议直接使用 `python app.py`，可以使用 Gunicorn：
+For anything other than local development, use Gunicorn rather than the Flask dev server:
 
 ```bash
 gunicorn -w 4 -b 127.0.0.1:5000 app:app
 ```
 
-如果用 systemd 管理服务，代码更新或环境变量更新后需要重启对应的 `everfly` 服务。
+## Configuration
 
-## Docker 部署
+All configuration is via environment variables. Copy `.env.example` to `.env` and fill it in. Never commit a real `.env`.
 
-项目自带 `Dockerfile`，镜像会安装依赖并用 Gunicorn 启动应用。
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `MASTER_SECRET_KEY` | yes | Fernet key encrypting users' stored FlightAware API keys |
+| `FLASK_SECRET_KEY` | yes | Flask session signing key |
+| `INVITATION_CODE` | yes | Code required to register a new account |
+| `FLASK_DEBUG` | no | `false` in production |
+| `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DB` | yes | Database connection |
+| `IMAGEKIT_PRIVATE_KEY` / `IMAGEKIT_URL_ENDPOINT` | no | Airline logo storage and CDN delivery |
+| `INTERNAL_SERVICE_TOKEN` | no | Bearer token for the internal service API |
+| `EVERFLY_INTERNAL_USERNAME` | no | Existing username that internal-API flight drafts are attributed to |
 
-手动构建和运行：
-
-```bash
-docker build -t everfly:local .
-docker run -d \
-  --name everfly-app \
-  --restart unless-stopped \
-  --env-file .env \
-  -p 5000:5000 \
-  everfly:local
-```
-
-通用 Docker Compose 示例：
-
-```yaml
-services:
-  everfly-app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: everfly-app
-    restart: always
-    ports:
-      - "5000:5000"
-    env_file:
-      - .env
-```
-
-启动或重新构建：
+Generate the two secrets:
 
 ```bash
-docker compose up -d --build
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-## 1Panel 部署
+> **`MASTER_SECRET_KEY` must stay stable across deployments.** It encrypts users' FlightAware API keys. If you rotate or lose it, existing ciphertexts become undecryptable and every user must re-enter their key.
 
-这个项目可以通过 1Panel 的 Docker Compose 编排部署。
+Airline logos work without ImageKit — the app falls back to the source URL and then to an airline-code placeholder if ImageKit is unconfigured, fails, or is out of quota. `IMAGEKIT_PRIVATE_KEY` is server-side only and never reaches the browser.
 
-一个典型的部署布局：
+## Deployment
 
-- 源代码目录：`/home/ubuntu/everfly`
-- 1Panel Compose 文件：`/opt/1panel/docker/compose/everfly/docker-compose.yml`
-- Compose 项目名：`everfly`
-- 容器名：`everfly-app`
-- 端口映射：宿主机 `5000` -> 容器 `5000`
-- 健康检查：`http://127.0.0.1:5000/api/health`
-
-1Panel 编排从本地源码目录构建镜像，核心结构如下。真实密钥和密码应在 `.env` 或 1Panel 编排中配置，不要写入公开仓库。
-
-```yaml
-services:
-  everfly-app:
-    build:
-      context: /home/ubuntu/everfly
-      dockerfile: Dockerfile
-    container_name: everfly-app
-    restart: always
-    ports:
-      - "5000:5000"
-    environment:
-      - MASTER_SECRET_KEY=<fernet-key>
-      - FLASK_SECRET_KEY=<session-secret>
-      - INVITATION_CODE=<invitation-code>
-      - FLASK_DEBUG=false
-      - MYSQL_HOST=<mysql-host>
-      - MYSQL_PORT=3306
-      - MYSQL_USER=everfly
-      - MYSQL_PASSWORD=<mysql-password>
-      - MYSQL_DB=everfly
-    networks:
-      - 1panel-network
-
-networks:
-  1panel-network:
-    external: true
-```
-
-新建 1Panel 部署时：
-
-1. 把源码放到服务器目录，例如 `/home/ubuntu/everfly`。
-2. 创建 MySQL 数据库并导入 `schema_mysql.sql`。
-3. 在 1Panel 中创建 Docker Compose 编排。
-4. 将 `build.context` 指向源码目录。
-5. 配置所有必需环境变量。
-6. 如果 MySQL 容器在 1Panel 网络中，将服务加入 `1panel-network`。
-7. 在 1Panel 中创建反向代理，代理到 `http://127.0.0.1:5000`。
-8. 为反向代理启用 HTTPS。
-
-## 升级服务（推荐方式）
-
-仓库自带 `deploy.sh`，封装了「拉取代码 → 重建镜像 → 重启容器 → 等待健康检查」的完整流程，失败时会打印日志并给出回滚命令。
+`docker-compose.example.yml` is a portable starting point:
 
 ```bash
-./deploy.sh            # 部署当前分支最新提交
-./deploy.sh v1.0.0     # 部署指定 tag（生产环境推荐）
-./deploy.sh --rollback # 回滚到上一次部署的版本
+docker compose -f docker-compose.example.yml up -d --build
 ```
 
-生产环境建议**固定在 tag 上**，而不是跟着 `main` 走：这样什么时候升级完全由你控制，`main` 上的新提交不会影响正在运行的服务。
+For the full production setup — the split between the development tree and the
+production checkout, tag-based releases, rollback, 1Panel, schema migrations and
+day-to-day ops commands — see **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 
-发布一个新版本：
+The short version: development happens in your own clone on `main`; production
+builds from a **separate checkout pinned to a tag**, driven by `deploy.sh`.
 
 ```bash
-git tag -a v1.1.0 -m "描述这次发布的内容"
-git push origin v1.1.0
-./deploy.sh v1.1.0
+./deploy.sh v1.1.0     # deploy a tag
+./deploy.sh --rollback # go back to the previously deployed ref
 ```
 
-脚本的路径和名称通过环境变量配置，默认值适用于「compose 文件就在源码目录」的情况。如果 compose 文件在别处（例如 1Panel 的编排目录），这样调用：
+## Development
 
 ```bash
-EVERFLY_COMPOSE_FILE=/opt/1panel/docker/compose/everfly/docker-compose.yml \
-EVERFLY_COMPOSE_PROJECT=everfly \
-./deploy.sh v1.1.0
-```
-
-可用变量：`EVERFLY_SRC_DIR`、`EVERFLY_COMPOSE_FILE`、`EVERFLY_COMPOSE_PROJECT`、`EVERFLY_CONTAINER`、`EVERFLY_HEALTH_URL`、`EVERFLY_HEALTH_TIMEOUT`。
-
-## 源代码更新后如何更新服务（手动方式）
-
-不同变更需要不同更新方式。更新前建议先确认数据库已有备份。
-
-### 只有源代码变更
-
-本地非容器部署：
-
-```bash
-cd /home/ubuntu/everfly
-git pull
-sudo systemctl restart everfly
-```
-
-如果不是 systemd 管理，而是手动启动的进程，需要停止旧进程后重新启动。
-
-Docker Compose 或 1Panel Compose 部署：
-
-```bash
-cd /opt/1panel/docker/compose/everfly
-git -C /home/ubuntu/everfly pull
-docker compose up -d --build
-```
-
-如果你的 `docker-compose.yml` 就在源码目录中，则进入源码目录执行同样的 `docker compose up -d --build`。
-
-### 依赖文件变更
-
-如果 `requirements.txt` 有变化，本地部署需要重新安装依赖：
-
-```bash
-cd /home/ubuntu/everfly
 source venv/bin/activate
-pip install -r requirements.txt
-sudo systemctl restart everfly
+python -m pytest tests/ -q
 ```
 
-Docker 或 1Panel Compose 部署需要重建镜像：
+Tests live in `tests/` and cover the API surface, tenant isolation, AeroAPI
+scheduling and frontend hardening. Run them before tagging a release.
+
+Working on the code:
 
 ```bash
-cd /opt/1panel/docker/compose/everfly
-git -C /home/ubuntu/everfly pull
-docker compose build --no-cache
-docker compose up -d
+git checkout main
+git pull
+# ...edit, commit...
+git push origin main
 ```
 
-### 环境变量变更
+Your development tree should stay on `main`. Deployments never build from it —
+see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for why and how.
 
-本地部署：
+## Security notes
 
-```bash
-sudo systemctl restart everfly
-```
+- Keep `FLASK_DEBUG=false` in production.
+- Serve over HTTPS via a reverse proxy. If access is always HTTPS, set
+  `app.config['SESSION_COOKIE_SECURE'] = True` in `app.py`.
+- Never commit `MASTER_SECRET_KEY`, `FLASK_SECRET_KEY`, database passwords or
+  the invitation code.
+- Back up the MySQL database before any upgrade or migration.
 
-Docker 或 1Panel Compose 部署：
+## License
 
-```bash
-cd /opt/1panel/docker/compose/everfly
-docker compose up -d
-```
-
-如果容器没有拿到新的环境变量，可以强制重建容器：
-
-```bash
-docker compose up -d --force-recreate
-```
-
-### 数据库结构变更
-
-先备份数据库，再执行迁移。
-
-全新数据库可以直接导入：
-
-```bash
-mysql -h <mysql-host> -u everfly -p everfly < schema_mysql.sql
-```
-
-已有数据库不要直接重复导入整份 schema。应根据变更编写明确的 `ALTER TABLE` 迁移语句，再手动执行。
-
-租户关联完整性约束迁移位于 `migrations/20260609_tenant_integrity_constraints.sql`。该脚本会先检查孤立记录和跨用户关联；发现问题时会主动中止，不会继续添加约束。请先备份数据库，再使用 MySQL 客户端执行并根据错误信息清理历史数据。
-
-## 运维命令
-
-健康检查：
-
-```bash
-curl -i http://127.0.0.1:5000/api/health
-```
-
-查看容器日志：
-
-```bash
-docker logs --tail 100 everfly-app
-```
-
-查看 Compose 日志：
-
-```bash
-cd /opt/1panel/docker/compose/everfly
-docker compose logs -f --tail=100
-```
-
-查看容器状态：
-
-```bash
-docker ps --filter name=everfly-app
-```
-
-## 安全和维护建议
-
-- 生产环境保持 `FLASK_DEBUG=false`。
-- 生产访问建议走 HTTPS 反向代理。
-- 不要把 `MASTER_SECRET_KEY`、`FLASK_SECRET_KEY`、数据库密码、邀请码提交到 Git。
-- 当前仓库历史中曾包含敏感信息；如果要公开仓库，需先轮换所有相关密钥，并清理或重建 Git 历史。
-- 更新服务前先备份 MySQL 的 `everfly` 数据库。
-- `MASTER_SECRET_KEY` 丢失或更换后，用户保存过的 FlightAware API Key 需要重新录入。
-- 如果服务始终通过 HTTPS 访问，可以在 `app.py` 中启用安全 Cookie：
-
-```python
-app.config['SESSION_COOKIE_SECURE'] = True
-```
-
-### Production Compose and airline logos
-
-Use `docker-compose.example.yml` as a portable starting point and keep real credentials in a deployment-only `.env` outside the Git working tree. ImageKit is optional for core functionality, but enables uploaded and synchronized airline logos.
-
-After configuring `IMAGEKIT_PRIVATE_KEY` and `IMAGEKIT_URL_ENDPOINT`, rebuild the service so the environment is loaded, then synchronize missing airline logos:
-
-```bash
-docker exec everfly-app python scripts/sync_airline_logos.py
-```
-
-The synchronization is idempotent and skips airlines that already have a `logo_url`. Use `--force` only when intentionally replacing all logo references.
+See [LICENSE](LICENSE).
