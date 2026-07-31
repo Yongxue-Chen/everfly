@@ -478,6 +478,23 @@ def create_internal_flight_record(conn, payload, username):
     except Exception as e:
         print(f"schedule_flight_aeroapi_jobs error for internal flight {flight_id}: {e}")
     conn.commit()
+
+    # This request isn't a logged-in session, so g.user isn't populated the normal way --
+    # update_single_flight_from_aeroapi() needs it for the API key. Borrow it briefly.
+    previous_user = getattr(g, 'user', None)
+    try:
+        users_conn = database.get_users_db()
+        try:
+            g.user = users_conn.execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
+        finally:
+            users_conn.close()
+        if g.user:
+            _safely_auto_update_new_flight(flight_id)
+    except Exception as e:
+        print(f"auto aeroapi update error for internal flight {flight_id}: {e}")
+    finally:
+        g.user = previous_user
+
     return {
         'id': flight_id,
         'user_id': user_id,
@@ -622,6 +639,7 @@ def create_crud_routes(endpoint, table_name, columns):
             new_id = execute_db(f"INSERT INTO {table_name} ({cols}) VALUES ({placeholders})", values)
             if table_name == 'flights':
                 safely_schedule_flight_aeroapi_jobs(database.get_db(), g.user['id'], new_id)
+                _safely_auto_update_new_flight(new_id)
             new_item = query_db(f"SELECT * FROM {table_name} WHERE id = ? AND user_id = ?", (new_id, g.user['id']), one=True)
             return jsonify(new_item), 201
         except ValueError as e:
@@ -1795,6 +1813,22 @@ def safely_schedule_flight_aeroapi_jobs(conn, uid, flight_id):
         except Exception:
             pass
         return 0
+
+def _safely_auto_update_new_flight(flight_id):
+    """
+    Best-effort AeroAPI/schedules auto-fill right after a flight is created (manual entry
+    or everInbox import), so the record doesn't sit empty until the preflight job or a
+    manual button click. Never raises -- a failure here must not break record creation.
+    """
+    try:
+        update_single_flight_from_aeroapi(flight_id, force=False)
+        database.get_db().commit()
+    except Exception as e:
+        print(f"auto aeroapi update error for new flight {flight_id}: {e}")
+        try:
+            database.get_db().rollback()
+        except Exception:
+            pass
 
 def build_aeroapi_departure_day_window(f_date, origin_tz_name, now_utc=None):
     origin_tz = _timezone_or_utc(origin_tz_name)
