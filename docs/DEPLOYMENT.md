@@ -2,11 +2,23 @@
 
 *[中文文档](DEPLOYMENT.zh-CN.md)*
 
-This document describes how everfly is developed and deployed. The central idea:
+everfly is a single Flask container plus a MySQL server you provide. This guide
+covers running it in a way you can upgrade and roll back with confidence.
 
-> **The development tree and the production build source are two different directories.**
+If you just want it running, `docker-compose.example.yml` in the repository root
+is standalone and needs nothing set up beforehand:
 
-## Why the split
+```bash
+cp .env.example .env    # fill in the required values
+docker compose -f docker-compose.example.yml up -d --build
+```
+
+The rest of this document is about operating it over time.
+
+## The central idea: two checkouts
+
+> **The directory you develop in and the directory production builds from should
+> not be the same directory.**
 
 A tag-based deployment has to check out that tag. If production builds from the
 same directory you develop in, deploying `v1.1.0` leaves that directory in
@@ -18,37 +30,11 @@ Separating them removes the conflict entirely:
 | Directory | Role | Git state |
 | --- | --- | --- |
 | your clone, e.g. `~/everfly` | development | always on `main` |
-| `/opt/everfly` | production build source | detached at a release tag |
+| a second checkout, e.g. `/opt/everfly` | production build source | detached at a release tag |
 
-You never `cd` into `/opt/everfly` by hand. `deploy.sh` owns it.
+You never `cd` into the production checkout by hand. `deploy.sh` owns it.
 
-## Reference topology
-
-This is the layout used by the reference deployment. Adjust paths to taste; every
-one of them is overridable via environment variables.
-
-| Thing | Location |
-| --- | --- |
-| Development checkout | `/home/ubuntu/everfly` (on `main`) |
-| Production checkout | `/opt/everfly` (detached at a tag) |
-| Compose file | `/opt/1panel/docker/compose/flightlog/docker-compose.yml` |
-| Production `.env` | `/opt/1panel/docker/compose/flightlog/.env` (mode `600`, root-owned) |
-| Compose project | `flightlog` |
-| Container | `everfly-app` |
-| Port | host `5000` → container `5000` |
-| Health check | `http://127.0.0.1:5000/api/health` |
-
-> The compose project and its directory are still named `flightlog`. That is the
-> directory 1Panel created before the project was renamed; renaming it would
-> recreate the container for no benefit. It is a label only — the service, image
-> and container are all named `everfly`.
-
-The production `.env` lives **next to the compose file, outside the Git tree**, so
-secrets are never in a checkout that gets rewritten by deployments.
-
-### Setting up the production checkout
-
-One-time, on a fresh host:
+### Setting it up
 
 ```bash
 sudo mkdir -p /opt/everfly
@@ -57,48 +43,75 @@ git clone https://github.com/Yongxue-Chen/everfly.git /opt/everfly
 git -C /opt/everfly checkout --detach v1.0.0
 ```
 
-Point the compose file's build context at it:
+Then write a compose file whose build context points at that checkout. Keep the
+compose file and its `.env` **outside** the checkout, so your secrets do not live
+in a directory that deployments overwrite:
 
 ```yaml
+# /srv/everfly-deploy/docker-compose.yml
 services:
   everfly-app:
     build:
-      context: /opt/everfly    # <- production checkout, not your dev tree
+      context: /opt/everfly    # the production checkout, not your dev tree
       dockerfile: Dockerfile
     image: everfly:local
     container_name: everfly-app
     restart: always
     ports:
       - "5000:5000"
+    env_file:
+      - .env                   # sits next to this file, mode 600
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/health', timeout=5)\""]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 20s
-    env_file:
-      - .env
-    networks:
-      1panel-network:
-      travel-services:
-        aliases:
-          # Backwards-compatibility alias: everInbox resolves everfly by its
-          # pre-rename name. Removing this breaks that integration silently.
-          # Retire it only after everInbox's FLIGHTLOG_BASE_URL is updated.
-          - flightlog-app
-
-networks:
-  1panel-network:
-    external: true
-  travel-services:
-    external: true
 ```
 
-Both networks are `external: true` — they are shared with sibling services and
-are created outside this compose file. `travel-services` in particular is how
-everInbox reaches everfly. The standalone `docker-compose.example.yml` in the
-repository root deliberately declares no networks at all, so that a public user
-can bring everfly up on a clean Docker host; do not reconcile the two.
+If everfly needs to reach — or be reached by — other containers, add the shared
+network here. That is deployment-specific, which is why the example compose file
+in the repository root deliberately declares none.
+
+## Configuring deploy.sh
+
+`deploy.sh` has working defaults for every setting, so it may need no
+configuration at all. To pin down paths for your host, copy the example and edit
+it. `deploy.env` is not tracked by Git:
+
+```bash
+cp deploy.env.example deploy.env
+```
+
+```bash
+# deploy.env
+EVERFLY_SRC_DIR=/opt/everfly
+EVERFLY_COMPOSE_FILE=/srv/everfly-deploy/docker-compose.yml
+EVERFLY_COMPOSE_PROJECT=everfly
+```
+
+| Variable | Default |
+| --- | --- |
+| `EVERFLY_SRC_DIR` | `/opt/everfly` |
+| `EVERFLY_COMPOSE_FILE` | `$EVERFLY_SRC_DIR/docker-compose.yml` |
+| `EVERFLY_COMPOSE_PROJECT` | `everfly` |
+| `EVERFLY_CONTAINER` | `everfly-app` |
+| `EVERFLY_HEALTH_URL` | `http://127.0.0.1:5000/api/health` |
+| `EVERFLY_HEALTH_TIMEOUT` | `120` |
+
+`deploy.env` is looked for at `$EVERFLY_DEPLOY_ENV`, then next to `deploy.sh`,
+then `/etc/everfly/deploy.env`. An environment variable set on the command line
+always wins, so one-off overrides still work:
+
+```bash
+EVERFLY_HEALTH_TIMEOUT=300 ./deploy.sh v1.1.0
+```
+
+Running a second environment is then just a second file:
+
+```bash
+EVERFLY_DEPLOY_ENV=/etc/everfly/staging.env ./deploy.sh v1.1.0
+```
 
 ## Day-to-day development
 
@@ -111,9 +124,8 @@ python -m unittest discover -s tests
 git push origin main
 ```
 
-Nothing you do here touches production. There is no build context pointing at
-this directory, so an uncommitted experiment can never leak into a deployed
-image.
+Nothing you do here touches production. No build context points at this
+directory, so an uncommitted experiment cannot leak into a deployed image.
 
 ## Releasing
 
@@ -129,18 +141,18 @@ git push origin v1.1.0
 ./deploy.sh v1.1.0
 ```
 
-`deploy.sh` can be run from anywhere — it operates on `/opt/everfly` regardless
-of where the script itself lives.
+`deploy.sh` can be run from anywhere — it operates on the production checkout
+regardless of where the script itself lives.
 
 ### What deploy.sh does
 
 1. Refuses to run if the production checkout has uncommitted changes.
 2. `git fetch --tags --force --prune` from origin.
-3. Checks out the requested tag (detached) in `/opt/everfly`.
+3. Checks out the requested tag (detached) in the production checkout.
 4. `docker compose build` and `docker compose up -d`.
-5. Polls the container health status, up to `EVERFLY_HEALTH_TIMEOUT` seconds.
+5. Polls container health, up to `EVERFLY_HEALTH_TIMEOUT` seconds.
 6. On failure: prints the last 40 log lines and tells you the rollback command.
-7. On success: records the previous ref in `/opt/everfly/.deploy-last-ref`.
+7. On success: records the previous ref in `.deploy-last-ref`.
 
 ### Rollback
 
@@ -149,29 +161,8 @@ of where the script itself lives.
 ./deploy.sh v1.0.0         # or to a specific tag
 ```
 
-### Configuration
-
-Every path is an environment variable with a production-shaped default:
-
-| Variable | Default |
-| --- | --- |
-| `EVERFLY_SRC_DIR` | `/opt/everfly` |
-| `EVERFLY_COMPOSE_FILE` | `/opt/1panel/docker/compose/flightlog/docker-compose.yml` |
-| `EVERFLY_COMPOSE_PROJECT` | `flightlog` |
-| `EVERFLY_CONTAINER` | `everfly-app` |
-| `EVERFLY_HEALTH_URL` | `http://127.0.0.1:5000/api/health` |
-| `EVERFLY_HEALTH_TIMEOUT` | `120` |
-
-So a second environment is just a matter of overriding them:
-
-```bash
-EVERFLY_SRC_DIR=/opt/everfly-staging \
-EVERFLY_COMPOSE_FILE=/opt/compose/everfly-staging/docker-compose.yml \
-EVERFLY_COMPOSE_PROJECT=everfly-staging \
-EVERFLY_CONTAINER=everfly-staging-app \
-EVERFLY_HEALTH_URL=http://127.0.0.1:5001/api/health \
-./deploy.sh v1.1.0
-```
+Rollback is only trustworthy because `requirements.txt` is pinned — an old tag
+rebuilds with the dependency set it was tested against.
 
 ## Manual deployment
 
@@ -180,22 +171,22 @@ If you are not using `deploy.sh`:
 ```bash
 git -C /opt/everfly fetch --tags --force origin
 git -C /opt/everfly checkout --detach v1.1.0
-cd /opt/1panel/docker/compose/flightlog
-docker compose -p flightlog up -d --build
+cd /srv/everfly-deploy
+docker compose up -d --build
 ```
 
 If `requirements.txt` changed and you want to be certain the layer cache is not
 reused:
 
 ```bash
-docker compose -p flightlog build --no-cache
-docker compose -p flightlog up -d
+docker compose build --no-cache
+docker compose up -d
 ```
 
 If only `.env` changed, no rebuild is needed:
 
 ```bash
-docker compose -p flightlog up -d --force-recreate
+docker compose up -d --force-recreate
 ```
 
 ## Database migrations
@@ -232,11 +223,8 @@ docker ps --filter name=everfly-app
 # logs
 docker logs --tail 100 -f everfly-app
 
-# which ref is deployed
+# which version is live
 git -C /opt/everfly describe --tags
-
-# compose logs
-cd /opt/1panel/docker/compose/flightlog && docker compose logs -f --tail=100
 ```
 
 ### Airline logo sync
@@ -247,31 +235,29 @@ After configuring ImageKit and rebuilding:
 docker exec everfly-app python scripts/sync_airline_logos.py
 ```
 
-The sync is idempotent and skips airlines that already have a `logo_url`. Use
-`--force` only when deliberately replacing every logo reference.
+Idempotent; skips airlines that already have a `logo_url`. Use `--force` only
+when deliberately replacing every logo reference.
 
 ### Scheduled AeroAPI jobs
 
-The reference deployment runs AeroAPI jobs from a systemd timer every 10 minutes,
-authenticating with `INTERNAL_SERVICE_TOKEN` read out of the running container:
+everfly exposes an internal endpoint that processes queued AeroAPI lookups. Call
+it on a schedule — a systemd timer, a cron entry, or any external scheduler —
+authenticating with `INTERNAL_SERVICE_TOKEN`:
 
-```ini
-# /etc/systemd/system/everfly-aeroapi-jobs.service
-[Unit]
-Description=Run everfly AeroAPI scheduled jobs
-After=docker.service
-Requires=docker.service
-
-[Service]
-Type=oneshot
-ExecStart=/bin/bash -lc 'TOKEN="$$(/usr/bin/docker exec everfly-app printenv INTERNAL_SERVICE_TOKEN)" && /usr/bin/curl -fsS -X POST -H "Authorization: Bearer $${TOKEN}" -H "Content-Type: application/json" -d "{\"limit\":10}" http://127.0.0.1:5000/api/internal/aeroapi_jobs/run'
+```bash
+curl -fsS -X POST \
+  -H "Authorization: Bearer $INTERNAL_SERVICE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"limit":10}' \
+  http://127.0.0.1:5000/api/internal/aeroapi_jobs/run
 ```
+
+Every 10 minutes is a reasonable starting cadence.
 
 ## Reverse proxy
 
-Terminate TLS in front of the app and proxy to `http://127.0.0.1:5000`. With
-1Panel this is a website entry plus its Let's Encrypt integration. Once every
-request arrives over HTTPS, enable secure cookies in `app.py`:
+Terminate TLS in front of the app and proxy to `http://127.0.0.1:5000`. Once
+every request arrives over HTTPS, enable secure cookies in `app.py`:
 
 ```python
 app.config['SESSION_COOKIE_SECURE'] = True

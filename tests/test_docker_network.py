@@ -10,61 +10,78 @@ def _read(*parts):
         return handle.read()
 
 
-class DockerNetworkConfigTest(unittest.TestCase):
-    """Guards the everInbox integration.
+class ExampleComposeTest(unittest.TestCase):
+    """Keeps the public-facing compose example runnable on a clean host.
 
-    everInbox reaches everfly over the shared ``travel-services`` network, at the
-    pre-rename hostname ``flightlog-app``. If either goes away, everInbox breaks
-    silently — nothing errors, flight drafts just stop arriving.
+    This file previously asserted the example joined a specific external
+    network, which was wrong twice over: the deployment it claimed to protect
+    runs a compose file kept outside this repository, so the assertion proved
+    nothing; and requiring an external network made the example fail with
+    "declared as external, but could not be found" for anyone who had not
+    already created that network by hand.
 
-    This used to assert against ``docker-compose.example.yml``, which was wrong
-    twice over: production runs a compose file kept outside this repository (see
-    docs/DEPLOYMENT.md), so the assertion proved nothing about the deployment it
-    claimed to protect; and it forced the example file to declare an external
-    network, which made it fail on any clean Docker host.
-
-    The deployment guide is the only in-repo artefact that can carry this
-    requirement, so that is what we pin.
+    Deployment-specific wiring — shared networks, aliases for sibling services —
+    belongs in the operator's own compose file, not here.
     """
 
-    def test_deployment_guide_documents_shared_network_and_alias(self):
-        for doc in ("DEPLOYMENT.md", "DEPLOYMENT.zh-CN.md"):
-            source = _read("docs", doc)
-            self.assertIn(
-                "travel-services",
-                source,
-                f"{doc} must document the shared network everInbox uses",
-            )
-            self.assertIn(
-                "flightlog-app",
-                source,
-                f"{doc} must document the backwards-compatibility alias; "
-                "dropping it silently breaks everInbox",
-            )
-            self.assertIn(
-                "aliases:",
-                source,
-                f"{doc} must show the alias attached to the network, not just "
-                "mention the name in prose",
-            )
-
-    def test_example_compose_is_standalone(self):
-        """The public-facing example must run on a clean Docker host.
-
-        An ``external: true`` network here fails with "declared as external, but
-        could not be found" for anyone who has not already created it by hand.
-        """
+    def test_example_compose_needs_no_preexisting_resources(self):
         source = _read("docker-compose.example.yml")
 
         self.assertNotIn(
             "external: true",
             source,
-            "docker-compose.example.yml must not require a pre-existing network "
-            "or volume; the reference deployment's compose file lives outside "
-            "this repository",
+            "docker-compose.example.yml must run on a clean Docker host; it "
+            "cannot require a network or volume created out of band",
         )
+
+    def test_example_compose_defines_the_service(self):
+        source = _read("docker-compose.example.yml")
+
         self.assertIn("everfly-app:", source)
         self.assertIn("/api/health", source)
+        self.assertIn(".env", source)
+
+
+class DeployConfigTest(unittest.TestCase):
+    """deploy.sh must be usable without editing it.
+
+    Host-specific paths belong in an untracked deploy.env, so that a public
+    clone gets working defaults and this repository carries no one machine's
+    directory layout.
+    """
+
+    def test_deploy_script_has_generic_defaults(self):
+        source = _read("deploy.sh")
+
+        self.assertIn('EVERFLY_SRC_DIR:-/opt/everfly', source)
+        self.assertIn('EVERFLY_COMPOSE_PROJECT:-everfly', source)
+        self.assertNotIn(
+            "/opt/1panel/",
+            source,
+            "deploy.sh must not hardcode one host's compose path; put it in "
+            "deploy.env instead",
+        )
+
+    def test_deploy_env_example_is_tracked_and_documents_the_knobs(self):
+        source = _read("deploy.env.example")
+
+        for var in (
+            "EVERFLY_SRC_DIR",
+            "EVERFLY_COMPOSE_FILE",
+            "EVERFLY_COMPOSE_PROJECT",
+            "EVERFLY_CONTAINER",
+            "EVERFLY_HEALTH_URL",
+            "EVERFLY_HEALTH_TIMEOUT",
+        ):
+            self.assertIn(var, source, f"deploy.env.example should mention {var}")
+
+    def test_deploy_env_is_not_tracked(self):
+        gitignore = _read(".gitignore")
+        self.assertIn(
+            "deploy.env",
+            gitignore,
+            "deploy.env holds host-specific paths and must stay untracked",
+        )
 
 
 if __name__ == "__main__":

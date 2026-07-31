@@ -27,7 +27,7 @@ everfly 是一个自托管的 Flask Web 应用，用于记录、管理和可视�
 | 数据库 | MySQL（PyMySQL） |
 | 前端 | Jinja 模板、原生 JavaScript、Leaflet、Chart.js |
 | 容器 | Docker、Docker Compose |
-| 可选运维 | 1Panel |
+| 可选运维 | 任意 Docker 主机；1Panel、Portainer 或纯 compose |
 
 主要文件：
 
@@ -119,9 +119,9 @@ python -c "import secrets; print(secrets.token_hex(32))"
 docker compose -f docker-compose.example.yml up -d --build
 ```
 
-完整的生产部署方案 —— 开发目录与生产 checkout 的分离、基于 tag 的发布、回滚、1Panel、数据库迁移以及日常运维命令 —— 请参见 **[docs/DEPLOYMENT.zh-CN.md](docs/DEPLOYMENT.zh-CN.md)**。
+完整的生产部署方案 —— 开发目录与生产 checkout 的分离、基于 tag 的发布、回滚、数据库迁移以及日常运维命令 —— 请参见 **[docs/DEPLOYMENT.zh-CN.md](docs/DEPLOYMENT.zh-CN.md)**。
 
-一句话概括：开发在你自己的 clone 的 `main` 分支上进行；生产从**另一个固定在 tag 上的独立 checkout** 构建，由 `deploy.sh` 驱动。
+一句话概括：开发在你自己的 clone 的 `main` 分支上进行；生产从**另一个固定在 tag 上的独立 checkout** 构建，由 `deploy.sh` 驱动。主机相关的路径写在不跟踪的 `deploy.env` 里（见 `deploy.env.example`），所以部署始终是一条不带任何参数的命令。
 
 ```bash
 ./deploy.sh v1.1.0     # 部署指定 tag
@@ -135,7 +135,7 @@ source venv/bin/activate
 python -m unittest discover -s tests
 ```
 
-`tests/` 下有 98 个测试，覆盖 API 接口、租户隔离、AeroAPI 调度和前端加固。它们只用标准库的 `unittest`——不需要额外安装测试依赖——也不需要运行中的 MySQL。打 tag 发布前请先跑通。
+`tests/` 下的测试覆盖 API 接口、租户隔离、AeroAPI 调度、前端加固和部署配置。它们只用标准库的 `unittest`——不需要额外安装测试依赖——也不需要运行中的 MySQL。打 tag 发布前请先跑通；CI 会在每次 push 和 PR 上自动运行。
 
 日常改代码：
 

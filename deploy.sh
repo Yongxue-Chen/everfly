@@ -10,25 +10,48 @@
 #   ./deploy.sh              # deploy the tip of the production checkout's branch
 #   ./deploy.sh --rollback   # redeploy the previously deployed ref
 #
-# Configuration (override via environment variables):
+# Configuration. Every setting has a sensible default, can be overridden by an
+# environment variable, and — most conveniently — can be set once in a local
+# `deploy.env` file that is not tracked by Git. See deploy.env.example.
+#
 #   EVERFLY_SRC_DIR          production checkout        (default: /opt/everfly)
-#   EVERFLY_COMPOSE_FILE     compose file to drive
-#                            (default: /opt/1panel/docker/compose/flightlog/docker-compose.yml)
-#   EVERFLY_COMPOSE_PROJECT  compose project name       (default: flightlog)
+#   EVERFLY_COMPOSE_FILE     compose file to drive      (default: $EVERFLY_SRC_DIR/docker-compose.yml)
+#   EVERFLY_COMPOSE_PROJECT  compose project name       (default: everfly)
 #   EVERFLY_CONTAINER        container name             (default: everfly-app)
 #   EVERFLY_HEALTH_URL       health endpoint            (default: http://127.0.0.1:5000/api/health)
 #   EVERFLY_HEALTH_TIMEOUT   seconds to wait for health (default: 120)
 #
-# The compose project is still named "flightlog" for historical reasons: it is
-# the directory 1Panel created before the rename, and renaming it would recreate
-# the container. It is a label only — the service, image and container are all
-# named everfly.
+# deploy.env is searched for in this order, first hit wins:
+#   1. $EVERFLY_DEPLOY_ENV
+#   2. deploy.env next to this script
+#   3. /etc/everfly/deploy.env
+#
+# Real environment variables always win over deploy.env, so a one-off override
+# still works: EVERFLY_HEALTH_TIMEOUT=300 ./deploy.sh v1.2.0
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load host-specific settings. Anything already exported on the command line is
+# saved first and restored afterwards, so a one-off override beats the file.
+_PRESET="$(declare -p EVERFLY_SRC_DIR EVERFLY_COMPOSE_FILE EVERFLY_COMPOSE_PROJECT \
+                      EVERFLY_CONTAINER EVERFLY_HEALTH_URL EVERFLY_HEALTH_TIMEOUT \
+           2>/dev/null || true)"
+
+for candidate in "${EVERFLY_DEPLOY_ENV:-}" "$SCRIPT_DIR/deploy.env" /etc/everfly/deploy.env; do
+  [ -n "$candidate" ] && [ -f "$candidate" ] || continue
+  # shellcheck disable=SC1090
+  set -a; . "$candidate"; set +a
+  DEPLOY_ENV_FILE="$candidate"
+  break
+done
+
+[ -n "$_PRESET" ] && eval "$_PRESET"
+
 SRC_DIR="${EVERFLY_SRC_DIR:-/opt/everfly}"
-COMPOSE_FILE="${EVERFLY_COMPOSE_FILE:-/opt/1panel/docker/compose/flightlog/docker-compose.yml}"
-COMPOSE_PROJECT="${EVERFLY_COMPOSE_PROJECT:-flightlog}"
+COMPOSE_FILE="${EVERFLY_COMPOSE_FILE:-$SRC_DIR/docker-compose.yml}"
+COMPOSE_PROJECT="${EVERFLY_COMPOSE_PROJECT:-everfly}"
 CONTAINER="${EVERFLY_CONTAINER:-everfly-app}"
 HEALTH_URL="${EVERFLY_HEALTH_URL:-http://127.0.0.1:5000/api/health}"
 HEALTH_TIMEOUT="${EVERFLY_HEALTH_TIMEOUT:-120}"

@@ -40,6 +40,9 @@ docs/superpowers/
 # deploy state
 .deploy-last-ref
 
+# Host-specific deploy settings (paths, compose project). See deploy.env.example.
+deploy.env
+
 # Host-specific operations runbook (deployment paths, service wiring).
 # Kept locally so it is available on the box, but never published.
 AGENTS.md

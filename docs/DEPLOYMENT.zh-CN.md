@@ -2,11 +2,20 @@
 
 *[English](DEPLOYMENT.md)*
 
-本文档说明 everfly 如何开发、如何部署。核心思想只有一条：
+everfly 是一个 Flask 容器，加上一个由你提供的 MySQL 服务。本文讲的是如何以一种可以放心升级和回滚的方式运行它。
 
-> **开发目录和生产构建源，是两个不同的目录。**
+如果你只想先跑起来，仓库根目录的 `docker-compose.example.yml` 是自包含的，不需要任何前置准备：
 
-## 为什么要分开
+```bash
+cp .env.example .env    # 填写必需的值
+docker compose -f docker-compose.example.yml up -d --build
+```
+
+本文其余部分讲的是长期运维。
+
+## 核心思想：两个 checkout
+
+> **你写代码的目录，和生产构建用的目录，不应该是同一个目录。**
 
 基于 tag 的部署必须 checkout 那个 tag。如果生产从你写代码的同一个目录构建，那么部署 `v1.1.0` 之后，这个目录就停在了 detached `HEAD` 上 —— 下次你坐下来写代码时，会在毫无察觉的情况下把提交打在一个游离的 HEAD 上，而不是 `main`。
 
@@ -15,32 +24,11 @@
 | 目录 | 角色 | Git 状态 |
 | --- | --- | --- |
 | 你的 clone，例如 `~/everfly` | 开发 | 始终在 `main` 上 |
-| `/opt/everfly` | 生产构建源 | detached 在某个发布 tag 上 |
+| 第二个 checkout，例如 `/opt/everfly` | 生产构建源 | detached 在某个发布 tag 上 |
 
-你永远不需要手动 `cd` 进 `/opt/everfly`。那是 `deploy.sh` 的地盘。
+你永远不需要手动 `cd` 进生产 checkout。那是 `deploy.sh` 的地盘。
 
-## 参考拓扑
-
-这是参考部署使用的布局。路径可以按需调整，每一项都能通过环境变量覆盖。
-
-| 项目 | 位置 |
-| --- | --- |
-| 开发 checkout | `/home/ubuntu/everfly`（在 `main` 上） |
-| 生产 checkout | `/opt/everfly`（detached 在 tag 上） |
-| Compose 文件 | `/opt/1panel/docker/compose/flightlog/docker-compose.yml` |
-| 生产 `.env` | `/opt/1panel/docker/compose/flightlog/.env`（权限 `600`，root 所有） |
-| Compose 项目名 | `flightlog` |
-| 容器名 | `everfly-app` |
-| 端口 | 宿主机 `5000` → 容器 `5000` |
-| 健康检查 | `http://127.0.0.1:5000/api/health` |
-
-> Compose 项目和它的目录仍然叫 `flightlog`。那是项目改名之前 1Panel 创建的目录；重命名它会导致容器被重建，而收益为零。它只是一个标签 —— 服务名、镜像名和容器名都已经是 `everfly`。
-
-生产 `.env` 放在 **compose 文件旁边、Git 树之外**，这样密钥永远不会待在一个会被部署改写的 checkout 里。
-
-### 建立生产 checkout
-
-在新机器上，一次性操作：
+### 建立方式
 
 ```bash
 sudo mkdir -p /opt/everfly
@@ -49,44 +37,67 @@ git clone https://github.com/Yongxue-Chen/everfly.git /opt/everfly
 git -C /opt/everfly checkout --detach v1.0.0
 ```
 
-把 compose 文件的构建上下文指向它：
+然后写一个 compose 文件，把构建上下文指向那个 checkout。**把 compose 文件和它的 `.env` 放在 checkout 之外**，这样密钥就不会待在一个会被部署覆盖的目录里：
 
 ```yaml
+# /srv/everfly-deploy/docker-compose.yml
 services:
   everfly-app:
     build:
-      context: /opt/everfly    # <- 生产 checkout，不是你的开发目录
+      context: /opt/everfly    # 生产 checkout，不是你的开发目录
       dockerfile: Dockerfile
     image: everfly:local
     container_name: everfly-app
     restart: always
     ports:
       - "5000:5000"
+    env_file:
+      - .env                   # 与本文件同级，权限 600
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/health', timeout=5)\""]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 20s
-    env_file:
-      - .env
-    networks:
-      1panel-network:
-      travel-services:
-        aliases:
-          # 向后兼容别名：everInbox 仍然用改名前的名字解析 everfly。
-          # 删掉这一行会静默破坏该集成。
-          # 只有在 everInbox 的 FLIGHTLOG_BASE_URL 更新之后才能移除。
-          - flightlog-app
-
-networks:
-  1panel-network:
-    external: true
-  travel-services:
-    external: true
 ```
 
-两个网络都是 `external: true` —— 它们与兄弟服务共享，在这个 compose 文件之外创建。其中 `travel-services` 正是 everInbox 访问 everfly 的通道。仓库根目录下的 `docker-compose.example.yml` 则刻意不声明任何网络，好让公开用户能在一台干净的 Docker 主机上直接跑起来；不要把两者统一。
+如果 everfly 需要访问其他容器、或被其他容器访问，在这里加上共享网络。这属于部署相关的配置 —— 这也正是仓库根目录那个示例 compose 文件刻意不声明任何网络的原因。
+
+## 配置 deploy.sh
+
+`deploy.sh` 的每一项设置都有可用的默认值，所以很可能完全不需要配置。想固定你这台主机的路径，复制示例文件改一下即可。`deploy.env` 不会被 Git 跟踪：
+
+```bash
+cp deploy.env.example deploy.env
+```
+
+```bash
+# deploy.env
+EVERFLY_SRC_DIR=/opt/everfly
+EVERFLY_COMPOSE_FILE=/srv/everfly-deploy/docker-compose.yml
+EVERFLY_COMPOSE_PROJECT=everfly
+```
+
+| 变量 | 默认值 |
+| --- | --- |
+| `EVERFLY_SRC_DIR` | `/opt/everfly` |
+| `EVERFLY_COMPOSE_FILE` | `$EVERFLY_SRC_DIR/docker-compose.yml` |
+| `EVERFLY_COMPOSE_PROJECT` | `everfly` |
+| `EVERFLY_CONTAINER` | `everfly-app` |
+| `EVERFLY_HEALTH_URL` | `http://127.0.0.1:5000/api/health` |
+| `EVERFLY_HEALTH_TIMEOUT` | `120` |
+
+`deploy.env` 的查找顺序是：`$EVERFLY_DEPLOY_ENV` → 与 `deploy.sh` 同级的 `deploy.env` → `/etc/everfly/deploy.env`。命令行上设置的环境变量始终优先，所以临时覆盖依然有效：
+
+```bash
+EVERFLY_HEALTH_TIMEOUT=300 ./deploy.sh v1.1.0
+```
+
+要多开一套环境，就是多一个文件的事：
+
+```bash
+EVERFLY_DEPLOY_ENV=/etc/everfly/staging.env ./deploy.sh v1.1.0
+```
 
 ## 日常开发
 
@@ -99,7 +110,7 @@ python -m unittest discover -s tests
 git push origin main
 ```
 
-你在这里做的任何事都不会影响生产。没有任何构建上下文指向这个目录，所以一个没提交的实验绝不可能泄漏进已部署的镜像。
+你在这里做的任何事都不会影响生产。没有任何构建上下文指向这个目录，所以一个没提交的实验不可能泄漏进已部署的镜像。
 
 ## 发布
 
@@ -114,17 +125,17 @@ git push origin v1.1.0
 ./deploy.sh v1.1.0
 ```
 
-`deploy.sh` 可以从任何地方运行 —— 无论脚本本身放在哪，它操作的都是 `/opt/everfly`。
+`deploy.sh` 可以从任何地方运行 —— 无论脚本本身放在哪，它操作的都是生产 checkout。
 
 ### deploy.sh 做了什么
 
 1. 如果生产 checkout 有未提交的改动，直接拒绝运行。
 2. 从 origin 执行 `git fetch --tags --force --prune`。
-3. 在 `/opt/everfly` 里 checkout 指定 tag（detached）。
+3. 在生产 checkout 里 checkout 指定 tag（detached）。
 4. 执行 `docker compose build` 和 `docker compose up -d`。
 5. 轮询容器健康状态，最长等待 `EVERFLY_HEALTH_TIMEOUT` 秒。
 6. 失败时：打印最后 40 行日志，并告诉你回滚命令。
-7. 成功时：把上一个 ref 记录到 `/opt/everfly/.deploy-last-ref`。
+7. 成功时：把上一个 ref 记录到 `.deploy-last-ref`。
 
 ### 回滚
 
@@ -133,29 +144,7 @@ git push origin v1.1.0
 ./deploy.sh v1.0.0         # 或回到指定 tag
 ```
 
-### 配置
-
-每个路径都是一个环境变量，默认值就是生产的形状：
-
-| 变量 | 默认值 |
-| --- | --- |
-| `EVERFLY_SRC_DIR` | `/opt/everfly` |
-| `EVERFLY_COMPOSE_FILE` | `/opt/1panel/docker/compose/flightlog/docker-compose.yml` |
-| `EVERFLY_COMPOSE_PROJECT` | `flightlog` |
-| `EVERFLY_CONTAINER` | `everfly-app` |
-| `EVERFLY_HEALTH_URL` | `http://127.0.0.1:5000/api/health` |
-| `EVERFLY_HEALTH_TIMEOUT` | `120` |
-
-所以要多开一套环境，只需要覆盖它们：
-
-```bash
-EVERFLY_SRC_DIR=/opt/everfly-staging \
-EVERFLY_COMPOSE_FILE=/opt/compose/everfly-staging/docker-compose.yml \
-EVERFLY_COMPOSE_PROJECT=everfly-staging \
-EVERFLY_CONTAINER=everfly-staging-app \
-EVERFLY_HEALTH_URL=http://127.0.0.1:5001/api/health \
-./deploy.sh v1.1.0
-```
+回滚之所以可信，是因为 `requirements.txt` 锁定了版本 —— 旧 tag 会用它当初测试过的那套依赖重新构建。
 
 ## 手动部署
 
@@ -164,21 +153,21 @@ EVERFLY_HEALTH_URL=http://127.0.0.1:5001/api/health \
 ```bash
 git -C /opt/everfly fetch --tags --force origin
 git -C /opt/everfly checkout --detach v1.1.0
-cd /opt/1panel/docker/compose/flightlog
-docker compose -p flightlog up -d --build
+cd /srv/everfly-deploy
+docker compose up -d --build
 ```
 
 如果 `requirements.txt` 变了，而你想确保不复用镜像层缓存：
 
 ```bash
-docker compose -p flightlog build --no-cache
-docker compose -p flightlog up -d
+docker compose build --no-cache
+docker compose up -d
 ```
 
 如果只改了 `.env`，不需要重新构建：
 
 ```bash
-docker compose -p flightlog up -d --force-recreate
+docker compose up -d --force-recreate
 ```
 
 ## 数据库迁移
@@ -213,9 +202,6 @@ docker logs --tail 100 -f everfly-app
 
 # 当前部署的是哪个版本
 git -C /opt/everfly describe --tags
-
-# compose 日志
-cd /opt/1panel/docker/compose/flightlog && docker compose logs -f --tail=100
 ```
 
 ### 航司 Logo 同步
@@ -230,23 +216,21 @@ docker exec everfly-app python scripts/sync_airline_logos.py
 
 ### AeroAPI 定时任务
 
-参考部署用 systemd timer 每 10 分钟跑一次 AeroAPI 任务，认证时从运行中的容器里读取 `INTERNAL_SERVICE_TOKEN`：
+everfly 提供一个内部端点用于处理排队中的 AeroAPI 查询。用任意调度方式定时调用它 —— systemd timer、cron，或任何外部调度器 —— 认证使用 `INTERNAL_SERVICE_TOKEN`：
 
-```ini
-# /etc/systemd/system/everfly-aeroapi-jobs.service
-[Unit]
-Description=Run everfly AeroAPI scheduled jobs
-After=docker.service
-Requires=docker.service
-
-[Service]
-Type=oneshot
-ExecStart=/bin/bash -lc 'TOKEN="$$(/usr/bin/docker exec everfly-app printenv INTERNAL_SERVICE_TOKEN)" && /usr/bin/curl -fsS -X POST -H "Authorization: Bearer $${TOKEN}" -H "Content-Type: application/json" -d "{\"limit\":10}" http://127.0.0.1:5000/api/internal/aeroapi_jobs/run'
+```bash
+curl -fsS -X POST \
+  -H "Authorization: Bearer $INTERNAL_SERVICE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"limit":10}' \
+  http://127.0.0.1:5000/api/internal/aeroapi_jobs/run
 ```
+
+每 10 分钟一次是个合理的起点。
 
 ## 反向代理
 
-在应用前面终止 TLS，代理到 `http://127.0.0.1:5000`。用 1Panel 的话就是一个网站条目加上它的 Let's Encrypt 集成。当所有请求都走 HTTPS 之后，在 `app.py` 中启用安全 Cookie：
+在应用前面终止 TLS，代理到 `http://127.0.0.1:5000`。当所有请求都走 HTTPS 之后，在 `app.py` 中启用安全 Cookie：
 
 ```python
 app.config['SESSION_COOKIE_SECURE'] = True

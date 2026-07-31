@@ -27,7 +27,7 @@ It turns a list of flights into something worth looking at: a map of every route
 | Database | MySQL (PyMySQL) |
 | Frontend | Jinja templates, vanilla JavaScript, Leaflet, Chart.js |
 | Container | Docker, Docker Compose |
-| Optional ops | 1Panel |
+| Optional ops | any Docker host; 1Panel, Portainer, plain compose |
 
 Key files:
 
@@ -121,11 +121,13 @@ docker compose -f docker-compose.example.yml up -d --build
 ```
 
 For the full production setup — the split between the development tree and the
-production checkout, tag-based releases, rollback, 1Panel, schema migrations and
+production checkout, tag-based releases, rollback, schema migrations and
 day-to-day ops commands — see **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 
 The short version: development happens in your own clone on `main`; production
 builds from a **separate checkout pinned to a tag**, driven by `deploy.sh`.
+Host-specific paths go in an untracked `deploy.env` (see `deploy.env.example`),
+so deploying stays a single command with no flags.
 
 ```bash
 ./deploy.sh v1.1.0     # deploy a tag
@@ -139,10 +141,11 @@ source venv/bin/activate
 python -m unittest discover -s tests
 ```
 
-98 tests live in `tests/`, covering the API surface, tenant isolation, AeroAPI
-scheduling and frontend hardening. They use only the standard library's
-`unittest` — no extra test dependency to install — and do not need a running
-MySQL server. Run them before tagging a release.
+The suite in `tests/` covers the API surface, tenant isolation, AeroAPI
+scheduling, frontend hardening and the deployment config. It uses only the
+standard library's `unittest` — no extra test dependency to install — and needs
+no running MySQL server. Run it before tagging a release; CI runs it on every
+push and pull request.
 
 Working on the code:
 
