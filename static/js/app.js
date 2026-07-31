@@ -849,6 +849,18 @@ function updateTrackHUD(flightId, alt, spd, pct) {
     });
 }
 
+function updatePlayButtonsState(flightId, isPlaying) {
+    const btns = [`btn-play-${flightId}`, `main-btn-play-${flightId}`];
+    btns.forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) {
+            btn.innerHTML = isPlaying
+                ? '<i class="fa-solid fa-pause"></i> <span>暂停</span>'
+                : '<i class="fa-solid fa-play"></i> <span>播放</span>';
+        }
+    });
+}
+
 function toggleTrackAnimation(flightId) {
     const anim = ensureTrackAnimState(flightId);
     if (!anim) return;
@@ -862,23 +874,27 @@ function toggleTrackAnimation(flightId) {
 function startTrackAnimation(flightId) {
     const anim = ensureTrackAnimState(flightId);
     if (!anim || !anim.points || !anim.points.length) return;
-    anim.isPlaying = true;
 
-    const updatePlayBtns = (iconHtml, textStr) => {
-        const btns = [`btn-play-${flightId}`, `main-btn-play-${flightId}`];
-        btns.forEach(id => {
-            const btn = document.getElementById(id);
-            if (btn) btn.innerHTML = `${iconHtml} <span>${textStr}</span>`;
-        });
-    };
-    updatePlayBtns('<i class="fa-solid fa-pause"></i>', '暂停');
+    if (anim.animFrame) {
+        cancelAnimationFrame(anim.animFrame);
+        anim.animFrame = null;
+    }
+
+    if (anim.currentIndex >= anim.points.length - 1) {
+        anim.currentIndex = 0;
+    }
+
+    anim.isPlaying = true;
+    updatePlayButtonsState(flightId, true);
 
     function step() {
         if (!anim.isPlaying) return;
         anim.currentIndex += 0.08 * anim.speed;
         if (anim.currentIndex >= anim.points.length - 1) {
             anim.currentIndex = anim.points.length - 1;
+            updatePlanePosition(flightId);
             pauseTrackAnimation(flightId);
+            return;
         }
         updatePlanePosition(flightId);
         if (anim.isPlaying) {
@@ -892,18 +908,17 @@ function pauseTrackAnimation(flightId) {
     const anim = ensureTrackAnimState(flightId);
     if (!anim) return;
     anim.isPlaying = false;
-    if (anim.animFrame) cancelAnimationFrame(anim.animFrame);
-
-    const btns = [`btn-play-${flightId}`, `main-btn-play-${flightId}`];
-    btns.forEach(id => {
-        const btn = document.getElementById(id);
-        if (btn) btn.innerHTML = '<i class="fa-solid fa-play"></i> <span>播放</span>';
-    });
+    if (anim.animFrame) {
+        cancelAnimationFrame(anim.animFrame);
+        anim.animFrame = null;
+    }
+    updatePlayButtonsState(flightId, false);
 }
 
 function restartTrackAnimation(flightId) {
     const anim = ensureTrackAnimState(flightId);
     if (!anim) return;
+    pauseTrackAnimation(flightId);
     anim.currentIndex = 0;
     updatePlanePosition(flightId);
     startTrackAnimation(flightId);
