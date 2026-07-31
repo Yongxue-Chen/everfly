@@ -41,6 +41,9 @@ Key files:
 
 ## Quick start
 
+Requires Python 3.9+ and a reachable MySQL 8 server. The production image is
+built on `python:3.9-slim`.
+
 ```bash
 git clone https://github.com/Yongxue-Chen/everfly.git
 cd everfly
@@ -160,4 +163,9 @@ see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for why and how.
 
 ## License
 
-See [LICENSE](LICENSE).
+[PolyForm Noncommercial License 1.0.0](LICENSE).
+
+You may use, modify and share everfly for **any noncommercial purpose**,
+including personal and self-hosted use. Commercial use is not granted by this
+license. Note that PolyForm Noncommercial is a *source-available* licence, not an
+OSI-approved open-source one.

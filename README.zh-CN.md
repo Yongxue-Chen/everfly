@@ -41,6 +41,8 @@ everfly 是一个自托管的 Flask Web 应用，用于记录、管理和可视�
 
 ## 快速开始
 
+需要 Python 3.9+ 和一个可访问的 MySQL 8 服务。生产镜像基于 `python:3.9-slim` 构建。
+
 ```bash
 git clone https://github.com/Yongxue-Chen/everfly.git
 cd everfly
@@ -151,4 +153,6 @@ git push origin main
 
 ## 许可证
 
-见 [LICENSE](LICENSE)。
+[PolyForm Noncommercial License 1.0.0](LICENSE)。
+
+你可以出于**任何非商业目的**使用、修改和分发 everfly，包括个人使用和自托管。本许可证不授予商业使用权。注意 PolyForm Noncommercial 属于 *source-available*（源码可见）许可证，并非 OSI 认证的开源许可证。
