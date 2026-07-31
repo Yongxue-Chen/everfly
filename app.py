@@ -1609,6 +1609,56 @@ def fetch_aeroapi_data(ident, start_str, end_str):
     data = response.json()
     return data.get('flights', [])
 
+def _parse_ident_airline_flightnum(ident):
+    """Split an IATA-style ident (e.g. 'FR37', 'U28844') into (airline_code, flight_number)."""
+    m = re.match(r'^([A-Za-z0-9]{2})0*([0-9]+)$', (ident or '').strip().upper())
+    if not m:
+        return None, None
+    return m.group(1), m.group(2)
+
+def fetch_aeroapi_schedule(airline_code, flight_number, date_str):
+    """
+    GET /schedules/{start}/{end}: published airline schedules, up to 1 year ahead and
+    3 months in the past. Unlike /flights/{ident}, it is not limited to a 2-day future window.
+    """
+    date_end = (dateutil.parser.parse(date_str).date() + timedelta(days=1)).isoformat()
+    url = f"https://aeroapi.flightaware.com/aeroapi/schedules/{date_str}/{date_end}"
+    headers = {"x-apikey": _get_user_api_key()}
+    params = {"airline": airline_code, "flight_number": flight_number, "max_pages": 1}
+
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=8)
+    except Exception as e:
+        raise ValueError(f"Connection Error: {e}")
+
+    if response.status_code != 200:
+        try:
+            err = response.json()
+            raise ValueError(f"API Error: {err.get('detail', 'Bad Request')}")
+        except ValueError as ve:
+            raise ve
+        except Exception:
+            raise ValueError(f"API Status {response.status_code}")
+
+    data = response.json()
+    return data.get('scheduled', [])
+
+def to_local_str(utc_str, tz_name):
+    if not utc_str:
+        return None
+    try:
+        dt_utc = dateutil.parser.parse(utc_str)
+        if tz_name:
+            try:
+                tz = pytz.timezone(tz_name)
+                dt_local = dt_utc.astimezone(tz)
+                return dt_local.strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                return dt_utc.strftime('%Y-%m-%d %H:%M:%S')
+        return dt_utc.strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        return utc_str
+
 def _timezone_or_utc(tz_name):
     try:
         return pytz.timezone(tz_name) if tz_name else pytz.utc
@@ -2895,29 +2945,8 @@ def get_detailed_flights():
 
     return jsonify(flights)
 
-def update_single_flight_from_aeroapi(flight_id, force=False):
-    conn = database.get_db()
-    uid = g.user['id']
-    cur = conn.execute("SELECT flight_number, date, origin_airport_id, dest_airport_id, std, atd, sta, ata, registration, airline_id, aircraft_model_id, distance, duration_scheduled, duration_actual, origin_terminal, dest_terminal, flight_class FROM flights WHERE id = ? AND user_id = ?", (flight_id, uid))
-    flight = cur.fetchone()
-    
-    if not flight:
-        return {'error': 'Flight not found'}
-        
-    f_num = flight[0]
-    f_date = flight[1]
-    
-    if not f_num or not f_date:
-        return {'error': 'Missing flight number or date'}
-
-    # Strategy: Always fetch if forced, OR if missing critical data
-    is_missing_data = not (flight[4] and flight[5] and flight[8])
-    if not force and not is_missing_data:
-        return {'message': 'Skipped, data exists'}
-         
-    f_num_clean = f_num.replace(' ', '')
-    origin_tz_name = _get_airport_timezone(conn, flight[2], uid)
-
+def _run_ident_update(flight, f_num_clean, f_date, origin_tz_name, conn, uid, flight_id, force):
+    """Precise update via /flights/{ident}. Only usable within AeroAPI's 2-day future window."""
     try:
         if origin_tz_name:
             start_window, end_window = build_aeroapi_departure_day_window(f_date, origin_tz_name)
@@ -2925,14 +2954,14 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
             start_window, end_window = build_aeroapi_unknown_timezone_window(f_date)
     except ValueError as e:
         return {'error': str(e)}
-    
+
     try:
         raw_flights = fetch_aeroapi_data(f_num_clean, start_window, end_window)
     except ValueError as e:
         return {'error': str(e)}
-    except Exception as e:
+    except Exception:
         return {'error': 'API unexpected error'}
-    
+
     if not raw_flights:
         if force: return {'error': 'No data found in AeroAPI'}
         return {'message': 'No data found'}
@@ -2957,14 +2986,14 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
         if force: return {'error': 'No matching flight in time window'}
         return {'message': 'No matching flight'}
 
-    print(f"DEBUG: Best match for {f_num} on {f_date}: {best_match.get('ident')} at {best_match.get('scheduled_out')}")
-        
+    print(f"DEBUG: Best match for {flight[0]} on {f_date}: {best_match.get('ident')} at {best_match.get('scheduled_out')}")
+
     api_std = best_match.get('scheduled_out')
     api_atd = best_match.get('actual_out') or best_match.get('actual_off')
     api_sta = best_match.get('scheduled_in')
     api_ata = best_match.get('actual_in') or best_match.get('actual_on')
     api_reg = best_match.get('registration')
-    
+
     # Calculate Durations (UTC diff)
     dur_sched = None
     if api_std and api_sta:
@@ -2973,7 +3002,7 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
              d2 = dateutil.parser.parse(api_sta)
              dur_sched = int((d2 - d1).total_seconds() / 60)
         except: pass
-        
+
     dur_actual = None
     if api_atd and api_ata:
         try:
@@ -2981,7 +3010,7 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
              d2 = dateutil.parser.parse(api_ata)
              dur_actual = int((d2 - d1).total_seconds() / 60)
         except: pass
-    
+
     # Distance conversion: Miles -> KM
     api_dist = best_match.get('route_distance')
     if api_dist is not None:
@@ -2989,9 +3018,6 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
             api_dist = int(api_dist * 1.60934)
         except:
             pass
-    
-    api_origin_code = best_match.get('origin', {}).get('code')
-    api_dest_code = best_match.get('destination', {}).get('code')
 
     def _fmt_term(t):
         if t and t.isdigit(): return f"T{t}"
@@ -2999,34 +3025,18 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
 
     api_origin_term = _fmt_term(best_match.get('terminal_origin'))
     api_dest_term = _fmt_term(best_match.get('terminal_destination'))
-    
+
     api_origin_tz = best_match.get('origin', {}).get('timezone')
     api_dest_tz = best_match.get('destination', {}).get('timezone')
-
-    def to_local_str(utc_str, tz_name):
-        if not utc_str: return None
-        try:
-            dt_utc = dateutil.parser.parse(utc_str)
-            if tz_name:
-                try:
-                    tz = pytz.timezone(tz_name)
-                    dt_local = dt_utc.astimezone(tz)
-                    return dt_local.strftime('%Y-%m-%d %H:%M:%S')
-                except:
-                     return dt_utc.strftime('%Y-%m-%d %H:%M:%S')
-            else:
-                return dt_utc.strftime('%Y-%m-%d %H:%M:%S')
-        except:
-            return utc_str
 
     api_std = to_local_str(api_std, api_origin_tz)
     api_atd = to_local_str(api_atd, api_origin_tz)
     api_sta = to_local_str(api_sta, api_dest_tz)
     api_ata = to_local_str(api_ata, api_dest_tz)
-    
+
     update_fields = []
     update_values = []
-    
+
     def add_update(col, val, current_val):
         if val is not None and (force or not current_val):
              update_fields.append(f"{col} = ?")
@@ -3036,33 +3046,269 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
     add_update('atd', api_atd, flight[5])
     add_update('sta', api_sta, flight[6])
     add_update('ata', api_ata, flight[7])
-    
+
     add_update('registration', api_reg, flight[8])
     add_update('distance', api_dist, flight[11])
-    
+
     add_update('duration_scheduled', dur_sched, flight[12])
     add_update('duration_actual', dur_actual, flight[13])
-    
+
     # Terminals
     add_update('origin_terminal', api_origin_term, flight[14])
     add_update('dest_terminal', api_dest_term, flight[15])
     add_update('flight_class', 'Economy', flight[16])
 
-    
     related_fields, related_values = collect_aeroapi_related_updates(best_match, flight, conn, uid)
     update_fields.extend(related_fields)
     update_values.extend(related_values)
 
     if not update_fields:
         return {'message': 'No new data or data already exists'}
-        
+
     update_values.append(flight_id)
     sql = f"UPDATE flights SET {', '.join(update_fields)} WHERE id = ? AND user_id = ?"
     update_values.append(uid)
     conn.execute(sql, update_values)
     conn.commit()
-    
-    return {'success': True, 'fields_updated': len(update_fields), 'debug_match': best_match.get('ident')}
+
+    return {'success': True, 'fields_updated': len(update_fields), 'source': 'ident', 'debug_match': best_match.get('ident')}
+
+def _lookup_airport_readonly(icao, iata, conn, uid):
+    """
+    Read-only equivalent of get_or_create_airport(): resolves an existing DB airport row's
+    id/timezone, or falls back to the local airportsdata package for just a timezone --
+    without ever writing. Used for preview so nothing is created until the user applies.
+    """
+    if icao:
+        row = conn.execute("SELECT id, timezone FROM airports WHERE icao_code = ? AND user_id = ?", (icao, uid)).fetchone()
+        if row:
+            return row[0], row[1]
+    if iata:
+        row = conn.execute("SELECT id, timezone FROM airports WHERE iata_code = ? AND user_id = ?", (iata, uid)).fetchone()
+        if row:
+            return row[0], row[1]
+    info = airportsdata.load('ICAO').get(icao) if icao else None
+    if not info and iata:
+        info = airportsdata.load('IATA').get(iata)
+    return None, (info.get('tz') if info else None)
+
+def _schedule_remote_values(sched, conn, uid):
+    """Read-only preview values from a /schedules match: just std/sta, nothing else is known."""
+    _, origin_tz = _lookup_airport_readonly(sched.get('origin_icao'), sched.get('origin_iata'), conn, uid)
+    _, dest_tz = _lookup_airport_readonly(sched.get('destination_icao'), sched.get('destination_iata'), conn, uid)
+    return {
+        'std': to_local_str(sched.get('scheduled_out'), origin_tz),
+        'sta': to_local_str(sched.get('scheduled_in'), dest_tz),
+    }
+
+def build_schedule_related_diffs(sched, flight):
+    """Mirrors build_aeroapi_related_diffs() but reads /schedules' flat origin/destination/ident shape."""
+    diffs = []
+    if not flight[2]:
+        origin_label = sched.get('origin_iata') or sched.get('origin_icao')
+        if origin_label:
+            diffs.append({'field': 'origin_airport_id', 'label': 'Origin Airport', 'remote': origin_label, 'status': 'missing'})
+    if not flight[3]:
+        dest_label = sched.get('destination_iata') or sched.get('destination_icao')
+        if dest_label:
+            diffs.append({'field': 'dest_airport_id', 'label': 'Destination Airport', 'remote': dest_label, 'status': 'missing'})
+    ident_icao = sched.get('ident_icao') or ''
+    if not flight[9] and ident_icao:
+        diffs.append({'field': 'airline_id', 'label': 'Airline', 'remote': ident_icao[:3], 'status': 'missing'})
+    return diffs
+
+def _collect_schedule_related_updates(sched, flight, conn, uid):
+    """Write-capable counterpart of build_schedule_related_diffs(); mirrors
+    collect_aeroapi_related_updates() -- only fills origin/dest/airline if currently empty."""
+    update_fields = []
+    update_values = []
+
+    if sched.get('origin_icao') or sched.get('origin_iata'):
+        aid = get_or_create_airport(sched.get('origin_icao'), sched.get('origin_iata'), conn)
+        if aid and not flight[2]:
+            update_fields.append("origin_airport_id = ?")
+            update_values.append(aid)
+
+    if sched.get('destination_icao') or sched.get('destination_iata'):
+        aid = get_or_create_airport(sched.get('destination_icao'), sched.get('destination_iata'), conn)
+        if aid and not flight[3]:
+            update_fields.append("dest_airport_id = ?")
+            update_values.append(aid)
+
+    # /schedules has no separate "operator" field; derive it from the ident
+    # (ICAO idents are always a 3-letter airline code, IATA idents 2-char).
+    ident_icao = sched.get('ident_icao') or ''
+    ident_iata = sched.get('ident_iata') or ''
+    if ident_icao and not flight[9]:
+        al_id = get_or_create_airline(ident_icao[:3], ident_iata[:2] or None, conn)
+        if al_id:
+            update_fields.append("airline_id = ?")
+            update_values.append(al_id)
+
+    return update_fields, update_values
+
+def _decide_aeroapi_strategy(flight, conn, uid, now_utc=None):
+    """
+    Decide whether an AeroAPI refresh should use /flights/{ident} (precise, but hard-limited
+    to 2 days out) or /schedules (coarse -- origin/dest/airline/scheduled times only -- but
+    good for up to 1 year out). Returns 'ident', 'schedules', or 'schedules_then_ident'
+    (timezone genuinely unknown: resolve via /schedules first, then decide).
+    """
+    f_date = flight[1]
+    origin_tz_name = _get_airport_timezone(conn, flight[2], uid)
+    now_utc = _as_utc(now_utc or datetime.now(pytz.utc))
+    future_limit = now_utc + timedelta(days=2)
+
+    if origin_tz_name and flight[4]:
+        try:
+            departure_utc = _timezone_or_utc(origin_tz_name).localize(dateutil.parser.parse(flight[4])).astimezone(pytz.utc)
+        except Exception:
+            departure_utc = None
+        if departure_utc is not None:
+            return 'schedules' if departure_utc > future_limit else 'ident'
+
+    if origin_tz_name:
+        try:
+            build_aeroapi_departure_day_window(f_date, origin_tz_name, now_utc=now_utc)
+            return 'ident'
+        except ValueError:
+            return 'schedules'
+
+    return 'schedules_then_ident'
+
+def _run_schedule_update(flight, f_num_clean, f_date, conn, uid, flight_id, force):
+    """
+    Coarse early update via /schedules, not limited to the 2-day future window
+    (covers 3 months back / 1 year ahead). Only fills origin/dest airport, airline,
+    and scheduled departure/arrival time -- no actuals, registration, or terminals,
+    since /schedules doesn't carry that data.
+    Returns (result_dict, matched_schedule_or_None).
+    """
+    airline_code, flight_num = _parse_ident_airline_flightnum(f_num_clean)
+    if not airline_code or not flight_num:
+        return {'error': 'Cannot parse airline/flight number for schedule lookup'}, None
+
+    try:
+        sched_list = fetch_aeroapi_schedule(airline_code, flight_num, f_date)
+    except ValueError as e:
+        return {'error': str(e)}, None
+    except Exception:
+        return {'error': 'API unexpected error'}, None
+
+    if not sched_list:
+        if force: return {'error': 'No data found in AeroAPI schedules'}, None
+        return {'message': 'No schedule data found'}, None
+
+    sched = sched_list[0]
+
+    update_fields = []
+    update_values = []
+
+    # Origin/dest/airline follow the same "only fill if currently empty" rule as
+    # collect_aeroapi_related_updates() -- these are reference fields, not force-overwritten.
+    related_fields, related_values = _collect_schedule_related_updates(sched, flight, conn, uid)
+    update_fields.extend(related_fields)
+    update_values.extend(related_values)
+
+    origin_aid = flight[2]
+    if 'origin_airport_id = ?' in related_fields:
+        origin_aid = related_values[related_fields.index('origin_airport_id = ?')]
+    dest_aid = flight[3]
+    if 'dest_airport_id = ?' in related_fields:
+        dest_aid = related_values[related_fields.index('dest_airport_id = ?')]
+
+    origin_tz = _get_airport_timezone(conn, origin_aid, uid)
+    dest_tz = _get_airport_timezone(conn, dest_aid, uid)
+
+    api_std = to_local_str(sched.get('scheduled_out'), origin_tz)
+    api_sta = to_local_str(sched.get('scheduled_in'), dest_tz)
+
+    if api_std and (force or not flight[4]):
+        update_fields.append("std = ?")
+        update_values.append(api_std)
+    if api_sta and (force or not flight[6]):
+        update_fields.append("sta = ?")
+        update_values.append(api_sta)
+
+    if not update_fields:
+        return {'message': 'No new data or data already exists'}, sched
+
+    update_values.append(flight_id)
+    sql = f"UPDATE flights SET {', '.join(update_fields)} WHERE id = ? AND user_id = ?"
+    update_values.append(uid)
+    conn.execute(sql, update_values)
+    conn.commit()
+
+    return {
+        'success': True,
+        'fields_updated': len(update_fields),
+        'source': 'schedules',
+        'debug_match': sched.get('ident'),
+    }, sched
+
+def update_single_flight_from_aeroapi(flight_id, force=False):
+    conn = database.get_db()
+    uid = g.user['id']
+    flight = _load_flight_for_aeroapi(conn, uid, flight_id)
+
+    if not flight:
+        return {'error': 'Flight not found'}
+
+    f_num = flight[0]
+    f_date = flight[1]
+
+    if not f_num or not f_date:
+        return {'error': 'Missing flight number or date'}
+
+    # Strategy: Always fetch if forced, OR if missing critical data
+    is_missing_data = not (flight[4] and flight[5] and flight[8])
+    if not force and not is_missing_data:
+        return {'message': 'Skipped, data exists'}
+
+    f_num_clean = f_num.replace(' ', '')
+    strategy = _decide_aeroapi_strategy(flight, conn, uid)
+
+    if strategy == 'ident':
+        origin_tz_name = _get_airport_timezone(conn, flight[2], uid)
+        return _run_ident_update(flight, f_num_clean, f_date, origin_tz_name, conn, uid, flight_id, force)
+
+    if strategy == 'schedules':
+        result, _sched = _run_schedule_update(flight, f_num_clean, f_date, conn, uid, flight_id, force)
+        return result
+
+    # 'schedules_then_ident': timezone genuinely unknown (no origin airport on file yet) --
+    # resolve origin/dest/airline/times via /schedules first, then use that real
+    # scheduled_out to decide whether it's now worth also running the precise
+    # /flights/{ident} pass.
+    sched_result, sched = _run_schedule_update(flight, f_num_clean, f_date, conn, uid, flight_id, force)
+    if not sched:
+        return sched_result
+
+    sched_out = sched.get('scheduled_out')
+    if not sched_out:
+        return sched_result
+
+    try:
+        sched_departure_utc = _as_utc(dateutil.parser.parse(sched_out))
+    except Exception:
+        return sched_result
+
+    if sched_departure_utc > datetime.now(pytz.utc) + timedelta(days=2):
+        return sched_result
+
+    # Now confirmed within 2 days -- layer the precise ident-based pass on top.
+    flight = _load_flight_for_aeroapi(conn, uid, flight_id)
+    new_origin_tz_name = _get_airport_timezone(conn, flight[2], uid)
+    ident_result = _run_ident_update(flight, f_num_clean, f_date, new_origin_tz_name, conn, uid, flight_id, force)
+
+    if ident_result.get('success'):
+        return {
+            'success': True,
+            'fields_updated': sched_result.get('fields_updated', 0) + ident_result.get('fields_updated', 0),
+            'source': 'schedules+ident',
+            'debug_match': ident_result.get('debug_match'),
+        }
+    return sched_result
 
 def _load_flight_for_aeroapi(conn, uid, flight_id):
     cur = conn.execute("SELECT flight_number, date, origin_airport_id, dest_airport_id, std, atd, sta, ata, registration, airline_id, aircraft_model_id, distance, duration_scheduled, duration_actual, origin_terminal, dest_terminal, flight_class FROM flights WHERE id = ? AND user_id = ?", (flight_id, uid))
@@ -3263,13 +3509,7 @@ def build_aeroapi_related_diffs(best_match, flight):
 
     return diffs
 
-def _build_aeroapi_preview(flight_id, selected_candidate_index=None):
-    conn = database.get_db()
-    uid = g.user['id']
-    flight = _load_flight_for_aeroapi(conn, uid, flight_id)
-    if not flight:
-        return {'error': 'Flight not found'}
-
+def _build_ident_preview(flight, conn, uid, selected_candidate_index=None):
     try:
         selection = _resolve_aeroapi_selection_for_flight(flight, conn, uid, selected_candidate_index)
     except ValueError as e:
@@ -3288,6 +3528,7 @@ def _build_aeroapi_preview(flight_id, selected_candidate_index=None):
         remote_values['flight_class'] = 'Economy'
     return {
         'success': True,
+        'source': 'ident',
         'debug_match': best_match.get('ident'),
         'candidate_index': selection.get('candidate_index'),
         'local': local_values,
@@ -3297,6 +3538,74 @@ def _build_aeroapi_preview(flight_id, selected_candidate_index=None):
         'origin_airport_id': flight[2],
         'dest_airport_id': flight[3],
     }
+
+def _build_schedule_preview(flight, conn, uid, f_num, f_date):
+    f_num_clean = f_num.replace(' ', '')
+    airline_code, flight_num = _parse_ident_airline_flightnum(f_num_clean)
+    if not airline_code or not flight_num:
+        return {'error': 'Cannot parse airline/flight number for schedule lookup'}, None
+    try:
+        sched_list = fetch_aeroapi_schedule(airline_code, flight_num, f_date)
+    except ValueError as e:
+        return {'error': str(e)}, None
+    except Exception:
+        return {'error': 'API unexpected error'}, None
+    if not sched_list:
+        return {'error': 'No schedule data found (this flight may not operate on this date)'}, None
+
+    sched = sched_list[0]
+    local_values = _local_aeroapi_values(flight)
+    remote_values = _schedule_remote_values(sched, conn, uid)
+    return {
+        'success': True,
+        'source': 'schedules',
+        'debug_match': sched.get('ident'),
+        'local': local_values,
+        'remote': remote_values,
+        'diffs': build_aeroapi_field_diffs(local_values, remote_values),
+        'related_diffs': build_schedule_related_diffs(sched, flight),
+        'origin_airport_id': flight[2],
+        'dest_airport_id': flight[3],
+    }, sched
+
+def _build_aeroapi_preview(flight_id, selected_candidate_index=None):
+    conn = database.get_db()
+    uid = g.user['id']
+    flight = _load_flight_for_aeroapi(conn, uid, flight_id)
+    if not flight:
+        return {'error': 'Flight not found'}
+
+    f_num = flight[0]
+    f_date = flight[1]
+    if not f_num or not f_date:
+        return {'error': 'Missing flight number or date'}
+
+    strategy = _decide_aeroapi_strategy(flight, conn, uid)
+
+    if strategy == 'ident':
+        return _build_ident_preview(flight, conn, uid, selected_candidate_index)
+
+    if strategy == 'schedules':
+        preview, _sched = _build_schedule_preview(flight, conn, uid, f_num, f_date)
+        return preview
+
+    # 'schedules_then_ident': timezone unknown -- check /schedules first to learn the real
+    # scheduled_out; if that lands within 2 days, prefer the richer /flights/{ident} preview.
+    sched_preview, sched = _build_schedule_preview(flight, conn, uid, f_num, f_date)
+    if not sched:
+        return sched_preview
+
+    sched_out = sched.get('scheduled_out')
+    if sched_out:
+        try:
+            if _as_utc(dateutil.parser.parse(sched_out)) <= datetime.now(pytz.utc) + timedelta(days=2):
+                ident_preview = _build_ident_preview(flight, conn, uid, selected_candidate_index)
+                if ident_preview.get('success') or ident_preview.get('ambiguous'):
+                    return ident_preview
+        except Exception:
+            pass
+
+    return sched_preview
 
 import pycountry
 import traceback
@@ -3352,17 +3661,29 @@ def apply_flight_aeroapi(flight_id):
             _ensure_terminal_in_db(conn, uid, preview.get('dest_airport_id'), remote_values.get('dest_terminal'))
 
         flight = _load_flight_for_aeroapi(conn, uid, flight_id)
-        try:
-            selection = _resolve_aeroapi_selection_for_flight(flight, conn, uid, data.get('candidate_index'))
-        except ValueError as e:
-            return {'error': str(e)}
-        if selection.get('ambiguous'):
-            return {
-                'ambiguous': True,
-                'message': 'Multiple AeroAPI candidates require manual selection',
-                'candidates': selection.get('candidates', []),
-            }
-        related_fields, related_values = collect_aeroapi_related_updates(selection['match'], flight, conn, uid)
+
+        if preview.get('source') == 'schedules':
+            f_num_clean = (flight[0] or '').replace(' ', '')
+            airline_code, flight_num = _parse_ident_airline_flightnum(f_num_clean)
+            try:
+                sched_list = fetch_aeroapi_schedule(airline_code, flight_num, flight[1]) if airline_code and flight_num else []
+            except ValueError as e:
+                return {'error': str(e)}
+            if not sched_list:
+                return {'error': 'No schedule data found (this flight may not operate on this date)'}
+            related_fields, related_values = _collect_schedule_related_updates(sched_list[0], flight, conn, uid)
+        else:
+            try:
+                selection = _resolve_aeroapi_selection_for_flight(flight, conn, uid, data.get('candidate_index'))
+            except ValueError as e:
+                return {'error': str(e)}
+            if selection.get('ambiguous'):
+                return {
+                    'ambiguous': True,
+                    'message': 'Multiple AeroAPI candidates require manual selection',
+                    'candidates': selection.get('candidates', []),
+                }
+            related_fields, related_values = collect_aeroapi_related_updates(selection['match'], flight, conn, uid)
         update_fields.extend(related_fields)
         update_values.extend(related_values)
 

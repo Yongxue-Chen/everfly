@@ -62,7 +62,9 @@ class AeroApiFieldDiffsTest(unittest.TestCase):
     def test_automatic_update_defaults_empty_flight_class_to_economy(self):
         with open(os.path.join(ROOT, "app.py"), encoding="utf-8") as fh:
             source = fh.read()
-        section = source.split("def update_single_flight_from_aeroapi", 1)[1].split("def _load_flight_for_aeroapi", 1)[0]
+        # The ident-based (/flights/{ident}) update pass is what fills flight_class;
+        # the coarse /schedules pass intentionally doesn't touch it.
+        section = source.split("def _run_ident_update", 1)[1].split("def _run_schedule_update", 1)[0]
 
         self.assertIn("add_update('flight_class', 'Economy', flight[16])", section)
 
