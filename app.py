@@ -2729,29 +2729,49 @@ def get_flight_track(id):
         except Exception:
             pass
 
-    # 2. Try AeroAPI if API key is configured
+    # 2. Try AeroAPI if API key is configured.
+    # /flights/{id}/track requires AeroAPI's own fa_flight_id (e.g. "RUK192-1785478906-schedule-165p"),
+    # not the plain flight number -- so we must resolve it via a /flights/{ident} lookup first.
     api_key = _get_user_api_key()
     points = []
     if api_key:
         try:
-            ident = flight['flight_number']
-            resp = requests.get(
-                f"https://aeroapi.flightaware.com/aeroapi/flights/{ident}/track",
-                headers={'x-apikey': api_key},
-                timeout=4
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                positions = data.get('positions', [])
-                for p in positions:
-                    if p.get('latitude') is not None and p.get('longitude') is not None:
-                        points.append({
-                            'lat': float(p['latitude']),
-                            'lon': float(p['longitude']),
-                            'alt': p.get('altitude'),
-                            'spd': p.get('groundspeed'),
-                            'timestamp': p.get('timestamp')
-                        })
+            ident = flight['flight_number'].replace(' ', '')
+            fa_flight_id = None
+            try:
+                start_window, end_window = build_aeroapi_unknown_timezone_window(flight['date'])
+                raw_flights = fetch_aeroapi_data(ident, start_window, end_window)
+            except ValueError:
+                raw_flights = []
+            if raw_flights:
+                origin_codes = {flight['origin_code']} if flight.get('origin_code') else set()
+                dest_codes = {flight['dest_code']} if flight.get('dest_code') else set()
+                selection = select_aeroapi_candidate(
+                    raw_flights, flight['date'], None,
+                    origin_codes=origin_codes, dest_codes=dest_codes,
+                )
+                match = selection.get('match') if not selection.get('ambiguous') else None
+                if match:
+                    fa_flight_id = match.get('fa_flight_id')
+
+            if fa_flight_id:
+                resp = requests.get(
+                    f"https://aeroapi.flightaware.com/aeroapi/flights/{fa_flight_id}/track",
+                    headers={'x-apikey': api_key},
+                    timeout=6
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    positions = data.get('positions', [])
+                    for p in positions:
+                        if p.get('latitude') is not None and p.get('longitude') is not None:
+                            points.append({
+                                'lat': float(p['latitude']),
+                                'lon': float(p['longitude']),
+                                'alt': p.get('altitude'),
+                                'spd': p.get('groundspeed'),
+                                'timestamp': p.get('timestamp')
+                            })
         except Exception as e:
             current_app.logger.warning(f"AeroAPI track fetch error for flight {id}: {e}")
 
