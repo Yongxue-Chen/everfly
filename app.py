@@ -2693,7 +2693,11 @@ def get_flight_entity(id):
 
 
 def generate_geodesic_points(lat1, lon1, lat2, lon2, num_points=40):
-    """Generates realistic flight waypoints along airways with SID/STAR turns and waypoint offsets."""
+    """
+    Generates a genuine great-circle path between two points -- used only as a fallback
+    when no real ADS-B track is available. No lateral offsets or altitude/speed profile
+    are fabricated here: it's an honest straight line on the sphere, not a simulated route.
+    """
     lat1_r, lon1_r = math.radians(lat1), math.radians(lon1)
     lat2_r, lon2_r = math.radians(lat2), math.radians(lon2)
 
@@ -2703,13 +2707,7 @@ def generate_geodesic_points(lat1, lon1, lat2, lon2, num_points=40):
     ))
 
     if d < 1e-6:
-        return [{'lat': lat1, 'lon': lon1, 'alt': 0, 'spd': 0}]
-
-    perp_lat = -(lon2 - lon1)
-    perp_lon = (lat2 - lat1)
-    norm = math.sqrt(perp_lat**2 + perp_lon**2) or 1.0
-    perp_lat /= norm
-    perp_lon /= norm
+        return [{'lat': lat1, 'lon': lon1, 'alt': None, 'spd': None}]
 
     points = []
     for i in range(num_points):
@@ -2720,35 +2718,14 @@ def generate_geodesic_points(lat1, lon1, lat2, lon2, num_points=40):
         y = a * math.cos(lat1_r) * math.sin(lon1_r) + b * math.cos(lat2_r) * math.sin(lon2_r)
         z = a * math.sin(lat1_r) + b * math.sin(lat2_r)
 
-        base_lat = math.degrees(math.atan2(z, math.sqrt(x ** 2 + y ** 2)))
-        base_lon = math.degrees(math.atan2(y, x))
-
-        offset = 0.0
-        if 0.05 < f < 0.18:
-            offset = math.sin((f - 0.05) / 0.13 * math.pi) * 0.12
-        elif 0.82 < f < 0.95:
-            offset = math.sin((f - 0.82) / 0.13 * math.pi) * -0.15
-        elif 0.18 <= f <= 0.82:
-            offset = math.sin(f * math.pi * 4) * 0.08 + math.cos(f * math.pi * 7) * 0.05
-
-        lat_i = base_lat + perp_lat * offset
-        lon_i = base_lon + perp_lon * offset
-
-        if f < 0.2:
-            alt = int((f / 0.2) * 35000)
-            spd = int(280 + (f / 0.2) * 560)
-        elif f > 0.8:
-            alt = int(((1 - f) / 0.2) * 35000)
-            spd = int(240 + ((1 - f) / 0.2) * 600)
-        else:
-            alt = 35000 + int(math.sin(f * math.pi * 5) * 400)
-            spd = 870 + int(math.sin(f * math.pi * 3) * 25)
+        lat_i = math.degrees(math.atan2(z, math.sqrt(x ** 2 + y ** 2)))
+        lon_i = math.degrees(math.atan2(y, x))
 
         points.append({
             'lat': round(lat_i, 5),
             'lon': round(lon_i, 5),
-            'alt': alt,
-            'spd': spd
+            'alt': None,
+            'spd': None,
         })
     return points
 
@@ -3168,11 +3145,23 @@ def _decide_aeroapi_strategy(flight, conn, uid, now_utc=None):
             return 'schedules' if departure_utc > future_limit else 'ident'
 
     if origin_tz_name:
+        # We only know the departure *date*, not the exact time, so we can bound the whole
+        # local departure day but can't pinpoint the instant. If that whole day sits on one
+        # side of the 2-day limit we can decide directly; if the limit falls somewhere inside
+        # the day, we genuinely can't tell without the real time -- same as the unknown-tz
+        # case, so resolve it via /schedules first.
         try:
-            build_aeroapi_departure_day_window(f_date, origin_tz_name, now_utc=now_utc)
+            origin_tz = _timezone_or_utc(origin_tz_name)
+            departure_date = dateutil.parser.parse(f_date).date()
+            day_start_utc = origin_tz.localize(datetime.combine(departure_date, time.min)).astimezone(pytz.utc)
+            day_end_utc = day_start_utc + timedelta(days=1)
+        except Exception:
+            return 'schedules_then_ident'
+        if day_end_utc <= future_limit:
             return 'ident'
-        except ValueError:
+        if day_start_utc > future_limit:
             return 'schedules'
+        return 'schedules_then_ident'
 
     return 'schedules_then_ident'
 
