@@ -3112,3 +3112,13 @@ th[onclick] {
     border-top-color: rgba(255, 255, 255, 0.15);
 }
 
+/* Plane Icon Styling */
+.plane-icon-inner {
+    color: #ff4757;
+    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.4));
+    display: inline-block;
+}
+.plane-icon-inner i {
+    filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.9));
+}
+
