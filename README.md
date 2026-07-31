@@ -45,9 +45,9 @@ FLASK_DEBUG=false
 
 MYSQL_HOST=localhost
 MYSQL_PORT=3306
-MYSQL_USER=flightlog
+MYSQL_USER=everfly
 MYSQL_PASSWORD=
-MYSQL_DB=flightlog
+MYSQL_DB=everfly
 
 # Optional: airline logo import and CDN delivery
 IMAGEKIT_PRIVATE_KEY=
@@ -70,16 +70,16 @@ python -c "import secrets; print(secrets.token_hex(32))"
 创建数据库和用户：
 
 ```sql
-CREATE DATABASE flightlog CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'flightlog'@'%' IDENTIFIED BY 'change-this-password';
-GRANT ALL PRIVILEGES ON flightlog.* TO 'flightlog'@'%';
+CREATE DATABASE everfly CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'everfly'@'%' IDENTIFIED BY 'change-this-password';
+GRANT ALL PRIVILEGES ON everfly.* TO 'everfly'@'%';
 FLUSH PRIVILEGES;
 ```
 
 导入表结构：
 
 ```bash
-mysql -h <mysql-host> -u flightlog -p flightlog < schema_mysql.sql
+mysql -h <mysql-host> -u everfly -p everfly < schema_mysql.sql
 ```
 
 当前应用不会在启动时自动创建完整业务表。`schema_mysql.sql` 是数据库结构的来源。
@@ -89,7 +89,7 @@ mysql -h <mysql-host> -u flightlog -p flightlog < schema_mysql.sql
 适用于不使用 Docker、直接在服务器或开发机上运行的情况。
 
 ```bash
-cd /home/ubuntu/FlightLog
+cd /home/ubuntu/everfly
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -114,7 +114,7 @@ http://127.0.0.1:5000
 gunicorn -w 4 -b 127.0.0.1:5000 app:app
 ```
 
-如果用 systemd 管理服务，代码更新或环境变量更新后需要重启对应的 `flightlog` 服务。
+如果用 systemd 管理服务，代码更新或环境变量更新后需要重启对应的 `everfly` 服务。
 
 ## Docker 部署
 
@@ -123,24 +123,24 @@ gunicorn -w 4 -b 127.0.0.1:5000 app:app
 手动构建和运行：
 
 ```bash
-docker build -t flightlog:local .
+docker build -t everfly:local .
 docker run -d \
-  --name flightlog-app \
+  --name everfly-app \
   --restart unless-stopped \
   --env-file .env \
   -p 5000:5000 \
-  flightlog:local
+  everfly:local
 ```
 
 通用 Docker Compose 示例：
 
 ```yaml
 services:
-  flightlog-app:
+  everfly-app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: flightlog-app
+    container_name: everfly-app
     restart: always
     ports:
       - "5000:5000"
@@ -158,24 +158,24 @@ docker compose up -d --build
 
 这个项目可以通过 1Panel 的 Docker Compose 编排部署。
 
-当前服务器上的实际部署信息：
+一个典型的部署布局：
 
-- 源代码目录：`/home/ubuntu/FlightLog`
-- 1Panel Compose 文件：`/opt/1panel/docker/compose/flightlog/docker-compose.yml`
-- Compose 项目名：`flightlog`
-- 容器名：`flightlog-app`
+- 源代码目录：`/home/ubuntu/everfly`
+- 1Panel Compose 文件：`/opt/1panel/docker/compose/everfly/docker-compose.yml`
+- Compose 项目名：`everfly`
+- 容器名：`everfly-app`
 - 端口映射：宿主机 `5000` -> 容器 `5000`
 - 健康检查：`http://127.0.0.1:5000/api/health`
 
-当前 1Panel 编排从本地源码目录构建镜像，核心结构如下。真实密钥和密码应在 1Panel 编排或环境变量中配置，不要写入公开仓库。
+1Panel 编排从本地源码目录构建镜像，核心结构如下。真实密钥和密码应在 `.env` 或 1Panel 编排中配置，不要写入公开仓库。
 
 ```yaml
 services:
-  flightlog-app:
+  everfly-app:
     build:
-      context: /home/ubuntu/FlightLog
+      context: /home/ubuntu/everfly
       dockerfile: Dockerfile
-    container_name: flightlog-app
+    container_name: everfly-app
     restart: always
     ports:
       - "5000:5000"
@@ -186,9 +186,9 @@ services:
       - FLASK_DEBUG=false
       - MYSQL_HOST=<mysql-host>
       - MYSQL_PORT=3306
-      - MYSQL_USER=flightlog
+      - MYSQL_USER=everfly
       - MYSQL_PASSWORD=<mysql-password>
-      - MYSQL_DB=flightlog
+      - MYSQL_DB=everfly
     networks:
       - 1panel-network
 
@@ -199,7 +199,7 @@ networks:
 
 新建 1Panel 部署时：
 
-1. 把源码放到服务器目录，例如 `/home/ubuntu/FlightLog`。
+1. 把源码放到服务器目录，例如 `/home/ubuntu/everfly`。
 2. 创建 MySQL 数据库并导入 `schema_mysql.sql`。
 3. 在 1Panel 中创建 Docker Compose 编排。
 4. 将 `build.context` 指向源码目录。
@@ -208,7 +208,37 @@ networks:
 7. 在 1Panel 中创建反向代理，代理到 `http://127.0.0.1:5000`。
 8. 为反向代理启用 HTTPS。
 
-## 源代码更新后如何更新服务
+## 升级服务（推荐方式）
+
+仓库自带 `deploy.sh`，封装了「拉取代码 → 重建镜像 → 重启容器 → 等待健康检查」的完整流程，失败时会打印日志并给出回滚命令。
+
+```bash
+./deploy.sh            # 部署当前分支最新提交
+./deploy.sh v1.0.0     # 部署指定 tag（生产环境推荐）
+./deploy.sh --rollback # 回滚到上一次部署的版本
+```
+
+生产环境建议**固定在 tag 上**，而不是跟着 `main` 走：这样什么时候升级完全由你控制，`main` 上的新提交不会影响正在运行的服务。
+
+发布一个新版本：
+
+```bash
+git tag -a v1.1.0 -m "描述这次发布的内容"
+git push origin v1.1.0
+./deploy.sh v1.1.0
+```
+
+脚本的路径和名称通过环境变量配置，默认值适用于「compose 文件就在源码目录」的情况。如果 compose 文件在别处（例如 1Panel 的编排目录），这样调用：
+
+```bash
+EVERFLY_COMPOSE_FILE=/opt/1panel/docker/compose/everfly/docker-compose.yml \
+EVERFLY_COMPOSE_PROJECT=everfly \
+./deploy.sh v1.1.0
+```
+
+可用变量：`EVERFLY_SRC_DIR`、`EVERFLY_COMPOSE_FILE`、`EVERFLY_COMPOSE_PROJECT`、`EVERFLY_CONTAINER`、`EVERFLY_HEALTH_URL`、`EVERFLY_HEALTH_TIMEOUT`。
+
+## 源代码更新后如何更新服务（手动方式）
 
 不同变更需要不同更新方式。更新前建议先确认数据库已有备份。
 
@@ -217,9 +247,9 @@ networks:
 本地非容器部署：
 
 ```bash
-cd /home/ubuntu/FlightLog
+cd /home/ubuntu/everfly
 git pull
-sudo systemctl restart flightlog
+sudo systemctl restart everfly
 ```
 
 如果不是 systemd 管理，而是手动启动的进程，需要停止旧进程后重新启动。
@@ -227,8 +257,8 @@ sudo systemctl restart flightlog
 Docker Compose 或 1Panel Compose 部署：
 
 ```bash
-cd /opt/1panel/docker/compose/flightlog
-git -C /home/ubuntu/FlightLog pull
+cd /opt/1panel/docker/compose/everfly
+git -C /home/ubuntu/everfly pull
 docker compose up -d --build
 ```
 
@@ -239,17 +269,17 @@ docker compose up -d --build
 如果 `requirements.txt` 有变化，本地部署需要重新安装依赖：
 
 ```bash
-cd /home/ubuntu/FlightLog
+cd /home/ubuntu/everfly
 source venv/bin/activate
 pip install -r requirements.txt
-sudo systemctl restart flightlog
+sudo systemctl restart everfly
 ```
 
 Docker 或 1Panel Compose 部署需要重建镜像：
 
 ```bash
-cd /opt/1panel/docker/compose/flightlog
-git -C /home/ubuntu/FlightLog pull
+cd /opt/1panel/docker/compose/everfly
+git -C /home/ubuntu/everfly pull
 docker compose build --no-cache
 docker compose up -d
 ```
@@ -259,13 +289,13 @@ docker compose up -d
 本地部署：
 
 ```bash
-sudo systemctl restart flightlog
+sudo systemctl restart everfly
 ```
 
 Docker 或 1Panel Compose 部署：
 
 ```bash
-cd /opt/1panel/docker/compose/flightlog
+cd /opt/1panel/docker/compose/everfly
 docker compose up -d
 ```
 
@@ -282,7 +312,7 @@ docker compose up -d --force-recreate
 全新数据库可以直接导入：
 
 ```bash
-mysql -h <mysql-host> -u flightlog -p flightlog < schema_mysql.sql
+mysql -h <mysql-host> -u everfly -p everfly < schema_mysql.sql
 ```
 
 已有数据库不要直接重复导入整份 schema。应根据变更编写明确的 `ALTER TABLE` 迁移语句，再手动执行。
@@ -300,20 +330,20 @@ curl -i http://127.0.0.1:5000/api/health
 查看容器日志：
 
 ```bash
-docker logs --tail 100 flightlog-app
+docker logs --tail 100 everfly-app
 ```
 
 查看 Compose 日志：
 
 ```bash
-cd /opt/1panel/docker/compose/flightlog
+cd /opt/1panel/docker/compose/everfly
 docker compose logs -f --tail=100
 ```
 
 查看容器状态：
 
 ```bash
-docker ps --filter name=flightlog-app
+docker ps --filter name=everfly-app
 ```
 
 ## 安全和维护建议
@@ -322,7 +352,7 @@ docker ps --filter name=flightlog-app
 - 生产访问建议走 HTTPS 反向代理。
 - 不要把 `MASTER_SECRET_KEY`、`FLASK_SECRET_KEY`、数据库密码、邀请码提交到 Git。
 - 当前仓库历史中曾包含敏感信息；如果要公开仓库，需先轮换所有相关密钥，并清理或重建 Git 历史。
-- 更新服务前先备份 MySQL 的 `flightlog` 数据库。
+- 更新服务前先备份 MySQL 的 `everfly` 数据库。
 - `MASTER_SECRET_KEY` 丢失或更换后，用户保存过的 FlightAware API Key 需要重新录入。
 - 如果服务始终通过 HTTPS 访问，可以在 `app.py` 中启用安全 Cookie：
 
@@ -337,7 +367,7 @@ Use `docker-compose.example.yml` as a portable starting point and keep real cred
 After configuring `IMAGEKIT_PRIVATE_KEY` and `IMAGEKIT_URL_ENDPOINT`, rebuild the service so the environment is loaded, then synchronize missing airline logos:
 
 ```bash
-docker exec flightlog-app python scripts/sync_airline_logos.py
+docker exec everfly-app python scripts/sync_airline_logos.py
 ```
 
 The synchronization is idempotent and skips airlines that already have a `logo_url`. Use `--force` only when intentionally replacing all logo references.

@@ -36,3 +36,6 @@ node_modules/
 
 # Internal planning/spec notes (kept locally, not published)
 docs/superpowers/
+
+# deploy state
+.deploy-last-ref

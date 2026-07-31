@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+#
+# everfly deployment helper.
+#
+# Usage:
+#   ./deploy.sh              # deploy the latest commit on the current branch
+#   ./deploy.sh v1.2.0       # deploy a specific tag (recommended for production)
+#   ./deploy.sh --rollback   # redeploy the previously deployed ref
+#
+# Configuration (override via environment variables):
+#   EVERFLY_SRC_DIR          source checkout            (default: this script's directory)
+#   EVERFLY_COMPOSE_FILE     compose file to drive      (default: $EVERFLY_SRC_DIR/docker-compose.yml)
+#   EVERFLY_COMPOSE_PROJECT  compose project name       (default: everfly)
+#   EVERFLY_CONTAINER        container name             (default: everfly-app)
+#   EVERFLY_HEALTH_URL       health endpoint            (default: http://127.0.0.1:5000/api/health)
+#   EVERFLY_HEALTH_TIMEOUT   seconds to wait for health (default: 120)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SRC_DIR="${EVERFLY_SRC_DIR:-$SCRIPT_DIR}"
+COMPOSE_FILE="${EVERFLY_COMPOSE_FILE:-$SRC_DIR/docker-compose.yml}"
+COMPOSE_PROJECT="${EVERFLY_COMPOSE_PROJECT:-everfly}"
+CONTAINER="${EVERFLY_CONTAINER:-everfly-app}"
+HEALTH_URL="${EVERFLY_HEALTH_URL:-http://127.0.0.1:5000/api/health}"
+HEALTH_TIMEOUT="${EVERFLY_HEALTH_TIMEOUT:-120}"
+STATE_FILE="$SRC_DIR/.deploy-last-ref"
+
+log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m warn:\033[0m %s\n' "$*" >&2; }
+die()  { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+compose() {
+  docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" "$@"
+}
+
+[ -f "$COMPOSE_FILE" ] || die "compose file not found: $COMPOSE_FILE"
+command -v docker >/dev/null || die "docker not found in PATH"
+
+TARGET="${1:-}"
+if [ "$TARGET" = "--rollback" ]; then
+  [ -f "$STATE_FILE" ] || die "no previous deploy recorded in $STATE_FILE"
+  TARGET="$(cat "$STATE_FILE")"
+  log "rolling back to $TARGET"
+fi
+
+# --- 1. Refuse to deploy on top of uncommitted work ---------------------------
+if [ -n "$(git -C "$SRC_DIR" status --porcelain)" ]; then
+  die "working tree at $SRC_DIR is dirty. Commit or stash before deploying."
+fi
+
+PREVIOUS_REF="$(git -C "$SRC_DIR" rev-parse HEAD)"
+
+# --- 2. Fetch and check out the requested ref --------------------------------
+log "fetching from origin"
+git -C "$SRC_DIR" fetch --tags --prune origin
+
+if [ -n "$TARGET" ]; then
+  git -C "$SRC_DIR" rev-parse --verify "$TARGET^{commit}" >/dev/null 2>&1 \
+    || die "ref not found: $TARGET"
+  log "checking out $TARGET"
+  git -C "$SRC_DIR" checkout --quiet --detach "$TARGET"
+else
+  BRANCH="$(git -C "$SRC_DIR" rev-parse --abbrev-ref HEAD)"
+  [ "$BRANCH" != "HEAD" ] || die "detached HEAD; pass an explicit tag or branch"
+  log "fast-forwarding $BRANCH"
+  git -C "$SRC_DIR" pull --ff-only origin "$BRANCH"
+fi
+
+NEW_REF="$(git -C "$SRC_DIR" rev-parse HEAD)"
+log "deploying $(git -C "$SRC_DIR" describe --tags --always) ($(echo "$NEW_REF" | cut -c1-8))"
+
+if [ "$NEW_REF" = "$PREVIOUS_REF" ]; then
+  warn "already at this revision; rebuilding anyway"
+fi
+
+# --- 3. Build and start ------------------------------------------------------
+log "building image"
+compose build
+
+log "starting container"
+compose up -d
+
+# --- 4. Wait for health ------------------------------------------------------
+log "waiting for health (timeout ${HEALTH_TIMEOUT}s)"
+deadline=$(( $(date +%s) + HEALTH_TIMEOUT ))
+healthy=0
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  state="$(docker inspect "$CONTAINER" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' 2>/dev/null || echo missing)"
+  case "$state" in
+    healthy) healthy=1; break ;;
+    none)
+      # No healthcheck defined; fall back to probing the endpoint directly.
+      if curl -fsS -o /dev/null --max-time 5 "$HEALTH_URL" 2>/dev/null; then healthy=1; break; fi
+      ;;
+    unhealthy) break ;;
+  esac
+  sleep 3
+done
+
+if [ "$healthy" != "1" ]; then
+  warn "container did not become healthy"
+  docker logs "$CONTAINER" --tail 40 2>&1 || true
+  echo
+  die "deploy failed. Roll back with: $0 $PREVIOUS_REF"
+fi
+
+echo "$PREVIOUS_REF" > "$STATE_FILE"
+log "deploy OK — $(curl -fsS --max-time 5 "$HEALTH_URL" 2>/dev/null || echo 'healthy')"
