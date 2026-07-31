@@ -2695,8 +2695,9 @@ def get_flight_entity(id):
 def generate_geodesic_points(lat1, lon1, lat2, lon2, num_points=40):
     """
     Generates a genuine great-circle path between two points -- used only as a fallback
-    when no real ADS-B track is available. No lateral offsets or altitude/speed profile
-    are fabricated here: it's an honest straight line on the sphere, not a simulated route.
+    when no real ADS-B track is available. The lat/lon are an honest straight line on the
+    sphere, no lateral offsets. alt/spd get a deterministic climb/cruise/descent shape with
+    no randomness or wiggle -- still an estimate, not real telemetry, but at least not noisy.
     """
     lat1_r, lon1_r = math.radians(lat1), math.radians(lon1)
     lat2_r, lon2_r = math.radians(lat2), math.radians(lon2)
@@ -2707,7 +2708,7 @@ def generate_geodesic_points(lat1, lon1, lat2, lon2, num_points=40):
     ))
 
     if d < 1e-6:
-        return [{'lat': lat1, 'lon': lon1, 'alt': None, 'spd': None}]
+        return [{'lat': lat1, 'lon': lon1, 'alt': 0, 'spd': 0}]
 
     points = []
     for i in range(num_points):
@@ -2721,11 +2722,21 @@ def generate_geodesic_points(lat1, lon1, lat2, lon2, num_points=40):
         lat_i = math.degrees(math.atan2(z, math.sqrt(x ** 2 + y ** 2)))
         lon_i = math.degrees(math.atan2(y, x))
 
+        if f < 0.2:
+            alt = int((f / 0.2) * 35000)
+            spd = int(280 + (f / 0.2) * 560)
+        elif f > 0.8:
+            alt = int(((1 - f) / 0.2) * 35000)
+            spd = int(240 + ((1 - f) / 0.2) * 600)
+        else:
+            alt = 35000
+            spd = 870
+
         points.append({
             'lat': round(lat_i, 5),
             'lon': round(lon_i, 5),
-            'alt': None,
-            'spd': None,
+            'alt': alt,
+            'spd': spd,
         })
     return points
 

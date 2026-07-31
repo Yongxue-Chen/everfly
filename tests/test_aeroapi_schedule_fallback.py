@@ -149,10 +149,21 @@ class GenerateGeodesicPointsTest(unittest.TestCase):
         midpoint = points[20]
         self.assertAlmostEqual(midpoint['lat'], expected_lat, places=3)
         self.assertAlmostEqual(midpoint['lon'], expected_lon, places=3)
-        # No fabricated altitude/speed for a fallback path -- we have no real data for it.
-        for p in points:
-            self.assertIsNone(p['alt'])
-            self.assertIsNone(p['spd'])
+
+    def test_cruise_alt_and_speed_are_flat_not_wiggled(self):
+        # The middle (cruise) portion must be a flat constant -- no sine-wave noise.
+        points = generate_geodesic_points(51.4700, -0.4543, 40.6413, -73.7781, num_points=41)
+        cruise_points = points[9:33]  # f roughly in (0.2, 0.8)
+        self.assertTrue(all(p['alt'] == 35000 for p in cruise_points))
+        self.assertTrue(all(p['spd'] == 870 for p in cruise_points))
+
+    def test_climb_and_descent_are_monotonic(self):
+        points = generate_geodesic_points(51.4700, -0.4543, 40.6413, -73.7781, num_points=41)
+        alts = [p['alt'] for p in points]
+        climb, descent = alts[:9], alts[33:]
+        self.assertEqual(climb, sorted(climb))
+        self.assertEqual(descent, sorted(descent, reverse=True))
+        self.assertEqual(alts[0], 0)
 
     def test_endpoints_are_exact(self):
         points = generate_geodesic_points(51.4700, -0.4543, 40.6413, -73.7781, num_points=10)
