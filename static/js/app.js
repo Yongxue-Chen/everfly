@@ -891,7 +891,16 @@ function updatePlanePosition(flightId) {
     updateTrackHUD(flightId, alt, spd, pct);
 }
 
-async function focusFlightTrackOnMainMap(flightId) {
+async function renderFocusedFlightTrackOnMap(flightId) {
+    if (!State.map) initMap();
+    if (!State.map) return;
+
+    // Clear existing profile layers
+    if (State.profileLayers) {
+        State.profileLayers.forEach(l => l.remove());
+    }
+    State.profileLayers = [];
+
     let points = (State.cacheTrackPoints && State.cacheTrackPoints[flightId]) || [];
     if (!points || points.length === 0) {
         try {
@@ -902,66 +911,67 @@ async function focusFlightTrackOnMainMap(flightId) {
                 State.cacheTrackPoints[flightId] = points;
             }
         } catch (e) {
-            console.error('Track fetch error for main map focus:', e);
+            console.error('Failed to fetch track points for focus map:', e);
         }
     }
 
+    if (!points || points.length === 0) return;
+
+    const latLngs = points.map(p => [p.lat, p.lon]);
+
+    // Draw focused polyline track
+    const focusedLine = L.polyline(latLngs, {
+        color: '#0284c7',
+        weight: 5,
+        opacity: 0.95
+    }).addTo(State.map);
+    State.profileLayers.push(focusedLine);
+
+    // Draw Start & End markers
+    const startMarker = L.circleMarker(latLngs[0], { radius: 7, color: '#0369a1', fillColor: '#0284c7', fillOpacity: 1 }).addTo(State.map).bindPopup('出发 Departure');
+    const endMarker = L.circleMarker(latLngs[latLngs.length - 1], { radius: 7, color: '#0369a1', fillColor: '#10b981', fillOpacity: 1 }).addTo(State.map).bindPopup('到达 Arrival');
+    State.profileLayers.push(startMarker);
+    State.profileLayers.push(endMarker);
+
+    // Main plane marker on State.map
+    const mainPlaneIcon = L.divIcon({
+        className: 'main-plane-icon',
+        html: `<div style="color:#0284c7;font-size:24px;transform:rotate(45deg);"><i class="fa-solid fa-plane"></i></div>`,
+        iconSize: [26, 26],
+        iconAnchor: [13, 13]
+    });
+    const mainPlaneMarker = L.marker(latLngs[0], { icon: mainPlaneIcon }).addTo(State.map);
+    State.profileLayers.push(mainPlaneMarker);
+
+    if (State.trackAnimState && State.trackAnimState[flightId]) {
+        State.trackAnimState[flightId].mainPlaneMarker = mainPlaneMarker;
+    }
+
+    // Show floating focus banner
+    let banner = document.getElementById('main-map-focused-banner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'main-map-focused-banner';
+        banner.className = 'main-map-focused-banner';
+        const mapContainer = document.getElementById('flight-map');
+        if (mapContainer) mapContainer.appendChild(banner);
+    }
+    const flightNum = State.entityPanelCurrent?.entity?.flight_number || '航班';
+    banner.innerHTML = `<span><i class="fa-solid fa-crosshairs"></i> 正在独占高亮航班 <strong>${escapeHtml(flightNum)}</strong> 的真实航迹</span> <button class="btn-reset-map-focus" onclick="resetMainMapFocus()"><i class="fa-solid fa-xmark"></i> 返回全量地图</button>`;
+    banner.style.display = 'flex';
+
+    invalidateProfileMapSize();
+    setTimeout(() => {
+        invalidateProfileMapSize();
+        if (State.map) State.map.fitBounds(focusedLine.getBounds(), { padding: [60, 60] });
+    }, 150);
+}
+
+async function focusFlightTrackOnMainMap(flightId) {
     State.focusedFlightId = flightId;
     navigateTo('profile');
     closeEntityPanel();
-
-    if (!window.flightMap) return;
-
-    // Clear all other layers from main map
-    window.flightMap.eachLayer(layer => {
-        if (layer instanceof L.Polyline || layer instanceof L.Marker || layer instanceof L.CircleMarker) {
-            window.flightMap.removeLayer(layer);
-        }
-    });
-
-    if (points.length > 0) {
-        const latLngs = points.map(p => [p.lat, p.lon]);
-        window.focusedPolyline = L.polyline(latLngs, {
-            color: '#0284c7',
-            weight: 5,
-            opacity: 0.95
-        }).addTo(window.flightMap);
-
-        // Add Start & End markers
-        L.circleMarker(latLngs[0], { radius: 7, color: '#0369a1', fillColor: '#0284c7', fillOpacity: 1 }).addTo(window.flightMap);
-        L.circleMarker(latLngs[latLngs.length - 1], { radius: 7, color: '#0369a1', fillColor: '#10b981', fillOpacity: 1 }).addTo(window.flightMap);
-
-        // Plane marker on main map
-        const mainPlaneIcon = L.divIcon({
-            className: 'main-plane-icon',
-            html: `<div style="color:#0284c7;font-size:24px;transform:rotate(45deg);"><i class="fa-solid fa-plane"></i></div>`,
-            iconSize: [26, 26],
-            iconAnchor: [13, 13]
-        });
-        window.mainPlaneMarker = L.marker(latLngs[0], { icon: mainPlaneIcon }).addTo(window.flightMap);
-
-        if (State.trackAnimState[flightId]) {
-            State.trackAnimState[flightId].mainPlaneMarker = window.mainPlaneMarker;
-        }
-
-        // Add Floating Top Focus Banner to Main Map
-        let banner = document.getElementById('main-map-focused-banner');
-        if (!banner) {
-            banner = document.createElement('div');
-            banner.id = 'main-map-focused-banner';
-            banner.className = 'main-map-focused-banner';
-            const mapContainer = document.getElementById('flight-map');
-            if (mapContainer) mapContainer.appendChild(banner);
-        }
-        const flightNum = State.entityPanelCurrent?.entity?.flight_number || '航班';
-        banner.innerHTML = `<span><i class="fa-solid fa-crosshairs"></i> 正在独占高亮航班 <strong>${escapeHtml(flightNum)}</strong> 的真实航迹</span> <button class="btn-reset-map-focus" onclick="resetMainMapFocus()"><i class="fa-solid fa-xmark"></i> 返回全量地图</button>`;
-        banner.style.display = 'flex';
-
-        setTimeout(() => {
-            window.flightMap.invalidateSize();
-            window.flightMap.fitBounds(window.focusedPolyline.getBounds(), { padding: [60, 60] });
-        }, 150);
-    }
+    await renderFocusedFlightTrackOnMap(flightId);
 }
 
 function resetMainMapFocus() {
@@ -969,20 +979,7 @@ function resetMainMapFocus() {
     const banner = document.getElementById('main-map-focused-banner');
     if (banner) banner.style.display = 'none';
 
-    if (window.focusedPolyline) {
-        window.flightMap.removeLayer(window.focusedPolyline);
-        window.focusedPolyline = null;
-    }
-    if (window.mainPlaneMarker) {
-        window.flightMap.removeLayer(window.mainPlaneMarker);
-        window.mainPlaneMarker = null;
-    }
-
-    if (State.cache && State.cache.profile) {
-        renderProfileMap(State.cache.profile.flights || []);
-    } else {
-        loadProfile();
-    }
+    refreshProfileMapLayers({ fitBounds: true });
 }
 
 function renderEntityPanel(payload) {
@@ -3655,6 +3652,11 @@ function renderProfileMap(flights, selectedYear) {
 
 function refreshProfileMapLayers({ fitBounds = false } = {}) {
     if (!State.map || !State.profileMapFlights) return;
+
+    if (State.focusedFlightId) {
+        renderFocusedFlightTrackOnMap(State.focusedFlightId);
+        return;
+    }
 
     const selectedYear = State.profileMapSelectedYear;
     const flights = State.profileMapFlights;
