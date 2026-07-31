@@ -3114,8 +3114,8 @@ th[onclick] {
 
 /* Plane Icon Styling */
 .plane-icon-inner {
-    color: #ff4757;
-    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.4));
+    color: #10b981;
+    filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.35));
     display: inline-block;
 }
 .plane-icon-inner i {
