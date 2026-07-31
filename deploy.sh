@@ -34,6 +34,15 @@ compose() {
   docker compose -f "$COMPOSE_FILE" -p "$COMPOSE_PROJECT" "$@"
 }
 
+# Docker usually needs root, but git needs the checkout owner's SSH keys and
+# identity. When invoked as root, drop back to the owner for every git call.
+SRC_OWNER="$(stat -c '%U' "$SRC_DIR")"
+if [ "$(id -u)" = "0" ] && [ "$SRC_OWNER" != "root" ]; then
+  git() { sudo -u "$SRC_OWNER" -H git "$@"; }
+else
+  git() { command git "$@"; }
+fi
+
 [ -f "$COMPOSE_FILE" ] || die "compose file not found: $COMPOSE_FILE"
 command -v docker >/dev/null || die "docker not found in PATH"
 
