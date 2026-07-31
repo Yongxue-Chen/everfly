@@ -17,8 +17,22 @@ env/
 
 # Databases
 *.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+node_modules/
 
 # instance/
 
 # Codex
 .superpowers/
+
+# Internal planning/spec notes (kept locally, not published)
+docs/superpowers/

@@ -1,9 +1,9 @@
 services:
-  flightlog-app:
+  everfly-app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: flightlog-app
+    container_name: everfly-app
     restart: always
     ports:
       - "5000:5000"

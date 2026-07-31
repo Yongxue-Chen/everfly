@@ -53,7 +53,7 @@ class InternalFlightsApiTest(unittest.TestCase):
         self.old_token = os.environ.get("INTERNAL_SERVICE_TOKEN")
         self.old_username = os.environ.get("EVERFLY_INTERNAL_USERNAME")
         os.environ["INTERNAL_SERVICE_TOKEN"] = "shared-secret"
-        os.environ["EVERFLY_INTERNAL_USERNAME"] = "yongxue"
+        os.environ["EVERFLY_INTERNAL_USERNAME"] = "testuser"
         self.old_get_db = database.get_db
         self.fake_conn = FakeConnection()
         database.get_db = lambda: self.fake_conn
@@ -97,7 +97,7 @@ class InternalFlightsApiTest(unittest.TestCase):
             },
         }, response.get_json())
         self.assertEqual(
-            ("SELECT id FROM users WHERE username = ? LIMIT 1", ("yongxue",)),
+            ("SELECT id FROM users WHERE username = ? LIMIT 1", ("testuser",)),
             self.fake_conn.queries[0],
         )
         self.assertEqual(

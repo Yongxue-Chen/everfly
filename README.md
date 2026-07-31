@@ -1,6 +1,6 @@
-# FlightLog
+# everfly
 
-FlightLog 是一个用于记录、管理和可视化个人飞行记录的 Flask Web 应用。当前前端页面展示的产品名是 `everfly`。
+everfly 是一个用于记录、管理和可视化个人飞行记录的 Flask Web 应用。
 
 ## 项目介绍
 

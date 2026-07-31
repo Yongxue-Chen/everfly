@@ -440,7 +440,7 @@ def _normalize_internal_flight_payload(data):
     return {'flight_number': flight_number, 'date': date_value}, None
 
 def _configured_internal_username():
-    return os.environ.get('EVERFLY_INTERNAL_USERNAME', 'yongxue').strip()
+    return os.environ.get('EVERFLY_INTERNAL_USERNAME', '').strip()
 
 def create_internal_flight_record(conn, payload, username):
     cur = conn.execute("SELECT id FROM users WHERE username = ? LIMIT 1", (username,))
