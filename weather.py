@@ -8,6 +8,8 @@ Usage:
     data = fetch_metar("ZBAA")  # returns dict or None
 """
 
+from __future__ import annotations
+
 import os
 import re
 import time
