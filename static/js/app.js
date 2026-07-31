@@ -891,8 +891,21 @@ function updatePlanePosition(flightId) {
     updateTrackHUD(flightId, alt, spd, pct);
 }
 
-function focusFlightTrackOnMainMap(flightId) {
-    const points = (State.cacheTrackPoints && State.cacheTrackPoints[flightId]) || [];
+async function focusFlightTrackOnMainMap(flightId) {
+    let points = (State.cacheTrackPoints && State.cacheTrackPoints[flightId]) || [];
+    if (!points || points.length === 0) {
+        try {
+            const res = await fetch(`/api/flights/${flightId}/track`);
+            if (res.ok) {
+                const data = await res.json();
+                points = data.points || [];
+                State.cacheTrackPoints[flightId] = points;
+            }
+        } catch (e) {
+            console.error('Track fetch error for main map focus:', e);
+        }
+    }
+
     State.focusedFlightId = flightId;
     navigateTo('profile');
     closeEntityPanel();
