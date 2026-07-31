@@ -21,6 +21,7 @@ from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFProtect, CSRFError
 from werkzeug.middleware.proxy_fix import ProxyFix
 from airlines_data import AIRLINES_ICAO_TO_IATA
+import weather
 
 load_dotenv()
 
@@ -2606,7 +2607,9 @@ def get_flight_entity(id):
     uid = g.user['id']
     entity = query_db('''
         SELECT f.*, oa.name AS origin_name, oa.iata_code AS origin_code,
+               oa.icao_code AS origin_icao,
                da.name AS dest_name, da.iata_code AS dest_code,
+               da.icao_code AS dest_icao,
                al.name AS airline_name, al.logo_url AS airline_logo_url,
                al.logo_source_url AS airline_logo_source_url,
                CONCAT(am.manufacturer, ' ', COALESCE(am.name, am.model)) AS aircraft_model
@@ -3344,6 +3347,17 @@ def run_internal_aeroapi_jobs():
     except (TypeError, ValueError):
         limit = 10
     return jsonify({'ok': True, **run_due_aeroapi_jobs(limit=max(1, min(limit, 50)))})
+
+# --- Weather API ---
+
+@app.route('/api/weather/metar/<icao>', methods=['GET'])
+@login_required
+def get_weather_metar(icao):
+    """Return current METAR weather for an airport by ICAO code."""
+    data = weather.fetch_metar(icao)
+    if data is None:
+        return jsonify({'error': 'Weather data unavailable', 'icao': icao.upper()}), 404
+    return jsonify(data)
 
 if __name__ == '__main__':
     debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'

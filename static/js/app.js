@@ -478,13 +478,83 @@ function renderEntityPanel(payload) {
         <button class="entity-related-row" onclick="openEntityPanel('flights', ${Number(f.id)})"><span><b>${escapeHtml(f.flight_number || 'Flight')}</b><small>${escapeHtml(f.date || '')}</small></span><span>${escapeHtml(f.origin_code || '')} → ${escapeHtml(f.dest_code || '')}</span></button>`).join('');
     const relatedAirports = (related.airports || []).map(a => `
         <button class="entity-related-row" onclick="openEntityPanel('airports', ${Number(a.id)})"><span><b>${escapeHtml(a.name)}</b><small>${escapeHtml(a.iata_code || a.icao_code || '')}</small></span></button>`).join('');
+
+    // Weather section placeholder for flights and airports
+    let weatherHtml = '';
+    if (type === 'flights' && (entity.origin_icao || entity.dest_icao)) {
+        weatherHtml = `<section><h3>Weather</h3><div id="weather-panel-container">
+            ${entity.origin_icao ? `<div class="weather-card" id="weather-dep"><div class="weather-card-header"><span class="weather-label">Departure</span><span class="weather-airport">${escapeHtml(entity.origin_code || '')} (${escapeHtml(entity.origin_icao)})</span></div><div class="weather-card-body weather-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div></div>` : ''}
+            ${entity.dest_icao ? `<div class="weather-card" id="weather-arr"><div class="weather-card-header"><span class="weather-label">Arrival</span><span class="weather-airport">${escapeHtml(entity.dest_code || '')} (${escapeHtml(entity.dest_icao)})</span></div><div class="weather-card-body weather-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div></div>` : ''}
+        </div></section>`;
+    } else if (type === 'airports' && entity.icao_code) {
+        weatherHtml = `<section><h3>Current weather</h3><div id="weather-panel-container">
+            <div class="weather-card" id="weather-airport"><div class="weather-card-body weather-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div></div>
+        </div></section>`;
+    }
+
     document.getElementById('entity-panel-body').innerHTML = `
         <section class="entity-hero">${type === 'airlines' ? airlineLogoMarkup(entity.logo_url, entity.logo_source_url, entity.iata_code || entity.icao_code || entity.name, 'detail') : `<div class="entity-mark">${escapeHtml((codes[0] || title || '?').slice(0, 3).toUpperCase())}</div>`}<div class="entity-hero-copy"><h2>${escapeHtml(title)}</h2><p>${codes.map(escapeHtml).join(' · ')}</p><div class="entity-hero-actions"><button class="btn btn-sm btn-primary" onclick="editCurrentEntityPanel()">Edit</button>${type === 'airlines' ? `<button class="btn btn-sm btn-secondary" onclick="manageAirlineLogo(${Number(entity.id)})">Manage logo</button>` : ''}<button class="btn btn-sm action-danger" onclick="deleteCurrentEntityPanel()"><i class="fa-solid fa-trash"></i> Delete</button></div></div></section>
         ${statsHtml ? `<section><h3>Overview</h3><div class="entity-stats">${statsHtml}</div></section>` : ''}
         ${relationshipLinks ? `<section><h3>Connections</h3>${relationshipLinks}</section>` : ''}
+        ${weatherHtml}
         <section><h3>Details</h3><div class="entity-fields">${metadata}</div></section>
         ${relatedAirports ? `<section><h3>Airports</h3>${relatedAirports}</section>` : ''}
         ${relatedFlights ? `<section><h3>Related flights</h3>${relatedFlights}</section>` : ''}`;
+
+    // Fetch weather data after rendering
+    if (type === 'flights') {
+        if (entity.origin_icao) _fetchWeather(entity.origin_icao, 'weather-dep');
+        if (entity.dest_icao) _fetchWeather(entity.dest_icao, 'weather-arr');
+    } else if (type === 'airports' && entity.icao_code) {
+        _fetchWeather(entity.icao_code, 'weather-airport');
+    }
+}
+
+function _fetchWeather(icao, containerId) {
+    fetch(`/api/weather/metar/${encodeURIComponent(icao)}`)
+        .then(r => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+        })
+        .then(data => {
+            const el = document.getElementById(containerId);
+            if (!el) return;
+            const body = el.querySelector('.weather-card-body');
+            if (!body) return;
+            body.classList.remove('weather-loading');
+            body.innerHTML = _renderWeatherBody(data);
+        })
+        .catch(() => {
+            const el = document.getElementById(containerId);
+            if (!el) return;
+            const body = el.querySelector('.weather-card-body');
+            if (!body) return;
+            body.classList.remove('weather-loading');
+            body.innerHTML = '<span class="weather-unavailable">Weather data unavailable</span>';
+        });
+}
+
+function _renderWeatherBody(w) {
+    const temp = w.temperature != null ? `${Math.round(w.temperature)}°C` : '—';
+    const windDir = w.wind_direction != null ? `${Math.round(w.wind_direction)}°` : 'VRB';
+    const windSpd = w.wind_speed != null ? `${Math.round(w.wind_speed)}kt` : '—';
+    const gust = w.wind_gust ? ` G${Math.round(w.wind_gust)}kt` : '';
+    const vis = w.visibility_m != null ? (w.visibility_m >= 9999 ? '10+ km' : `${(w.visibility_m / 1000).toFixed(1)} km`) : '—';
+    const frClass = (w.flight_rules || '').toLowerCase();
+
+    return `
+        <div class="weather-main">
+            <span class="weather-emoji">${escapeHtml(w.condition_emoji || '🌤️')}</span>
+            <span class="weather-temp">${escapeHtml(temp)}</span>
+            <span class="weather-condition">${escapeHtml(w.condition || 'Unknown')}</span>
+        </div>
+        <div class="weather-details">
+            <div class="weather-detail"><i class="fa-solid fa-wind"></i> ${escapeHtml(windDir)} @ ${escapeHtml(windSpd)}${escapeHtml(gust)}</div>
+            <div class="weather-detail"><i class="fa-solid fa-eye"></i> ${escapeHtml(vis)}</div>
+            <div class="weather-detail"><i class="fa-solid fa-gauge-high"></i> ${w.pressure != null ? escapeHtml(Math.round(w.pressure * 33.8639) + ' hPa') : '—'}</div>
+            <div class="weather-detail weather-fr weather-fr-${escapeHtml(frClass)}">${escapeHtml(w.flight_rules_emoji || '')} ${escapeHtml(w.flight_rules || '—')}</div>
+        </div>
+        <details class="weather-raw"><summary>Raw METAR</summary><code>${escapeHtml(w.raw || '—')}</code></details>`;
 }
 
 // --- View Management ---

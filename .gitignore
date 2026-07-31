@@ -47,3 +47,4 @@ deploy.env
 # Kept locally so it is available on the box, but never published.
 AGENTS.md
 CLAUDE.md
+flightaware_api_analysis.md
