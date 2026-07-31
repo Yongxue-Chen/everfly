@@ -590,8 +590,8 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
             </div>
             <div class="flight-track-controls" id="track-controls-${entity.id}" style="display:none;">
                 <div class="track-controls-row">
-                    <button class="track-btn" id="btn-play-${entity.id}" onclick="toggleTrackAnimation(${entity.id})" title="播放/暂停"><i class="fa-solid fa-play"></i></button>
-                    <button class="track-btn" onclick="restartTrackAnimation(${entity.id})" title="重头播放"><i class="fa-solid fa-rotate-left"></i></button>
+                    <button class="track-btn track-btn-labeled" id="btn-play-${entity.id}" onclick="toggleTrackAnimation(${entity.id})" title="播放/暂停"><i class="fa-solid fa-play"></i> <span>播放</span></button>
+                    <button class="track-btn track-btn-labeled" onclick="restartTrackAnimation(${entity.id})" title="重头播放"><i class="fa-solid fa-rotate-left"></i> <span>重放</span></button>
                     <input type="range" class="track-progress-slider" id="slider-${entity.id}" min="0" max="100" value="0" oninput="seekTrackAnimation(${entity.id}, this.value)">
                     <select class="track-speed-select" onchange="setTrackSpeed(${entity.id}, this.value)">
                         <option value="1">1x</option>
@@ -757,10 +757,13 @@ async function loadAndRenderFlightTrack(flightId) {
         L.circleMarker(latLngs[0], { radius: 6, color: '#0369a1', fillColor: '#0284c7', fillOpacity: 1 }).addTo(miniMap);
         L.circleMarker(latLngs[latLngs.length - 1], { radius: 6, color: '#0369a1', fillColor: '#10b981', fillOpacity: 1 }).addTo(miniMap);
 
+        const initialHeading = latLngs.length > 1 ? calculateBearing(latLngs[0][0], latLngs[0][1], latLngs[1][0], latLngs[1][1]) : 45;
+        polyline.bindTooltip(`✈ <strong>航班航轨</strong>`, { sticky: true });
+
         // Create animated plane marker
         const planeIcon = L.divIcon({
-            className: 'mini-plane-icon',
-            html: `<div style="color:#0284c7;font-size:18px;transform:rotate(45deg);"><i class="fa-solid fa-plane"></i></div>`,
+            className: 'mini-plane-icon-wrapper',
+            html: `<div class="plane-icon-inner" style="color:#0284c7;font-size:18px;transition:transform 0.1s linear;transform:rotate(${initialHeading - 45}deg);"><i class="fa-solid fa-plane"></i></div>`,
             iconSize: [20, 20],
             iconAnchor: [10, 10]
         });
@@ -792,6 +795,37 @@ async function loadAndRenderFlightTrack(flightId) {
     }
 }
 
+function calculateBearing(lat1, lon1, lat2, lon2) {
+    const toRad = deg => deg * Math.PI / 180;
+    const toDeg = rad => rad * 180 / Math.PI;
+
+    const φ1 = toRad(lat1), φ2 = toRad(lat2);
+    const Δλ = toRad(lon2 - lon1);
+
+    const y = Math.sin(Δλ) * Math.cos(φ2);
+    const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+    const θ = Math.atan2(y, x);
+
+    return (toDeg(θ) + 360) % 360;
+}
+
+function ensureTrackAnimState(flightId) {
+    State.trackAnimState = State.trackAnimState || {};
+    if (!State.trackAnimState[flightId]) {
+        const points = (State.cacheTrackPoints && State.cacheTrackPoints[flightId]) || [];
+        State.trackAnimState[flightId] = {
+            points,
+            currentIndex: 0,
+            speed: 5,
+            isPlaying: false,
+            animFrame: null,
+            planeMarker: null,
+            mainPlaneMarker: null
+        };
+    }
+    return State.trackAnimState[flightId];
+}
+
 function updateTrackHUD(flightId, alt, spd, pct) {
     const altIds = [`hud-alt-${flightId}`, `main-hud-alt-${flightId}`];
     altIds.forEach(id => {
@@ -816,7 +850,7 @@ function updateTrackHUD(flightId, alt, spd, pct) {
 }
 
 function toggleTrackAnimation(flightId) {
-    const anim = State.trackAnimState[flightId];
+    const anim = ensureTrackAnimState(flightId);
     if (!anim) return;
     if (anim.isPlaying) {
         pauseTrackAnimation(flightId);
@@ -826,14 +860,18 @@ function toggleTrackAnimation(flightId) {
 }
 
 function startTrackAnimation(flightId) {
-    const anim = State.trackAnimState[flightId];
-    if (!anim || !anim.points.length) return;
+    const anim = ensureTrackAnimState(flightId);
+    if (!anim || !anim.points || !anim.points.length) return;
     anim.isPlaying = true;
-    const btns = [`btn-play-${flightId}`, `main-btn-play-${flightId}`];
-    btns.forEach(id => {
-        const btn = document.getElementById(id);
-        if (btn) btn.innerHTML = '<i class="fa-solid fa-pause"></i>';
-    });
+
+    const updatePlayBtns = (iconHtml, textStr) => {
+        const btns = [`btn-play-${flightId}`, `main-btn-play-${flightId}`];
+        btns.forEach(id => {
+            const btn = document.getElementById(id);
+            if (btn) btn.innerHTML = `${iconHtml} <span>${textStr}</span>`;
+        });
+    };
+    updatePlayBtns('<i class="fa-solid fa-pause"></i>', '暂停');
 
     function step() {
         if (!anim.isPlaying) return;
@@ -851,19 +889,20 @@ function startTrackAnimation(flightId) {
 }
 
 function pauseTrackAnimation(flightId) {
-    const anim = State.trackAnimState[flightId];
+    const anim = ensureTrackAnimState(flightId);
     if (!anim) return;
     anim.isPlaying = false;
     if (anim.animFrame) cancelAnimationFrame(anim.animFrame);
+
     const btns = [`btn-play-${flightId}`, `main-btn-play-${flightId}`];
     btns.forEach(id => {
         const btn = document.getElementById(id);
-        if (btn) btn.innerHTML = '<i class="fa-solid fa-play"></i>';
+        if (btn) btn.innerHTML = '<i class="fa-solid fa-play"></i> <span>播放</span>';
     });
 }
 
 function restartTrackAnimation(flightId) {
-    const anim = State.trackAnimState[flightId];
+    const anim = ensureTrackAnimState(flightId);
     if (!anim) return;
     anim.currentIndex = 0;
     updatePlanePosition(flightId);
@@ -871,21 +910,22 @@ function restartTrackAnimation(flightId) {
 }
 
 function setTrackSpeed(flightId, speedVal) {
-    const anim = State.trackAnimState[flightId];
+    const anim = ensureTrackAnimState(flightId);
     if (anim) anim.speed = parseFloat(speedVal) || 1;
 }
 
 function seekTrackAnimation(flightId, percent) {
-    const anim = State.trackAnimState[flightId];
-    if (!anim || !anim.points.length) return;
+    const anim = ensureTrackAnimState(flightId);
+    if (!anim || !anim.points || !anim.points.length) return;
     const idx = (parseFloat(percent) / 100) * (anim.points.length - 1);
     anim.currentIndex = idx;
     updatePlanePosition(flightId);
 }
 
 function updatePlanePosition(flightId) {
-    const anim = State.trackAnimState[flightId];
-    if (!anim || !anim.points.length) return;
+    const anim = ensureTrackAnimState(flightId);
+    if (!anim || !anim.points || !anim.points.length) return;
+
     const idx = Math.min(Math.floor(anim.currentIndex), anim.points.length - 1);
     const nextIdx = Math.min(idx + 1, anim.points.length - 1);
     const fraction = anim.currentIndex - idx;
@@ -899,12 +939,25 @@ function updatePlanePosition(flightId) {
     const spd = (p1.spd || 0) + ((p2.spd || 0) - (p1.spd || 0)) * fraction;
     const pct = (anim.currentIndex / (anim.points.length - 1)) * 100;
 
-    if (anim.planeMarker) {
-        anim.planeMarker.setLatLng([lat, lon]);
+    let heading = 45;
+    if (idx < anim.points.length - 1) {
+        heading = calculateBearing(p1.lat, p1.lon, p2.lat, p2.lon);
     }
-    if (anim.mainPlaneMarker) {
-        anim.mainPlaneMarker.setLatLng([lat, lon]);
-    }
+
+    const setMarkerPosAndRotation = (marker) => {
+        if (!marker) return;
+        marker.setLatLng([lat, lon]);
+        const el = marker.getElement();
+        if (el) {
+            const inner = el.querySelector('.plane-icon-inner');
+            if (inner) {
+                inner.style.transform = `rotate(${heading - 45}deg)`;
+            }
+        }
+    };
+
+    setMarkerPosAndRotation(anim.planeMarker);
+    setMarkerPosAndRotation(anim.mainPlaneMarker);
 
     updateTrackHUD(flightId, alt, spd, pct);
 }
@@ -951,8 +1004,8 @@ function buildFocusedMapOverlay(flightId) {
         panel.dataset.flightId = String(flightId);
         panel.innerHTML = `
             <div class="track-controls-row">
-                <button class="track-btn" id="main-btn-play-${flightId}" title="播放/暂停"><i class="fa-solid fa-play"></i></button>
-                <button class="track-btn" id="main-btn-restart-${flightId}" title="重头播放"><i class="fa-solid fa-rotate-left"></i></button>
+                <button class="track-btn track-btn-labeled" id="main-btn-play-${flightId}" title="播放/暂停"><i class="fa-solid fa-play"></i> <span>播放</span></button>
+                <button class="track-btn track-btn-labeled" id="main-btn-restart-${flightId}" title="重头播放"><i class="fa-solid fa-rotate-left"></i> <span>重放</span></button>
                 <input type="range" class="track-progress-slider" id="main-slider-${flightId}" min="0" max="100" value="0">
                 <select class="track-speed-select" id="main-speed-${flightId}">
                     <option value="1">1x</option>
@@ -1016,12 +1069,18 @@ async function renderFocusedFlightTrackOnMap(flightId, options = {}) {
         const latLngs = points.map(p => [p.lat, p.lon]);
         const flightNum = State.entityPanelCurrent?.entity?.flight_number || '航班';
 
-        // Draw focused polyline track with popups
+        // Draw focused polyline track with click popup and hover tooltip
         const focusedLine = L.polyline(latLngs, {
             color: '#0284c7',
             weight: 5,
             opacity: 0.95
         }).addTo(State.map);
+
+        focusedLine.bindTooltip(`✈ <strong>航班 ${escapeHtml(flightNum)}</strong> · 高度 ~10,660m · 870 km/h`, {
+            sticky: true,
+            direction: 'top',
+            offset: [0, -10]
+        });
 
         focusedLine.bindPopup(`
             <div style="font-family:sans-serif;padding:6px;min-width:180px;">
@@ -1042,18 +1101,18 @@ async function renderFocusedFlightTrackOnMap(flightId, options = {}) {
         State.profileLayers.push(endMarker);
 
         // Main plane marker on State.map
+        const initialHeading = latLngs.length > 1 ? calculateBearing(latLngs[0][0], latLngs[0][1], latLngs[1][0], latLngs[1][1]) : 45;
         const mainPlaneIcon = L.divIcon({
-            className: 'main-plane-icon',
-            html: `<div style="color:#0284c7;font-size:24px;transform:rotate(45deg);"><i class="fa-solid fa-plane"></i></div>`,
+            className: 'main-plane-icon-wrapper',
+            html: `<div class="plane-icon-inner" style="color:#0284c7;font-size:24px;transition:transform 0.1s linear;transform:rotate(${initialHeading - 45}deg);"><i class="fa-solid fa-plane"></i></div>`,
             iconSize: [26, 26],
             iconAnchor: [13, 13]
         });
         const mainPlaneMarker = L.marker(latLngs[0], { icon: mainPlaneIcon }).addTo(State.map);
         State.profileLayers.push(mainPlaneMarker);
 
-        if (State.trackAnimState && State.trackAnimState[flightId]) {
-            State.trackAnimState[flightId].mainPlaneMarker = mainPlaneMarker;
-        }
+        const anim = ensureTrackAnimState(flightId);
+        anim.mainPlaneMarker = mainPlaneMarker;
 
         buildFocusedMapOverlay(flightId);
 
