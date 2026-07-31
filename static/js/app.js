@@ -1146,6 +1146,12 @@ async function focusFlightTrackOnMainMap(flightId) {
     State.currentFocusedFlightId = null;
     navigateTo('profile');
     closeEntityPanel();
+
+    const mapPanel = document.querySelector('.journey-map-panel') || document.getElementById('flight-map');
+    if (mapPanel) {
+        mapPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
     await renderFocusedFlightTrackOnMap(flightId, { fitBounds: true });
 }
 
