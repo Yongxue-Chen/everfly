@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push to the same branch makes an in-flight run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 is what the production image runs; 3.12 catches deprecations
+        # early so a base-image bump is not a surprise.
+        python-version: ['3.9', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      # Also the guard that the pins in requirements.txt still resolve on a
+      # clean machine — not just in an already-warm local environment.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Report resolved versions
+        run: pip freeze
+
+      # The suite is stdlib unittest and needs no MySQL. The two secrets below
+      # are throwaway values that only satisfy app.py's import-time checks.
+      - name: Run tests
+        env:
+          FLASK_SECRET_KEY: ci-not-a-real-secret
+          MASTER_SECRET_KEY: yQfOtmNHMhk_0T_Bq0ZyJPBC5nTrwT4GrIaeAt1CexM=
+        run: python -m unittest discover -s tests -v
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: everfly:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # .dockerignore exists specifically to keep .git out of the image.
+      # Assert it, so the leak cannot silently come back.
+      - name: Assert no source history in image
+        run: |
+          if docker run --rm --entrypoint sh everfly:ci -c '[ -d /app/.git ]'; then
+            echo "::error::.git was copied into the image — check .dockerignore"
+            exit 1
+          fi
+          echo "OK: no .git in image"
+          docker run --rm --entrypoint sh everfly:ci -c 'du -sh /app'
+
+      - name: Smoke test the container
+        env:
+          FLASK_SECRET_KEY: ci-not-a-real-secret
+          MASTER_SECRET_KEY: yQfOtmNHMhk_0T_Bq0ZyJPBC5nTrwT4GrIaeAt1CexM=
+        run: |
+          docker run -d --name everfly-ci -p 5000:5000 \
+            -e FLASK_SECRET_KEY="$FLASK_SECRET_KEY" \
+            -e MASTER_SECRET_KEY="$MASTER_SECRET_KEY" \
+            -e FLASK_DEBUG=false \
+            everfly:ci
+
+          # /api/health does not touch the database, so it answers even with no
+          # MySQL reachable. Startup migrations log failures and carry on.
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 3 http://127.0.0.1:5000/api/health; then
+              echo && echo "OK: container healthy after ${i} attempt(s)"
+              docker rm -f everfly-ci >/dev/null
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "::error::container never answered /api/health"
+          docker logs everfly-ci
+          docker rm -f everfly-ci >/dev/null
+          exit 1

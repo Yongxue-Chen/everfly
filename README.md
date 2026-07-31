@@ -1,5 +1,7 @@
 # everfly
 
+[![CI](https://github.com/Yongxue-Chen/everfly/actions/workflows/ci.yml/badge.svg)](https://github.com/Yongxue-Chen/everfly/actions/workflows/ci.yml)
+
 *[中文文档](README.zh-CN.md)*
 
 everfly is a self-hosted Flask web application for recording, managing and visualising your personal flight history.

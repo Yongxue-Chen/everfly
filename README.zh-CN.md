@@ -1,5 +1,7 @@
 # everfly
 
+[![CI](https://github.com/Yongxue-Chen/everfly/actions/workflows/ci.yml/badge.svg)](https://github.com/Yongxue-Chen/everfly/actions/workflows/ci.yml)
+
 *[English](README.md)*
 
 everfly 是一个自托管的 Flask Web 应用，用于记录、管理和可视化个人飞行记录。
