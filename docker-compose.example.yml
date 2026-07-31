@@ -1,24 +1,36 @@
+# Standalone everfly deployment.
+#
+#   cp .env.example .env    # then fill in the required values
+#   docker compose -f docker-compose.example.yml up -d --build
+#
+# This file is deliberately self-contained: it declares no external networks and
+# no external volumes, so it works on a clean Docker host with nothing set up
+# beforehand. You supply only a reachable MySQL server via .env.
+#
+# If MySQL runs on the Docker host itself rather than a separate machine, set
+# MYSQL_HOST=host.docker.internal in .env and uncomment the extra_hosts block.
+#
+# For the reference production deployment — which additionally joins existing
+# shared networks — see docs/DEPLOYMENT.md.
+
 services:
   everfly-app:
     build:
       context: .
       dockerfile: Dockerfile
+    image: everfly:local
     container_name: everfly-app
     restart: always
     ports:
       - "5000:5000"
+    env_file:
+      - .env
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/health', timeout=5)\""]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 20s
-    env_file:
-      - .env
-    networks:
-      - travel-services
-
-networks:
-  travel-services:
-    name: ${TRAVEL_SERVICES_NETWORK:-travel-services}
-    external: true
+    # Uncomment if MySQL listens on the Docker host:
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"

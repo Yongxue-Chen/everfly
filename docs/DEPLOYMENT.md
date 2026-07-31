@@ -81,6 +81,11 @@ services:
     networks:
       1panel-network:
       travel-services:
+        aliases:
+          # Backwards-compatibility alias: everInbox resolves everfly by its
+          # pre-rename name. Removing this breaks that integration silently.
+          # Retire it only after everInbox's FLIGHTLOG_BASE_URL is updated.
+          - flightlog-app
 
 networks:
   1panel-network:
@@ -88,6 +93,12 @@ networks:
   travel-services:
     external: true
 ```
+
+Both networks are `external: true` — they are shared with sibling services and
+are created outside this compose file. `travel-services` in particular is how
+everInbox reaches everfly. The standalone `docker-compose.example.yml` in the
+repository root deliberately declares no networks at all, so that a public user
+can bring everfly up on a clean Docker host; do not reconcile the two.
 
 ## Day-to-day development
 

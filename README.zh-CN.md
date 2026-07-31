@@ -43,7 +43,7 @@ everfly 是一个自托管的 Flask Web 应用，用于记录、管理和可视�
 
 ## 快速开始
 
-需要 Python 3.9+ 和一个可访问的 MySQL 8 服务。生产镜像基于 `python:3.9-slim` 构建。
+需要 Python 3.9+ 和一个可访问的 MySQL 8.0+ 服务（已在 MySQL 9 上验证）。生产镜像基于 `python:3.9-slim` 构建。
 
 ```bash
 git clone https://github.com/Yongxue-Chen/everfly.git
@@ -106,6 +106,8 @@ python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 > **`MASTER_SECRET_KEY` 在各次部署之间必须保持不变。** 它加密着用户的 FlightAware API Key。一旦轮换或丢失，已有密文将无法解密，所有用户都需要重新填写。
+
+`FLASK_SECRET_KEY` 和 `MASTER_SECRET_KEY` 在导入时就会检查——缺少任何一个应用都会拒绝启动。`INVITATION_CODE` 则是 fail closed：未设置时任何提交的邀请码都不可能匹配，注册功能会静默失效。这是安全的默认行为，但很容易被误认为是 bug。
 
 没有 ImageKit 航司 Logo 也能工作 —— 未配置、上传失败或免费额度耗尽时，应用会依次回退到原始 URL 和航司代码占位图。`IMAGEKIT_PRIVATE_KEY` 只保存在服务端，绝不会下发到浏览器。
 

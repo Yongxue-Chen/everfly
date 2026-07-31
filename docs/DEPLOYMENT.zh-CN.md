@@ -73,6 +73,11 @@ services:
     networks:
       1panel-network:
       travel-services:
+        aliases:
+          # 向后兼容别名：everInbox 仍然用改名前的名字解析 everfly。
+          # 删掉这一行会静默破坏该集成。
+          # 只有在 everInbox 的 FLIGHTLOG_BASE_URL 更新之后才能移除。
+          - flightlog-app
 
 networks:
   1panel-network:
@@ -80,6 +85,8 @@ networks:
   travel-services:
     external: true
 ```
+
+两个网络都是 `external: true` —— 它们与兄弟服务共享，在这个 compose 文件之外创建。其中 `travel-services` 正是 everInbox 访问 everfly 的通道。仓库根目录下的 `docker-compose.example.yml` 则刻意不声明任何网络，好让公开用户能在一台干净的 Docker 主机上直接跑起来；不要把两者统一。
 
 ## 日常开发
 

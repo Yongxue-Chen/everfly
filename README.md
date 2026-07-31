@@ -43,8 +43,8 @@ Key files:
 
 ## Quick start
 
-Requires Python 3.9+ and a reachable MySQL 8 server. The production image is
-built on `python:3.9-slim`.
+Requires Python 3.9+ and a reachable MySQL 8.0+ server (tested through MySQL 9).
+The production image is built on `python:3.9-slim`.
 
 ```bash
 git clone https://github.com/Yongxue-Chen/everfly.git
@@ -107,6 +107,8 @@ python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
 > **`MASTER_SECRET_KEY` must stay stable across deployments.** It encrypts users' FlightAware API keys. If you rotate or lose it, existing ciphertexts become undecryptable and every user must re-enter their key.
+
+`FLASK_SECRET_KEY` and `MASTER_SECRET_KEY` are checked at import time — the app refuses to start without them. `INVITATION_CODE` fails closed instead: if it is unset, no submitted code can ever match, so registration is silently disabled. That is the safe default, but it is easy to mistake for a bug.
 
 Airline logos work without ImageKit — the app falls back to the source URL and then to an airline-code placeholder if ImageKit is unconfigured, fails, or is out of quota. `IMAGEKIT_PRIVATE_KEY` is server-side only and never reaches the browser.
 
