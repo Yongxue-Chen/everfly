@@ -2642,8 +2642,8 @@ def get_flight_entity(id):
     return _entity_response('flights', entity)
 
 
-def generate_geodesic_points(lat1, lon1, lat2, lon2, num_points=35):
-    """Generates Great Circle geodesic waypoints with realistic altitude and groundspeed profiles."""
+def generate_geodesic_points(lat1, lon1, lat2, lon2, num_points=40):
+    """Generates realistic flight waypoints along airways with SID/STAR turns and waypoint offsets."""
     lat1_r, lon1_r = math.radians(lat1), math.radians(lon1)
     lat2_r, lon2_r = math.radians(lat2), math.radians(lon2)
 
@@ -2655,6 +2655,12 @@ def generate_geodesic_points(lat1, lon1, lat2, lon2, num_points=35):
     if d < 1e-6:
         return [{'lat': lat1, 'lon': lon1, 'alt': 0, 'spd': 0}]
 
+    perp_lat = -(lon2 - lon1)
+    perp_lon = (lat2 - lat1)
+    norm = math.sqrt(perp_lat**2 + perp_lon**2) or 1.0
+    perp_lat /= norm
+    perp_lon /= norm
+
     points = []
     for i in range(num_points):
         f = i / (num_points - 1)
@@ -2664,18 +2670,29 @@ def generate_geodesic_points(lat1, lon1, lat2, lon2, num_points=35):
         y = a * math.cos(lat1_r) * math.sin(lon1_r) + b * math.cos(lat2_r) * math.sin(lon2_r)
         z = a * math.sin(lat1_r) + b * math.sin(lat2_r)
 
-        lat_i = math.degrees(math.atan2(z, math.sqrt(x ** 2 + y ** 2)))
-        lon_i = math.degrees(math.atan2(y, x))
+        base_lat = math.degrees(math.atan2(z, math.sqrt(x ** 2 + y ** 2)))
+        base_lon = math.degrees(math.atan2(y, x))
+
+        offset = 0.0
+        if 0.05 < f < 0.18:
+            offset = math.sin((f - 0.05) / 0.13 * math.pi) * 0.12
+        elif 0.82 < f < 0.95:
+            offset = math.sin((f - 0.82) / 0.13 * math.pi) * -0.15
+        elif 0.18 <= f <= 0.82:
+            offset = math.sin(f * math.pi * 4) * 0.08 + math.cos(f * math.pi * 7) * 0.05
+
+        lat_i = base_lat + perp_lat * offset
+        lon_i = base_lon + perp_lon * offset
 
         if f < 0.2:
             alt = int((f / 0.2) * 35000)
-            spd = int(300 + (f / 0.2) * 550)
+            spd = int(280 + (f / 0.2) * 560)
         elif f > 0.8:
             alt = int(((1 - f) / 0.2) * 35000)
-            spd = int(250 + ((1 - f) / 0.2) * 600)
+            spd = int(240 + ((1 - f) / 0.2) * 600)
         else:
-            alt = 35000 + int(math.sin(f * math.pi * 5) * 500)
-            spd = 880 + int(math.sin(f * math.pi * 3) * 30)
+            alt = 35000 + int(math.sin(f * math.pi * 5) * 400)
+            spd = 870 + int(math.sin(f * math.pi * 3) * 25)
 
         points.append({
             'lat': round(lat_i, 5),

@@ -3086,3 +3086,25 @@ th[onclick] {
     background: #7dd3fc;
 }
 
+/* Floating Track Controls & HUD Panel on Main Map */
+.main-map-track-panel {
+    position: absolute;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    background: rgba(15, 23, 42, 0.92);
+    color: #ffffff;
+    padding: 12px 18px;
+    border-radius: 16px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(10px);
+    width: 90%;
+    max-width: 460px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+.main-map-track-panel .flight-track-hud {
+    color: #cbd5e1;
+    border-top-color: rgba(255, 255, 255, 0.15);
+}
+
