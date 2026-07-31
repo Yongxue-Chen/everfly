@@ -463,9 +463,161 @@ function entityRelationshipLinks(type, entity) {
     return links.join('');
 }
 
+function renderFlightDetailPanel(entity, stats = {}, related = {}) {
+    const title = entity.flight_number || 'Flight';
+    document.getElementById('entity-panel-title').textContent = 'Flight Details';
+
+    const originCode = entity.origin_code || entity.origin_name || 'DEP';
+    const destCode = entity.dest_code || entity.dest_name || 'ARR';
+    const originName = entity.origin_name || '';
+    const destName = entity.dest_name || '';
+
+    const std = entity.std || entity.dep_time_scheduled || '';
+    const sta = entity.sta || entity.arr_time_scheduled || '';
+    const atd = entity.atd || entity.dep_time_actual || '';
+    const ata = entity.ata || entity.arr_time_actual || '';
+
+    // Duration & Distance
+    const durationMins = entity.duration_actual || entity.duration_scheduled;
+    let durationText = '';
+    if (durationMins) {
+        const hrs = Math.floor(durationMins / 60);
+        const mins = durationMins % 60;
+        durationText = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+    }
+    const distanceText = entity.distance ? `${Number(entity.distance).toLocaleString()} km` : '';
+
+    // Seat & Cabin
+    const seatNo = entity.seat_number ? `Seat ${entity.seat_number}` : '';
+    const seatClass = entity.flight_class || entity.seat_type || '';
+    const seatInfo = [seatNo, seatClass].filter(Boolean).join(' · ');
+
+    // Aircraft & Registration
+    const aircraftModel = entity.aircraft_model || '';
+    const reg = entity.registration ? (entity.registration.toUpperCase().startsWith('B-') ? entity.registration : `B-${entity.registration}`) : '';
+    const aircraftInfo = [aircraftModel, reg].filter(Boolean).join(' · ');
+
+    // Weather container HTML
+    let weatherHtml = '';
+    if (entity.origin_icao || entity.dest_icao) {
+        weatherHtml = `<section><h3>Weather</h3><div id="weather-panel-container">
+            ${entity.origin_icao ? `<div class="weather-card" id="weather-dep"><div class="weather-card-header"><span class="weather-label">Departure</span><span class="weather-airport">${escapeHtml(entity.origin_code || '')} (${escapeHtml(entity.origin_icao)})</span></div><div class="weather-card-body weather-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div></div>` : ''}
+            ${entity.dest_icao ? `<div class="weather-card" id="weather-arr"><div class="weather-card-header"><span class="weather-label">Arrival</span><span class="weather-airport">${escapeHtml(entity.dest_code || '')} (${escapeHtml(entity.dest_icao)})</span></div><div class="weather-card-body weather-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div></div>` : ''}
+        </div></section>`;
+    }
+
+    // Notes
+    let notesHtml = '';
+    if (entity.note && entity.note.trim()) {
+        notesHtml = `<section><div class="flight-notes-card"><div class="flight-notes-title"><i class="fa-solid fa-sticky-note"></i> Note</div><div>${escapeHtml(entity.note)}</div></div></section>`;
+    }
+
+    // Related Connections
+    const relationshipLinks = entityRelationshipLinks('flights', entity);
+    const connectionsHtml = relationshipLinks ? `<section><h3>Connections</h3>${relationshipLinks}</section>` : '';
+
+    const html = `
+        <div class="flight-hero">
+            <div class="flight-hero-brand">
+                ${entity.airline_id ? airlineLogoMarkup(entity.airline_logo_url, entity.airline_logo_source_url, entity.airline_name || title, 'list') : '<div class="entity-mark" style="width:40px;height:40px;border-radius:10px;font-size:0.9rem;"><i class="fa-solid fa-plane"></i></div>'}
+                <div class="flight-hero-main">
+                    <div class="flight-hero-number">${escapeHtml(title)}</div>
+                    <div class="flight-hero-meta">${escapeHtml(entity.airline_name || '')}${entity.date ? ` · ${escapeHtml(entity.date)}` : ''}</div>
+                </div>
+            </div>
+            <div class="flight-hero-actions">
+                <button class="btn btn-sm btn-primary" onclick="editCurrentEntityPanel()"><i class="fa-solid fa-pen"></i> Edit</button>
+                <button class="btn btn-sm action-danger" onclick="deleteCurrentEntityPanel()"><i class="fa-solid fa-trash"></i></button>
+            </div>
+        </div>
+
+        <div class="flight-boarding-pass">
+            <div class="flight-route-banner">
+                <div class="flight-route-point">
+                    <div class="flight-route-code">${escapeHtml(originCode)}</div>
+                    ${originName ? `<div class="flight-route-name" title="${escapeHtml(originName)}">${escapeHtml(originName)}</div>` : ''}
+                </div>
+                <div class="flight-route-mid">
+                    <i class="fa-solid fa-plane flight-route-icon"></i>
+                </div>
+                <div class="flight-route-point">
+                    <div class="flight-route-code">${escapeHtml(destCode)}</div>
+                    ${destName ? `<div class="flight-route-name" title="${escapeHtml(destName)}">${escapeHtml(destName)}</div>` : ''}
+                </div>
+            </div>
+
+            <div class="flight-times-grid">
+                <div class="flight-time-col">
+                    <div class="flight-time-heading">Departure</div>
+                    ${std ? `<div class="flight-time-row"><span class="flight-time-label">STD</span><span class="flight-time-val">${escapeHtml(std)}</span></div>` : ''}
+                    ${atd ? `<div class="flight-time-row"><span class="flight-time-label">ATD</span><span class="flight-time-val">${escapeHtml(atd)}</span></div>` : ''}
+                    ${entity.origin_terminal ? `<div class="flight-gate-badge">T${escapeHtml(entity.origin_terminal)}</div>` : ''}
+                </div>
+                <div class="flight-time-col">
+                    <div class="flight-time-heading">Arrival</div>
+                    ${sta ? `<div class="flight-time-row"><span class="flight-time-label">STA</span><span class="flight-time-val">${escapeHtml(sta)}</span></div>` : ''}
+                    ${ata ? `<div class="flight-time-row"><span class="flight-time-label">ATA</span><span class="flight-time-val">${escapeHtml(ata)}</span></div>` : ''}
+                    ${entity.dest_terminal ? `<div class="flight-gate-badge">T${escapeHtml(entity.dest_terminal)}</div>` : ''}
+                </div>
+            </div>
+
+            ${(durationText || distanceText) ? `
+            <div class="flight-meta-bar">
+                ${durationText ? `<div class="flight-meta-item"><i class="fa-solid fa-clock"></i> ${escapeHtml(durationText)}</div>` : ''}
+                ${distanceText ? `<div class="flight-meta-item"><i class="fa-solid fa-route"></i> ${escapeHtml(distanceText)}</div>` : ''}
+            </div>` : ''}
+        </div>
+
+        ${(seatInfo || aircraftInfo || entity.reason) ? `
+        <div class="flight-details-grid">
+            ${seatInfo ? `
+            <div class="flight-detail-card">
+                <div class="flight-detail-icon"><i class="fa-solid fa-chair"></i></div>
+                <div class="flight-detail-info">
+                    <div class="flight-detail-label">Seat / Cabin</div>
+                    <div class="flight-detail-value" title="${escapeHtml(seatInfo)}">${escapeHtml(seatInfo)}</div>
+                </div>
+            </div>` : ''}
+
+            ${aircraftInfo ? `
+            <div class="flight-detail-card">
+                <div class="flight-detail-icon"><i class="fa-solid fa-plane-up"></i></div>
+                <div class="flight-detail-info">
+                    <div class="flight-detail-label">Aircraft</div>
+                    <div class="flight-detail-value" title="${escapeHtml(aircraftInfo)}">${escapeHtml(aircraftInfo)}</div>
+                </div>
+            </div>` : ''}
+
+            ${entity.reason ? `
+            <div class="flight-detail-card">
+                <div class="flight-detail-icon"><i class="fa-solid fa-compass"></i></div>
+                <div class="flight-detail-info">
+                    <div class="flight-detail-label">Reason</div>
+                    <div class="flight-detail-value" title="${escapeHtml(entity.reason)}">${escapeHtml(entity.reason)}</div>
+                </div>
+            </div>` : ''}
+        </div>` : ''}
+
+        ${weatherHtml}
+        ${notesHtml}
+        ${connectionsHtml}
+    `;
+
+    document.getElementById('entity-panel-body').innerHTML = html;
+
+    // Fetch weather data after rendering
+    if (entity.origin_icao) _fetchWeather(entity.origin_icao, 'weather-dep');
+    if (entity.dest_icao) _fetchWeather(entity.dest_icao, 'weather-arr');
+}
+
 function renderEntityPanel(payload) {
     const { type, entity, stats = {}, related = {} } = payload;
     State.entityPanelCurrent = { type, entity };
+
+    if (type === 'flights') {
+        return renderFlightDetailPanel(entity, stats, related);
+    }
+
     const title = entityDisplayName(type, entity);
     document.getElementById('entity-panel-title').textContent = ENTITY_LABELS[type] || 'Details';
     const codes = [entity.iata_code, entity.icao_code, entity.flight_number].filter(Boolean);
@@ -479,14 +631,9 @@ function renderEntityPanel(payload) {
     const relatedAirports = (related.airports || []).map(a => `
         <button class="entity-related-row" onclick="openEntityPanel('airports', ${Number(a.id)})"><span><b>${escapeHtml(a.name)}</b><small>${escapeHtml(a.iata_code || a.icao_code || '')}</small></span></button>`).join('');
 
-    // Weather section placeholder for flights and airports
+    // Weather section placeholder for airports
     let weatherHtml = '';
-    if (type === 'flights' && (entity.origin_icao || entity.dest_icao)) {
-        weatherHtml = `<section><h3>Weather</h3><div id="weather-panel-container">
-            ${entity.origin_icao ? `<div class="weather-card" id="weather-dep"><div class="weather-card-header"><span class="weather-label">Departure</span><span class="weather-airport">${escapeHtml(entity.origin_code || '')} (${escapeHtml(entity.origin_icao)})</span></div><div class="weather-card-body weather-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div></div>` : ''}
-            ${entity.dest_icao ? `<div class="weather-card" id="weather-arr"><div class="weather-card-header"><span class="weather-label">Arrival</span><span class="weather-airport">${escapeHtml(entity.dest_code || '')} (${escapeHtml(entity.dest_icao)})</span></div><div class="weather-card-body weather-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div></div>` : ''}
-        </div></section>`;
-    } else if (type === 'airports' && entity.icao_code) {
+    if (type === 'airports' && entity.icao_code) {
         weatherHtml = `<section><h3>Current weather</h3><div id="weather-panel-container">
             <div class="weather-card" id="weather-airport"><div class="weather-card-body weather-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading…</div></div>
         </div></section>`;
@@ -502,10 +649,7 @@ function renderEntityPanel(payload) {
         ${relatedFlights ? `<section><h3>Related flights</h3>${relatedFlights}</section>` : ''}`;
 
     // Fetch weather data after rendering
-    if (type === 'flights') {
-        if (entity.origin_icao) _fetchWeather(entity.origin_icao, 'weather-dep');
-        if (entity.dest_icao) _fetchWeather(entity.dest_icao, 'weather-arr');
-    } else if (type === 'airports' && entity.icao_code) {
+    if (type === 'airports' && entity.icao_code) {
         _fetchWeather(entity.icao_code, 'weather-airport');
     }
 }
