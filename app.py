@@ -1984,6 +1984,52 @@ def _get_airport_timezone(conn, airport_id, uid):
     ).fetchone()
     return row[0] if row and row[0] else None
 
+
+def _aeroapi_ident_candidates(flight_number, airline_id, conn, uid):
+    """Return AeroAPI idents in preferred lookup order.
+
+    FlightAware's ``/flights/{ident}`` endpoint is most reliable with an ICAO
+    operator ident (for example ``EZY8844``), while people commonly store the
+    IATA form (``U28844``). Derive the ICAO form from the flight's linked
+    airline and retain the stored value as a safe fallback.
+    """
+    stored_ident = re.sub(r'\s+', '', str(flight_number or '')).upper()
+    candidates = []
+
+    if stored_ident and airline_id:
+        row = conn.execute(
+            "SELECT iata_code, icao_code FROM airlines WHERE id = ? AND user_id = ?",
+            (airline_id, uid),
+        ).fetchone()
+        if row:
+            iata_code = re.sub(r'\s+', '', str(row[0] or '')).upper()
+            icao_code = re.sub(r'\s+', '', str(row[1] or '')).upper()
+            if iata_code and icao_code and stored_ident.startswith(iata_code):
+                suffix = stored_ident[len(iata_code):]
+                if suffix:
+                    candidates.append(f"{icao_code}{suffix}")
+
+    if stored_ident and stored_ident not in candidates:
+        candidates.append(stored_ident)
+    return candidates
+
+
+def _fetch_aeroapi_data_for_flight(flight, conn, uid, start_str, end_str):
+    """Look up a flight using its ICAO ident first, then its stored ident."""
+    last_error = None
+    for ident in _aeroapi_ident_candidates(flight[0], flight[9], conn, uid):
+        try:
+            flights = fetch_aeroapi_data(ident, start_str, end_str)
+        except ValueError as exc:
+            last_error = exc
+            continue
+        if flights:
+            return flights
+
+    if last_error is not None:
+        raise last_error
+    return []
+
 def clean_airport_name(name):
     if not name:
         return name
@@ -2978,7 +3024,9 @@ def _run_ident_update(flight, f_num_clean, f_date, origin_tz_name, conn, uid, fl
         return {'error': str(e)}
 
     try:
-        raw_flights = fetch_aeroapi_data(f_num_clean, start_window, end_window)
+        raw_flights = _fetch_aeroapi_data_for_flight(
+            flight, conn, uid, start_window, end_window
+        )
     except ValueError as e:
         return {'error': str(e)}
     except Exception:
@@ -3380,7 +3428,9 @@ def _resolve_aeroapi_selection_for_flight(flight, conn, uid, selected_candidate_
         start_window, end_window = build_aeroapi_departure_day_window(f_date, origin_tz_name)
     else:
         start_window, end_window = build_aeroapi_unknown_timezone_window(f_date)
-    raw_flights = fetch_aeroapi_data(f_num.replace(' ', ''), start_window, end_window)
+    raw_flights = _fetch_aeroapi_data_for_flight(
+        flight, conn, uid, start_window, end_window
+    )
     if not raw_flights:
         raise ValueError('No data found in AeroAPI')
 
