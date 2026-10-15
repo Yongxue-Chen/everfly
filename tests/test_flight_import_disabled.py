@@ -22,7 +22,7 @@ class FlightImportDisabledTest(unittest.TestCase):
         self.assertNotIn("Update Missing", flights_section)
         self.assertNotIn("openImportFlightsModal()", flights_section)
 
-    def test_dataset_import_csv_entry_remains_visible_but_disabled(self):
+    def test_dataset_import_csv_entry_is_hidden_until_available(self):
         with open(INDEX_TEMPLATE, encoding="utf-8") as fh:
             source = fh.read()
 
@@ -32,8 +32,7 @@ class FlightImportDisabledTest(unittest.TestCase):
             flags=re.DOTALL,
         ).group(0)
 
-        self.assertIn("Import CSV", datasets_section)
-        self.assertIn("disabled", datasets_section)
+        self.assertNotIn("Import CSV", datasets_section)
         self.assertNotIn("openImportModal()", datasets_section)
 
 

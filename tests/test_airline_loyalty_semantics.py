@@ -56,7 +56,7 @@ class AirlineLoyaltySemanticsTest(unittest.TestCase):
         self.assertIn("sensitivity: 'base'", self.js_source)
         self.assertEqual(
             self.js_source.count("return compareDatasetValues(valA, valB, State.sort.dir);"),
-            2,
+            1,
         )
 
 

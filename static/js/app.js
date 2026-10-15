@@ -134,7 +134,9 @@ const State = {
     entityPanelHistory: [],
     journeyCharts: {},
     libraryViewMode: 'table',
-    libraryFilters: {}
+    libraryFilters: {},
+    filter: '',
+    sort: { key: null, dir: 'asc' }
 };
 
 // --- API Client ---
@@ -197,6 +199,44 @@ function escapeHtml(value) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
+}
+
+function showToast(message, type = 'success') {
+    let region = document.getElementById('toast-region');
+    if (!region) {
+        region = document.createElement('div');
+        region.id = 'toast-region';
+        region.className = 'toast-region';
+        region.setAttribute('aria-live', 'polite');
+        region.setAttribute('aria-atomic', 'false');
+        document.body.appendChild(region);
+    }
+    const toast = document.createElement('div');
+    toast.className = `app-toast app-toast-${type}`;
+    toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    const icon = type === 'error' ? 'fa-circle-exclamation' : 'fa-circle-check';
+    toast.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i><span>${escapeHtml(message)}</span>`;
+    region.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('show'));
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 180);
+    }, type === 'error' ? 5200 : 3200);
+}
+
+function setButtonBusy(button, busy, label = 'Working…') {
+    if (!button) return;
+    if (busy) {
+        button.dataset.originalHtml = button.innerHTML;
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        button.innerHTML = `<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i><span>${escapeHtml(label)}</span>`;
+    } else {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        if (button.dataset.originalHtml) button.innerHTML = button.dataset.originalHtml;
+        delete button.dataset.originalHtml;
+    }
 }
 
 function airlineLogoPlaceholder(size = 'list') {
@@ -1484,87 +1524,87 @@ function bindProfileMapMoveHandler() {
 
 // --- Data Loading & Rendering ---
 
-async function loadDataset(datasetKey) {
-    // Normalize keys
+const LIBRARY_ITEM_LABELS = Object.freeze({
+    cities: 'city',
+    airports: 'airport',
+    airlines: 'airline',
+    aircraft_models: 'aircraft'
+});
+
+function libraryItemLabel(datasetKey, capitalize = false) {
+    const label = LIBRARY_ITEM_LABELS[datasetKey] || 'record';
+    return capitalize ? label.charAt(0).toUpperCase() + label.slice(1) : label;
+}
+
+function setLibraryLoading(loading) {
+    const table = document.getElementById('dataset-table');
+    const toolbar = document.querySelector('.library-toolbar');
+    const status = document.getElementById('dataset-results-status');
+    if (table) table.setAttribute('aria-busy', String(loading));
+    if (toolbar) toolbar.classList.toggle('is-loading', loading);
+    if (loading && status) status.textContent = 'Loading records…';
+}
+
+function updateLibraryControlLabels(datasetKey) {
+    const itemLabel = LIBRARY_ITEM_LABELS[datasetKey] || 'record';
+    const button = document.getElementById('dataset-add-button');
+    if (button) button.querySelector('span').textContent = `Add ${itemLabel}`;
+    const search = document.getElementById('dataset-search');
+    if (!search) return;
+    const placeholders = {
+        cities: 'Search city, country or continent',
+        airports: 'Search airport, IATA, ICAO or city',
+        airlines: 'Search airline, IATA, ICAO or alliance',
+        aircraft_models: 'Search manufacturer, model or series'
+    };
+    search.placeholder = placeholders[datasetKey] || 'Search records';
+}
+
+async function loadDataset(datasetKey, { resetControls = null } = {}) {
     if (datasetKey === 'aircraft') datasetKey = 'aircraft_models';
-
+    const switchingDataset = State.currentDataset !== datasetKey;
     State.currentDataset = datasetKey;
-
-    // Update Tabs
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    // Find button by onclick content is hacky but works for now
-    const tabs = document.querySelectorAll('.tab-btn');
-    if (datasetKey === 'cities') tabs[0].classList.add('active');
-    if (datasetKey === 'airports') tabs[1].classList.add('active');
-    if (datasetKey === 'airlines') tabs[2].classList.add('active');
-    if (datasetKey === 'aircraft_models') tabs[3].classList.add('active');
-
     const config = DATASETS[datasetKey];
     if (!config) return;
+    const shouldReset = resetControls ?? switchingDataset;
+    setLibraryLoading(true);
+    updateLibraryControlLabels(datasetKey);
+    try {
+        const data = await API.get(config.endpoint);
+        if (!Array.isArray(data)) throw new Error(data?.error || `${config.label} could not be loaded.`);
+        State.cache[datasetKey] = data;
 
-    // Fetch data
-    const data = await API.get(config.endpoint);
-    State.cache[datasetKey] = data; // Cache for lookups
-
-    // Fetch dependencies for lookups and overview counts.
-    if (datasetKey === 'airports') await API.get('cities').then(d => State.cache.cities = d);
-    await Promise.all(Object.entries(DATASETS).map(async ([key, dataset]) => {
-        if (State.cache[key]?.length || key === datasetKey) return;
-        try {
-            State.cache[key] = await API.get(dataset.endpoint);
-        } catch (e) {
-            console.warn(`Failed to load ${key} overview`, e);
-        }
-    }));
-
-    // Reset sort/filter on new dataset load
-    State.filter = '';
-    State.sort = { key: null, dir: 'asc' };
-    State.libraryFilters = {};
-    const searchInput = document.getElementById('dataset-search');
-    if (searchInput) {
-        searchInput.value = '';
-        if (datasetKey === 'cities') {
-            searchInput.placeholder = 'Search city, country, continent...';
-        } else if (datasetKey === 'airports') {
-            searchInput.placeholder = 'Search airport, IATA, ICAO, city...';
-        } else if (datasetKey === 'airlines') {
-            searchInput.placeholder = 'Search airline, IATA, ICAO...';
-        } else if (datasetKey === 'aircraft_models') {
-            searchInput.placeholder = 'Search manufacturer, model, series...';
-        } else {
-            searchInput.placeholder = 'Search...';
-        }
-    }
-
-    // --- Dynamic Toolbar Buttons ---
-    const dynamicContainer = document.getElementById('dataset-dynamic-actions');
-    if (dynamicContainer) {
-        dynamicContainer.innerHTML = '';
-        const addDisabledAutoFillButton = (html) => {
-            const btn = document.createElement('button');
-            btn.className = 'btn btn-sm btn-info';
-            btn.innerHTML = html;
-            btn.disabled = true;
-            btn.title = 'Auto-fill is currently disabled';
-            btn.style.opacity = '0.5';
-            btn.style.cursor = 'not-allowed';
-            dynamicContainer.appendChild(btn);
-        };
         if (datasetKey === 'airports') {
-            addDisabledAutoFillButton('<i class="fas fa-magic"></i> Auto-Fill');
+            const cities = await API.get('cities');
+            if (Array.isArray(cities)) State.cache.cities = cities;
         }
-        if (datasetKey === 'cities') {
-            addDisabledAutoFillButton('<i class="fas fa-magic"></i> Auto-Fill Codes');
-        }
-        if (datasetKey === 'airlines') {
-            addDisabledAutoFillButton('<i class="fas fa-magic"></i> Auto-Fill IATA');
-        }
-    }
+        await Promise.all(Object.entries(DATASETS).map(async ([key, dataset]) => {
+            if (State.cache[key]?.length || key === datasetKey) return;
+            try {
+                const rows = await API.get(dataset.endpoint);
+                if (Array.isArray(rows)) State.cache[key] = rows;
+            } catch (error) {
+                console.warn(`Failed to load ${key} overview`, error);
+            }
+        }));
 
-    renderLibraryFilters(datasetKey);
-    renderDatasetTable(config, data);
-    renderLibraryOverview();
+        if (shouldReset) {
+            State.filter = '';
+            State.sort = { key: null, dir: 'asc' };
+            State.libraryFilters = {};
+            const search = document.getElementById('dataset-search');
+            if (search) search.value = '';
+        }
+        renderLibraryFilters(datasetKey);
+        renderDatasetTable(config, data);
+        renderLibraryOverview();
+    } catch (error) {
+        State.cache[datasetKey] = [];
+        renderLibraryError(error?.message || `${config.label} could not be loaded.`);
+        renderLibraryOverview();
+    } finally {
+        setLibraryLoading(false);
+    }
 }
 
 function switchDatasetTab(key) {
@@ -1572,9 +1612,19 @@ function switchDatasetTab(key) {
 }
 
 function filterDataset() {
-    State.filter = document.getElementById('dataset-search').value.toLowerCase();
+    State.filter = document.getElementById('dataset-search').value.trim().toLowerCase();
     const config = DATASETS[State.currentDataset];
     renderDatasetTable(config, State.cache[State.currentDataset]);
+}
+
+function resetLibraryFilters() {
+    State.filter = '';
+    State.libraryFilters = {};
+    const search = document.getElementById('dataset-search');
+    if (search) search.value = '';
+    renderLibraryFilters(State.currentDataset);
+    renderDatasetTable(DATASETS[State.currentDataset], State.cache[State.currentDataset] || []);
+    search?.focus();
 }
 
 async function clearCurrentDataset() {
@@ -1627,62 +1677,23 @@ function compareDatasetValues(valA, valB, direction = 'asc') {
     return direction === 'asc' ? comparison : -comparison;
 }
 
-function getProcessedDatasetData(config, data) {
-    let processedData = [...data];
-
-    // 1. Filter (Search)
-    if (State.filter) {
-        const filterVal = State.filter.toLowerCase();
-        processedData = processedData.filter(item => {
-            return Object.values(item).some(val =>
-                String(val).toLowerCase().includes(filterVal)
-            );
-        });
-    }
-
-    // 2. Composite Filter (from UI badges/selects)
-    if (State.libraryFilters) {
-        Object.entries(State.libraryFilters).forEach(([key, value]) => {
-            if (value) {
-                processedData = processedData.filter(item => String(item[key]) === String(value));
-            }
-        });
-    }
-
-    // 3. Sort
-    if (State.sort.key) {
-        processedData.sort((a, b) => {
-            let valA = a[State.sort.key];
-            let valB = b[State.sort.key];
-
-            const colDef = config.columns.find(c => c.key === State.sort.key);
-            if (colDef && colDef.type === 'lookup' && State.cache[colDef.lookup]) {
-                const lookupA = State.cache[colDef.lookup].find(i => i.id === valA);
-                const lookupB = State.cache[colDef.lookup].find(i => i.id === valB);
-                valA = lookupA ? lookupA[colDef.display] : valA;
-                valB = lookupB ? lookupB[colDef.display] : valB;
-            }
-
-            return compareDatasetValues(valA, valB, State.sort.dir);
-        });
-    }
-
-    return processedData;
-}
-
 function switchLibraryView(mode) {
-    State.libraryViewMode = mode;
+    State.libraryViewMode = mode === 'card' ? 'card' : 'table';
     
     // Update view toggle button classes
     const btnTable = document.getElementById('btn-view-table');
     const btnCard = document.getElementById('btn-view-card');
     if (btnTable && btnCard) {
-        if (mode === 'table') {
+        if (State.libraryViewMode === 'table') {
             btnTable.classList.add('active');
             btnCard.classList.remove('active');
+            btnTable.setAttribute('aria-pressed', 'true');
+            btnCard.setAttribute('aria-pressed', 'false');
         } else {
             btnCard.classList.add('active');
             btnTable.classList.remove('active');
+            btnCard.setAttribute('aria-pressed', 'true');
+            btnTable.setAttribute('aria-pressed', 'false');
         }
     }
     
@@ -1691,17 +1702,47 @@ function switchLibraryView(mode) {
     renderDatasetTable(config, data);
 }
 
-function renderDatasetCards(config, data) {
+function updateLibraryResults(visible, total) {
+    const filtered = Boolean(State.filter || Object.values(State.libraryFilters || {}).some(Boolean));
+    const status = document.getElementById('dataset-results-status');
+    const reset = document.getElementById('dataset-filter-reset');
+    const empty = document.getElementById('dataset-empty-state');
+    if (status) status.textContent = filtered ? `${visible} of ${total} records` : `${total} ${total === 1 ? 'record' : 'records'}`;
+    if (reset) reset.hidden = !filtered;
+    if (empty) {
+        empty.hidden = visible > 0;
+        empty.querySelector('h3').textContent = total === 0 && !filtered ? 'No records yet' : 'No records found';
+        empty.querySelector('p').textContent = total === 0 && !filtered
+            ? `Add your first ${LIBRARY_ITEM_LABELS[State.currentDataset] || 'record'} to this collection.`
+            : 'Try clearing the search or filters.';
+        const action = empty.querySelector('button');
+        action.textContent = total === 0 && !filtered ? `Add ${LIBRARY_ITEM_LABELS[State.currentDataset] || 'record'}` : 'Clear filters';
+        action.onclick = total === 0 && !filtered ? openAddDatasetModal : resetLibraryFilters;
+    }
+}
+
+function renderLibraryError(message) {
+    const table = document.getElementById('dataset-table');
+    const cards = document.getElementById('dataset-cards');
+    const empty = document.getElementById('dataset-empty-state');
+    const status = document.getElementById('dataset-results-status');
+    if (table) table.style.display = 'none';
+    if (cards) cards.style.display = 'none';
+    if (status) status.textContent = `Unable to load records: ${message}`;
+    if (!empty) return;
+    empty.hidden = false;
+    empty.querySelector('h3').textContent = 'Library unavailable';
+    empty.querySelector('p').textContent = message;
+    const action = empty.querySelector('button');
+    action.textContent = 'Try again';
+    action.onclick = () => loadDataset(State.currentDataset, { resetControls: false });
+}
+
+function renderDatasetCards(config, data, processedData = getProcessedDatasetData(config, data)) {
     const container = document.getElementById('dataset-cards');
     if (!container) return;
     container.innerHTML = '';
-
-    const processedData = getProcessedDatasetData(config, data);
-
-    if (processedData.length === 0) {
-        container.innerHTML = '<div class="empty-state">No records found matching current criteria.</div>';
-        return;
-    }
+    if (processedData.length === 0) return;
 
     processedData.forEach(item => {
         const card = document.createElement('article');
@@ -1817,23 +1858,19 @@ function renderDatasetCards(config, data) {
         editBtn.onclick = () => openEditDatasetModal(item);
         actionsDiv.appendChild(editBtn);
 
-        if (State.currentDataset === 'airports') {
+        if (['cities', 'airports', 'airlines'].includes(State.currentDataset)) {
             const upBtn = document.createElement('button');
             upBtn.className = 'btn btn-xs btn-outline-info';
             upBtn.innerHTML = '<i class="fas fa-sync"></i> Sync';
-            upBtn.onclick = async () => {
-                if (!confirm('Update this airport?')) return;
-                const res = await API.post(`airports/${item.id}/update`, {});
-                if (res.error) alert(res.error);
-                else loadDataset('airports');
-            };
+            upBtn.setAttribute('aria-label', `Sync ${LIBRARY_ITEM_LABELS[State.currentDataset]} data`);
+            upBtn.onclick = () => syncDatasetItem(State.currentDataset, item.id, upBtn);
             actionsDiv.appendChild(upBtn);
         }
 
         const delBtn = document.createElement('button');
         delBtn.className = 'btn btn-xs btn-outline-danger';
         delBtn.innerHTML = '<i class="fa-solid fa-trash"></i> Delete';
-        delBtn.onclick = () => deleteDatasetItem(item.id);
+        delBtn.onclick = () => deleteDatasetItem(item.id, delBtn);
         actionsDiv.appendChild(delBtn);
 
         card.innerHTML = cardHTML;
@@ -1845,36 +1882,36 @@ function renderDatasetCards(config, data) {
 function renderDatasetTable(config, data) {
     const table = document.getElementById('dataset-table');
     const cards = document.getElementById('dataset-cards');
+    const processedData = getProcessedDatasetData(config, data);
+    updateLibraryResults(processedData.length, data.length);
 
     if (State.libraryViewMode === 'card') {
         if (table) table.style.display = 'none';
-        if (cards) cards.style.display = 'grid';
-        renderDatasetCards(config, data);
+        if (cards) cards.style.display = processedData.length ? 'grid' : 'none';
+        renderDatasetCards(config, data, processedData);
         return;
     }
 
     if (cards) cards.style.display = 'none';
-    if (table) table.style.display = 'table';
+    if (table) table.style.display = processedData.length ? 'table' : 'none';
     if (table) {
         table.className = 'data-table'; // Ensure class is set
         table.innerHTML = '';
     }
-
-    const processedData = getProcessedDatasetData(config, data);
 
     // Header
     const thead = document.createElement('thead');
     const trHead = document.createElement('tr');
     config.columns.forEach(col => {
         const th = document.createElement('th');
-        th.textContent = col.label;
-        th.style.cursor = 'pointer';
-        th.onclick = () => sortDataset(col.key);
-
-        // Add sort indicator
-        if (State.sort.key === col.key) {
-            th.textContent += State.sort.dir === 'asc' ? ' ▲' : ' ▼';
-        }
+        const active = State.sort.key === col.key;
+        th.setAttribute('aria-sort', active ? (State.sort.dir === 'asc' ? 'ascending' : 'descending') : 'none');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'data-sort-button';
+        button.innerHTML = `<span>${escapeHtml(col.label)}</span><i class="fa-solid ${active ? (State.sort.dir === 'asc' ? 'fa-arrow-up' : 'fa-arrow-down') : 'fa-sort'}" aria-hidden="true"></i>`;
+        button.onclick = () => sortDataset(col.key);
+        th.appendChild(button);
 
         trHead.appendChild(th);
     });
@@ -1945,44 +1982,16 @@ function renderDatasetTable(config, data) {
         tdAction.className = 'data-cell data-actions';
         tdAction.setAttribute('data-label', 'Actions');
 
-        // Single Update Buttons
-        if (State.currentDataset === 'airports') {
+        // Single record sync
+        if (['cities', 'airports', 'airlines'].includes(State.currentDataset)) {
             const upBtn = document.createElement('button');
-            upBtn.className = 'btn-icon';
-            upBtn.innerHTML = '<i class="fas fa-sync"></i>';
-            upBtn.title = 'Update Data';
-            upBtn.onclick = async (e) => {
+            upBtn.className = 'btn btn-sm btn-icon action-sync';
+            upBtn.innerHTML = '<i class="fas fa-sync"></i><span>Sync</span>';
+            upBtn.title = 'Sync record data';
+            upBtn.setAttribute('aria-label', `Sync ${LIBRARY_ITEM_LABELS[State.currentDataset]} data`);
+            upBtn.onclick = (e) => {
                 e.stopPropagation();
-                if (!confirm('Update this airport?')) return;
-                const res = await API.post(`airports/${item.id}/update`, {});
-                if (res.error) alert(res.error);
-                else { alert(res.message); loadDataset('airports'); }
-            };
-            tdAction.appendChild(upBtn);
-        }
-        if (State.currentDataset === 'cities') {
-            const upBtn = document.createElement('button');
-            upBtn.className = 'btn-icon';
-            upBtn.innerHTML = '<i class="fas fa-sync"></i>';
-            upBtn.title = 'Update Data';
-            upBtn.onclick = async (e) => {
-                e.stopPropagation();
-                const res = await API.post(`cities/${item.id}/update`, {});
-                if (res.error) alert(res.error);
-                else { loadDataset('cities'); }
-            };
-            tdAction.appendChild(upBtn);
-        }
-        if (State.currentDataset === 'airlines') {
-            const upBtn = document.createElement('button');
-            upBtn.className = 'btn-icon';
-            upBtn.innerHTML = '<i class="fas fa-sync"></i>';
-            upBtn.title = 'Update Data';
-            upBtn.onclick = async (e) => {
-                e.stopPropagation();
-                const res = await API.post(`airlines/${item.id}/update`, {});
-                if (res.error) alert(res.error);
-                else { loadDataset('airlines'); }
+                syncDatasetItem(State.currentDataset, item.id, upBtn);
             };
             tdAction.appendChild(upBtn);
         }
@@ -2001,7 +2010,7 @@ function renderDatasetTable(config, data) {
         btnDel.setAttribute('aria-label', 'Delete record');
         btnDel.setAttribute('data-action-label', 'Delete');
         btnDel.innerHTML = '<i class="fa-solid fa-trash"></i><span>Delete</span>';
-        btnDel.onclick = (e) => { e.stopPropagation(); deleteDatasetItem(item.id); };
+        btnDel.onclick = (e) => { e.stopPropagation(); deleteDatasetItem(item.id, btnDel); };
 
         tdAction.appendChild(btnEdit);
         tdAction.appendChild(btnDel);
@@ -2191,9 +2200,11 @@ document.addEventListener('keydown', event => {
 // --- Forms ---
 function createForm(fields, item = {}) {
     const form = document.createElement('form');
+    form.className = 'form-grid';
     fields.forEach(col => {
         const formGroup = document.createElement('div');
         formGroup.className = 'form-group';
+        if (col.type === 'textarea') formGroup.classList.add('form-group-wide');
 
         const label = document.createElement('label');
         label.textContent = col.label;
@@ -2243,6 +2254,7 @@ function createForm(fields, item = {}) {
                 addBtn.className = 'btn btn-sm btn-secondary';
                 addBtn.innerText = '+';
                 addBtn.title = 'Add New Item';
+                addBtn.setAttribute('aria-label', `Add ${col.label}`);
                 addBtn.onclick = () => {
                     // Open Create Modal for this entity
                     // We need to know which dataset key maps to this lookup
@@ -2277,7 +2289,7 @@ function createForm(fields, item = {}) {
             input = document.createElement('textarea');
             input.name = col.key;
             input.rows = 3;
-            if (item[col.key]) input.value = item[col.key];
+            if (item[col.key] !== null && item[col.key] !== undefined) input.value = item[col.key];
             formGroup.appendChild(input);
         } else {
             input = document.createElement('input');
@@ -2286,9 +2298,13 @@ function createForm(fields, item = {}) {
             if (col.placeholder) input.placeholder = col.placeholder;
             if (col.required) input.required = true;
             if (col.step) input.step = col.step;
-            if (item[col.key]) input.value = item[col.key];
+            if (item[col.key] !== null && item[col.key] !== undefined) input.value = item[col.key];
             formGroup.appendChild(input);
         }
+
+        const fieldId = `modal-${modalSequence}-${col.key}`;
+        input.id = fieldId;
+        label.htmlFor = fieldId;
 
         if (col.help) {
             const help = document.createElement('small');
@@ -2316,10 +2332,10 @@ async function openAddDatasetModal() {
         }
         const res = await API.post(config.endpoint, data);
         if (res.error) {
-            alert(res.error);
-            return false; // Prevent modal from closing
+            throw new Error(res.error);
         }
-        loadDataset(State.currentDataset); // Refresh
+        showToast(`${libraryItemLabel(State.currentDataset, true)} added.`);
+        loadDataset(State.currentDataset, { resetControls: false });
         return res.id; // Return the new ID for lookup callbacks
     });
 }
@@ -2344,14 +2360,14 @@ async function openEditDatasetModal(item, datasetOverride = null, onSuccess = nu
         }
 
         if (res.error) {
-            alert(res.error);
-            return false; // Prevent modal from closing
+            throw new Error(res.error);
         }
 
         if (onSuccess) {
-            onSuccess(res.id); // Pass the new/updated ID to the callback
+            await onSuccess(res.id);
         } else {
-            loadDataset(State.currentDataset); // Refresh only if not a lookup add
+            showToast(`${libraryItemLabel(currentDatasetKey, true)} ${item.id ? 'updated' : 'added'}.`);
+            loadDataset(State.currentDataset, { resetControls: false });
         }
         return res.id; // Return the new ID for lookup callbacks
     });
@@ -2452,11 +2468,39 @@ function openImportModal() {
 }
 
 
-async function deleteDatasetItem(id) {
-    if (!confirm('Are you sure?')) return;
-    const config = DATASETS[State.currentDataset];
-    await API.delete(config.endpoint, id);
-    loadDataset(State.currentDataset);
+async function syncDatasetItem(datasetKey, id, button = null) {
+    const config = DATASETS[datasetKey];
+    if (!config) return;
+    setButtonBusy(button, true, 'Syncing…');
+    try {
+        const result = await API.post(`${config.endpoint}/${id}/update`, {});
+        if (result.error) throw new Error(result.error);
+        showToast(result.message || `${libraryItemLabel(datasetKey, true)} synced.`);
+        await loadDataset(datasetKey, { resetControls: false });
+    } catch (error) {
+        showToast(error?.message || 'Sync failed.', 'error');
+    } finally {
+        setButtonBusy(button, false);
+    }
+}
+
+async function deleteDatasetItem(id, button = null) {
+    const datasetKey = State.currentDataset;
+    const config = DATASETS[datasetKey];
+    const item = (State.cache[datasetKey] || []).find(row => row.id === id);
+    const itemName = item?.name || `${LIBRARY_ITEM_LABELS[datasetKey] || 'record'} ${id}`;
+    if (!confirm(`Delete ${itemName}? This cannot be undone.`)) return;
+    setButtonBusy(button, true, 'Deleting…');
+    try {
+        const result = await API.delete(config.endpoint, id);
+        if (result?.error) throw new Error(result.error);
+        showToast(`${libraryItemLabel(datasetKey, true)} deleted.`);
+        await loadDataset(datasetKey, { resetControls: false });
+    } catch (error) {
+        showToast(error?.message || 'Delete failed.', 'error');
+    } finally {
+        setButtonBusy(button, false);
+    }
 }
 
 // --- Flights Logic ---
@@ -3891,11 +3935,12 @@ function renderLibraryOverview() {
         const rows = State.cache[key] || [];
         const gaps = datasetQualityFor(key, rows);
         const active = State.currentDataset === key ? ' active' : '';
-        const health = gaps ? `${formatCompactNumber(gaps)} gaps` : 'Healthy';
-        return `<button class="library-overview-card${active}" onclick="switchDatasetTab('${key === 'aircraft_models' ? 'aircraft' : key}')">
+        const health = rows.length === 0 ? 'Empty' : (gaps ? `${formatCompactNumber(gaps)} gaps` : 'Healthy');
+        const healthClass = rows.length === 0 ? 'empty' : (gaps ? 'needs-work' : '');
+        return `<button type="button" class="library-overview-card${active}" data-dataset-key="${key}" aria-pressed="${State.currentDataset === key}" onclick="switchDatasetTab('${key === 'aircraft_models' ? 'aircraft' : key}')">
             <span class="library-overview-icon"><i class="fa-solid ${icon}"></i></span>
             <span><strong>${formatCompactNumber(rows.length)}</strong><small>${escapeHtml(label)}</small></span>
-            <em class="library-health-pill ${gaps ? 'needs-work' : ''}">${escapeHtml(health)}</em>
+            <em class="library-health-pill ${healthClass}">${escapeHtml(health)}</em>
         </button>`;
     }).join('');
 }
@@ -4542,6 +4587,10 @@ function renderLibraryFilters(datasetKey) {
             </label>
         `;
     }
+    bar.querySelectorAll('select').forEach(select => {
+        const key = select.getAttribute('onchange')?.match(/applyLibraryFilter\('([^']+)'/)?.[1];
+        if (key) select.value = State.libraryFilters[key] || '';
+    });
 }
 window.renderLibraryFilters = renderLibraryFilters;
 

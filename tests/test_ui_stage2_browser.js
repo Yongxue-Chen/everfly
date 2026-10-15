@@ -203,6 +203,48 @@ const fixture = [
         assert.ok((await page.locator('#flights-table tbody tr').textContent()).includes('TEST1'));
         await page.locator('#flight-health-filter').click();
         assert.equal(await page.locator('#flights-table tbody tr').count(),2);
+        await page.evaluate(()=>navigateTo('datasets'));
+        await page.waitForFunction(()=>document.querySelectorAll('.library-overview-card').length===4);
+        assert.equal(await page.locator('#view-datasets .tabs').count(),0);
+        assert.equal(await page.locator('#view-datasets button:disabled').count(),0);
+        assert.equal(await page.locator('#dataset-results-status').textContent(),'2 records');
+        assert.equal(await page.locator('.library-overview-card[aria-pressed="true"]').count(),1);
+        await page.locator('#dataset-search').fill('UK');
+        assert.equal(await page.locator('#dataset-results-status').textContent(),'1 of 2 records');
+        assert.equal(await page.locator('#dataset-table tbody tr').count(),1);
+        await page.locator('#dataset-filter-reset').click();
+        assert.equal(await page.locator('#dataset-table tbody tr').count(),2);
+        await page.setViewportSize({width:1024,height:900});
+        await page.locator('#dataset-table .data-sort-button').first().click();
+        assert.equal(await page.locator('#dataset-table th').first().getAttribute('aria-sort'),'ascending');
+        await page.locator('#btn-view-card').click();
+        assert.equal(await page.locator('#btn-view-card').getAttribute('aria-pressed'),'true');
+        assert.equal(await page.locator('#dataset-cards .library-card').count(),2);
+        await page.locator('#dataset-add-button').click();
+        assert.equal(await page.locator('[role="dialog"] form.form-grid').count(),1);
+        const cityName = page.locator('[role="dialog"] [name="name"]');
+        assert.equal(await cityName.getAttribute('id'),await page.locator('[role="dialog"] label').first().getAttribute('for'));
+        await page.keyboard.press('Escape');
+        await page.evaluate(()=>showToast('Library feedback ready'));
+        assert.equal(await page.locator('.app-toast').textContent(),'Library feedback ready');
+        await page.locator('.library-overview-card[data-dataset-key="airports"]').click();
+        await page.waitForFunction(()=>State.currentDataset==='airports' && document.querySelector('#dataset-table').getAttribute('aria-busy')==='false' && document.querySelector('#dataset-results-status').textContent==='0 records');
+        const emptyLibrary = await page.evaluate(()=>({heading:document.querySelector('#dataset-empty-state h3').textContent,filter:State.filter,filters:State.libraryFilters,total:State.cache.airports.length}));
+        assert.equal(emptyLibrary.heading,'No records yet',JSON.stringify(emptyLibrary));
+        assert.equal(await page.locator('#dataset-add-button span').textContent(),'Add airport');
+        await page.locator('.library-overview-card[data-dataset-key="cities"]').click();
+        await page.waitForFunction(()=>State.currentDataset==='cities' && document.querySelector('#dataset-table').getAttribute('aria-busy')==='false');
+        await page.evaluate(()=>document.querySelector('#toast-region')?.replaceChildren());
+        if (process.env.UI_SCREENSHOT_DIR) fs.mkdirSync(process.env.UI_SCREENSHOT_DIR,{recursive:true});
+        for (const width of [1440,390]) {
+            await page.setViewportSize({width,height:900});
+            await page.waitForTimeout(150);
+            assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`Library overflow at ${width}`);
+            if (width === 390) assert.equal(await page.locator('.library-card-actions').first().evaluate(element=>getComputedStyle(element).opacity),'1');
+            if (process.env.UI_SCREENSHOT_DIR) {
+                await page.screenshot({path:path.join(process.env.UI_SCREENSHOT_DIR,`library-stage5-${width}.png`),fullPage:true});
+            }
+        }
         await page.evaluate(()=>{ navigateTo('profile', false); history.replaceState({}, '', '/'); });
         await page.waitForFunction(()=>State.cache.stats?.totals.flights===0);
         empty = true;

@@ -20,7 +20,7 @@
         const CURRENT_USER = {{ user| tojson | safe }};
         const CSRF_TOKEN = "{{ csrf_token() }}";
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=ui-stage4-1">
+    <link rel="stylesheet" href="/static/css/style.css?v=ui-stage5-1">
 </head>
 
 <body>
@@ -190,49 +190,36 @@
             <div class="container">
                 <div class="library-heading"><div><span class="journey-eyebrow">Reference data</span><h2>Library</h2><p class="view-subtitle">Manage the places, airlines and aircraft behind your journeys.</p></div></div>
                 <div id="library-overview" class="library-overview"></div>
-                <div class="tabs">
-                    <button class="tab-btn active" onclick="switchDatasetTab('cities')">Cities</button>
-                    <button class="tab-btn" onclick="switchDatasetTab('airports')">Airports</button>
-                    <button class="tab-btn" onclick="switchDatasetTab('airlines')">Airlines</button>
-                    <button class="tab-btn" onclick="switchDatasetTab('aircraft')">Aircraft</button>
-                </div>
-
                 <div class="dataset-content">
-                    <div class="toolbar">
-                        <div class="toolbar-left">
-                            <button class="btn btn-sm btn-secondary" onclick="openAddDatasetModal()"><i class="fa-solid fa-plus"></i> Add</button>
-                            <button class="btn btn-sm btn-secondary" disabled
-                                title="CSV import is currently disabled"
-                                style="opacity: 0.5; cursor: not-allowed;">
-                                <i class="fa-solid fa-file-upload"></i> Import CSV
+                    <div class="toolbar library-toolbar" aria-label="Library controls">
+                        <button type="button" id="dataset-add-button" class="btn btn-primary" onclick="openAddDatasetModal()"><i class="fa-solid fa-plus" aria-hidden="true"></i><span>Add city</span></button>
+                        <label class="search-box library-search" for="dataset-search">
+                            <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                            <input type="search" id="dataset-search" placeholder="Search cities..." autocomplete="off" oninput="filterDataset()">
+                        </label>
+                        <button type="button" id="dataset-filter-reset" class="btn btn-sm btn-text" onclick="resetLibraryFilters()" hidden><i class="fa-solid fa-xmark" aria-hidden="true"></i><span>Clear</span></button>
+                        <div class="view-toggle-group" role="group" aria-label="Library layout">
+                            <button type="button" id="btn-view-table" class="btn btn-sm btn-view-toggle active" onclick="switchLibraryView('table')" aria-pressed="true" title="Table view">
+                                <i class="fa-solid fa-list" aria-hidden="true"></i><span>Table</span>
                             </button>
-                            <button class="btn btn-sm btn-secondary" disabled
-                                title="Clear is currently disabled"
-                                style="color: var(--danger); border-color: var(--danger); opacity: 0.5; cursor: not-allowed;">
-                                <i class="fa-solid fa-trash-can"></i> Clear
+                            <button type="button" id="btn-view-card" class="btn btn-sm btn-view-toggle" onclick="switchLibraryView('card')" aria-pressed="false" title="Card view">
+                                <i class="fa-solid fa-table-cells" aria-hidden="true"></i><span>Cards</span>
                             </button>
-                            <div id="dataset-dynamic-actions"></div>
                         </div>
-                        <div class="toolbar-right">
-                            <div class="search-box">
-                                <input type="text" id="dataset-search" placeholder="Filter..." onkeyup="filterDataset()">
-                            </div>
-                            <div class="view-toggle-group">
-                                <button id="btn-view-table" class="btn btn-sm btn-view-toggle active" onclick="switchLibraryView('table')" title="Table View">
-                                    <i class="fa-solid fa-list"></i>
-                                </button>
-                                <button id="btn-view-card" class="btn btn-sm btn-view-toggle" onclick="switchLibraryView('card')" title="Card View">
-                                    <i class="fa-solid fa-table-cells"></i>
-                                </button>
-                            </div>
-                        </div>
+                        <p id="dataset-results-status" class="dataset-results-status" role="status" aria-live="polite">Loading records…</p>
                     </div>
                     <div id="dataset-filters-bar" class="filters-bar" style="display: none;"></div>
-                    <table class="data-table" id="dataset-table">
+                    <table class="data-table" id="dataset-table" aria-describedby="dataset-results-status" aria-busy="true">
                         <!-- Dynamic columns and rows -->
                     </table>
                     <div id="dataset-cards" class="dataset-cards-grid" style="display: none;">
                         <!-- Dynamic cards -->
+                    </div>
+                    <div id="dataset-empty-state" class="dataset-empty-state" hidden>
+                        <span class="empty-state-icon"><i class="fa-solid fa-database" aria-hidden="true"></i></span>
+                        <h3>No records found</h3>
+                        <p>Try clearing the search or filters.</p>
+                        <button type="button" class="btn btn-secondary" onclick="resetLibraryFilters()">Clear filters</button>
                     </div>
                 </div>
             </div>
@@ -270,7 +257,7 @@
     </aside>
 
     <script src="/static/js/journey-stats.js?v=ui-stage2-3"></script>
-    <script src="/static/js/app.js?v=ui-stage4-1"></script>
+    <script src="/static/js/app.js?v=ui-stage5-1"></script>
 </body>
 
 </html>

@@ -9,7 +9,7 @@ APP_JS = os.path.join(ROOT, "static", "js", "app.js")
 
 
 class DatasetBulkActionsDisabledTest(unittest.TestCase):
-    def test_dataset_import_and_clear_buttons_are_disabled(self):
+    def test_unavailable_bulk_actions_do_not_clutter_library(self):
         with open(INDEX_TEMPLATE, encoding="utf-8") as fh:
             source = fh.read()
 
@@ -19,33 +19,17 @@ class DatasetBulkActionsDisabledTest(unittest.TestCase):
             flags=re.DOTALL,
         ).group(0)
 
-        self.assertIn("Import CSV", datasets_section)
-        self.assertIn("Clear", datasets_section)
+        self.assertNotIn("Import CSV", datasets_section)
+        self.assertNotIn("Auto-Fill", datasets_section)
         self.assertNotIn("openImportModal()", datasets_section)
         self.assertNotIn("clearCurrentDataset()", datasets_section)
 
-        import_button = re.search(r'<button[^>]*>\s*<i[^>]*></i> Import CSV\s*</button>', datasets_section, re.DOTALL).group(0)
-        clear_button = re.search(r'<button[^>]*>\s*<i[^>]*></i> Clear\s*</button>', datasets_section, re.DOTALL).group(0)
-
-        self.assertIn("disabled", import_button)
-        self.assertIn("cursor: not-allowed", import_button)
-        self.assertIn("disabled", clear_button)
-        self.assertIn("cursor: not-allowed", clear_button)
-
-    def test_dataset_auto_fill_buttons_are_disabled(self):
+    def test_disabled_auto_fill_buttons_are_not_created(self):
         with open(APP_JS, encoding="utf-8") as fh:
             source = fh.read()
 
-        dynamic_toolbar = re.search(
-            r'// --- Dynamic Toolbar Buttons ---.*?renderDatasetTable\(config, data\);',
-            source,
-            flags=re.DOTALL,
-        ).group(0)
-
-        self.assertIn("Auto-Fill", dynamic_toolbar)
-        self.assertIn("btn.disabled = true", dynamic_toolbar)
-        self.assertIn("cursor = 'not-allowed'", dynamic_toolbar)
-        self.assertNotIn("batch_update", dynamic_toolbar)
+        self.assertNotIn("addDisabledAutoFillButton", source)
+        self.assertNotIn("dataset-dynamic-actions", source)
 
 
 if __name__ == "__main__":
