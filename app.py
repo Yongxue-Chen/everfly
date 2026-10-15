@@ -22,6 +22,11 @@ from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFProtect, CSRFError
 from werkzeug.middleware.proxy_fix import ProxyFix
 from airlines_data import AIRLINES_ICAO_TO_IATA
+from china_localization import (
+    chinese_airline_name,
+    chinese_country_name,
+    localized_china_airport,
+)
 import weather
 
 load_dotenv()
@@ -1100,13 +1105,15 @@ def import_csv(table_name):
                         ad_data = airportsdata.load('IATA')
                         info = ad_data.get(iata.upper())
                         if info:
-                            if not normalized_row.get('name'): normalized_row['name'] = info.get('name')
+                            localized = localized_china_airport(info, iata=iata)
+                            if not normalized_row.get('name'):
+                                normalized_row['name'] = localized['airport'] if localized else info.get('name')
                             if not normalized_row.get('icao_code'): normalized_row['icao_code'] = info.get('icao')
                             if not normalized_row.get('lat'): normalized_row['lat'] = info.get('lat')
                             if not normalized_row.get('lon'): normalized_row['lon'] = info.get('lon')
                             # City logic: if city_id missing, use info.get('city') etc
                             if 'city_id' not in normalized_row:
-                                city_name = info.get('city')
+                                city_name = localized['city'] if localized else info.get('city')
                                 country_code = info.get('country')
                                 if city_name:
                                     # Reuse logic from _update_airport_logic if possible, or just look up
@@ -1116,7 +1123,7 @@ def import_csv(table_name):
                                     else:
                                         # Create basic city
                                         cur_ins = conn.execute("INSERT INTO cities (user_id, name, country, country_code, timezone) VALUES (?, ?, ?, ?, ?)",
-                                                   (g.user['id'], city_name, country_code, country_code, info.get('tz')))
+                                                   (g.user['id'], city_name, localized['country'] if localized else country_code, country_code, info.get('tz')))
                                         normalized_row['city_id'] = cur_ins.lastrowid
 
                 # Manual Autolink City (Fallback if not fetched above)
@@ -1320,6 +1327,10 @@ def _update_city_fields_logic(city_id, conn, uid, info_country_code=None, info_t
     new_country_code = country_code
     new_timezone = timezone
     new_continent = continent
+
+    localized_country = chinese_country_name(new_country_code or info_country_code)
+    if localized_country:
+        new_country = localized_country
     
     # 1. Resolve country and country_code if one is missing
     if not new_country_code and new_country:
@@ -1381,7 +1392,7 @@ def _update_city_fields_logic(city_id, conn, uid, info_country_code=None, info_t
     updates = []
     params = []
     
-    if (not country or country.strip() == "") and new_country:
+    if new_country and country != new_country:
         updates.append("country = ?")
         params.append(new_country)
     if (not country_code or country_code.strip() == "") and new_country_code:
@@ -1454,7 +1465,8 @@ def _update_airport_logic(id, conn):
         return False, "IATA与ICAO代码皆为空，无法查询"
 
     # 2. Process City mapping and cascading updates
-    city_name = info.get('city')
+    localized = localized_china_airport(info, iata=info.get('iata') or db_iata, icao=info.get('icao') or db_icao)
+    city_name = localized['city'] if localized else info.get('city')
     country_code = info.get('country') # 2-letter country code
     tz = info.get('tz')
     
@@ -1469,10 +1481,10 @@ def _update_airport_logic(id, conn):
             city_id = city_row[0]
         else:
             # Create new city
-            country_name = country_code
+            country_name = localized['country'] if localized else country_code
             try:
                 c_obj = pycountry.countries.get(alpha_2=country_code.upper())
-                if c_obj:
+                if c_obj and not localized:
                     country_name = c_obj.name
             except Exception:
                 pass
@@ -1490,7 +1502,11 @@ def _update_airport_logic(id, conn):
     updates = []
     params = []
     
-    if (not db_name or db_name.strip() == "") and info.get('name'):
+    localized_airport_name = localized['airport'] if localized else None
+    if localized_airport_name and db_name != localized_airport_name:
+        updates.append("name = ?")
+        params.append(localized_airport_name)
+    elif (not db_name or db_name.strip() == "") and info.get('name'):
         updates.append("name = ?")
         params.append(clean_airport_name(info['name']))
     if (not db_iata or db_iata.strip() == "") and info.get('iata'):
@@ -1508,7 +1524,7 @@ def _update_airport_logic(id, conn):
     if (not db_tz or db_tz.strip() == "") and info.get('tz'):
         updates.append("timezone = ?")
         params.append(info['tz'])
-    if not db_city_id and city_id:
+    if city_id and (not db_city_id or (localized and db_city_id != city_id)):
         updates.append("city_id = ?")
         params.append(city_id)
         
@@ -1680,8 +1696,12 @@ def fetch_aeroapi_schedule(airline_code, flight_number, date_str):
     GET /schedules/{start}/{end}: published airline schedules, up to 1 year ahead and
     3 months in the past. Unlike /flights/{ident}, it is not limited to a 2-day future window.
     """
-    date_end = (dateutil.parser.parse(date_str).date() + timedelta(days=1)).isoformat()
-    url = f"https://aeroapi.flightaware.com/aeroapi/schedules/{date_str}/{date_end}"
+    target_date = dateutil.parser.parse(date_str).date()
+    # Schedule timestamps are UTC. Query a wider window, then select by the
+    # departure airport's local calendar date to avoid Asia/UTC day shifts.
+    date_start = (target_date - timedelta(days=1)).isoformat()
+    date_end = (target_date + timedelta(days=1)).isoformat()
+    url = f"https://aeroapi.flightaware.com/aeroapi/schedules/{date_start}/{date_end}"
     headers = {"x-apikey": _get_user_api_key()}
     params = {"airline": airline_code, "flight_number": flight_number, "max_pages": 1}
 
@@ -2098,6 +2118,8 @@ def clean_airport_name(name):
 
 def get_or_create_airport(icao, iata, conn):
     uid = g.user['id']
+    icao = str(icao or '').strip().upper() or None
+    iata = str(iata or '').strip().upper() or None
     if not iata and not icao: return None
     # Try by ICAO first
     if icao:
@@ -2117,15 +2139,20 @@ def get_or_create_airport(icao, iata, conn):
     info = None
     if icao:
         info = ad.get(icao)
-    elif iata:
+    if not info and iata:
         ad_iata = airportsdata.load('IATA')
         info = ad_iata.get(iata)
 
     city_id = None
     if info:
         # Check/Create City
-        city_name = info['city']
-        cur = conn.execute("SELECT id, timezone, continent FROM cities WHERE name = ? AND user_id = ?", (city_name, uid))
+        localized = localized_china_airport(info, iata=iata, icao=icao)
+        city_name = localized['city'] if localized else info['city']
+        country_code = info.get('country')
+        cur = conn.execute(
+            "SELECT id, timezone, continent FROM cities WHERE name = ? AND country_code = ? AND user_id = ?",
+            (city_name, country_code, uid),
+        )
         city_row = cur.fetchone()
         
         if city_row:
@@ -2150,12 +2177,11 @@ def get_or_create_airport(icao, iata, conn):
         else:
             tz = info.get('tz')
             cont = get_continent_from_tz(tz)
-            country_code = info.get('country')
-            country_name = country_code
+            country_name = localized['country'] if localized else country_code
             try:
                 import pycountry
                 c_obj = pycountry.countries.get(alpha_2=country_code)
-                if c_obj:
+                if c_obj and not localized:
                     country_name = c_obj.name
             except:
                 pass
@@ -2167,7 +2193,7 @@ def get_or_create_airport(icao, iata, conn):
         cur = conn.execute('''
             INSERT INTO airports (user_id, city_id, name, iata_code, icao_code, lat, lon, timezone)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (uid, city_id, clean_airport_name(info['name']), info.get('iata'), info.get('icao'), info['lat'], info['lon'], info.get('tz')))
+        ''', (uid, city_id, localized['airport'] if localized else clean_airport_name(info['name']), info.get('iata'), info.get('icao'), info['lat'], info['lon'], info.get('tz')))
         return cur.lastrowid
     
     return None
@@ -2176,21 +2202,25 @@ def get_or_create_airline(icao, iata, conn):
     uid = g.user['id']
     icao = re.sub(r'\s+', '', str(icao or '')).upper() or None
     iata = re.sub(r'\s+', '', str(iata or '')).upper() or None
+    if not iata and icao:
+        iata = AIRLINES_ICAO_TO_IATA.get(icao)
     if not icao and not iata:
         return None
 
     row = None
     if icao:
         row = conn.execute(
-            "SELECT id, iata_code, icao_code FROM airlines WHERE icao_code = ? AND user_id = ?",
+            "SELECT id, iata_code, icao_code, name, country FROM airlines WHERE icao_code = ? AND user_id = ?",
             (icao, uid),
         ).fetchone()
     if not row and iata:
         row = conn.execute(
-            "SELECT id, iata_code, icao_code FROM airlines WHERE iata_code = ? AND user_id = ?",
+            "SELECT id, iata_code, icao_code, name, country FROM airlines WHERE iata_code = ? AND user_id = ?",
             (iata, uid),
         ).fetchone()
     if row:
+        resolved_iata = iata or row[1] or AIRLINES_ICAO_TO_IATA.get(icao)
+        localized_name = chinese_airline_name(resolved_iata)
         updates = []
         values = []
         if iata and not row[1]:
@@ -2199,6 +2229,12 @@ def get_or_create_airline(icao, iata, conn):
         if icao and not row[2]:
             updates.append("icao_code = ?")
             values.append(icao)
+        if localized_name and row[3] != localized_name:
+            updates.append("name = ?")
+            values.append(localized_name)
+        if localized_name and row[4] != '中国':
+            updates.append("country = ?")
+            values.append('中国')
         if updates:
             values.extend([row[0], uid])
             conn.execute(
@@ -2207,10 +2243,11 @@ def get_or_create_airline(icao, iata, conn):
             )
         return row[0]
 
-    name = iata or icao
+    name = chinese_airline_name(iata) or iata or icao
+    country = '中国' if chinese_airline_name(iata) else None
     cur = conn.execute(
-        "INSERT INTO airlines (user_id, name, iata_code, icao_code) VALUES (?, ?, ?, ?)",
-        (uid, name, iata, icao),
+        "INSERT INTO airlines (user_id, name, iata_code, icao_code, country) VALUES (?, ?, ?, ?, ?)",
+        (uid, name, iata, icao, country),
     )
     return cur.lastrowid
 
@@ -3267,6 +3304,38 @@ def _schedule_remote_values(sched, conn, uid):
         'sta': to_local_str(sched.get('scheduled_in'), dest_tz),
     }
 
+
+def select_schedule_candidate(schedules, target_date_str, conn, uid,
+                              origin_codes=None, dest_codes=None):
+    """Select a schedule by route and the origin's local departure date."""
+    target_date = dateutil.parser.parse(target_date_str).date()
+    origin_codes = {str(code).upper() for code in (origin_codes or set()) if code}
+    dest_codes = {str(code).upper() for code in (dest_codes or set()) if code}
+    usable = []
+
+    for sched in schedules:
+        scheduled_out = sched.get('scheduled_out')
+        if not scheduled_out:
+            continue
+        _, origin_tz = _lookup_airport_readonly(
+            sched.get('origin_icao'), sched.get('origin_iata'), conn, uid
+        )
+        departure_utc = _as_utc(dateutil.parser.parse(scheduled_out))
+        if departure_utc.astimezone(_timezone_or_utc(origin_tz)).date() != target_date:
+            continue
+        usable.append(sched)
+
+    if origin_codes and dest_codes:
+        route_matches = [
+            sched for sched in usable
+            if ({str(sched.get('origin_iata') or '').upper(), str(sched.get('origin_icao') or '').upper()} & origin_codes)
+            and ({str(sched.get('destination_iata') or '').upper(), str(sched.get('destination_icao') or '').upper()} & dest_codes)
+        ]
+        if route_matches:
+            usable = route_matches
+
+    return min(usable, key=lambda sched: sched.get('scheduled_out') or '') if usable else None
+
 def build_schedule_related_diffs(sched, flight):
     """Mirrors build_aeroapi_related_diffs() but reads /schedules' flat origin/destination/ident shape."""
     diffs = []
@@ -3387,7 +3456,13 @@ def _run_schedule_update(flight, f_num_clean, f_date, conn, uid, flight_id, forc
         if force: return {'error': 'No data found in AeroAPI schedules'}, None
         return {'message': 'No schedule data found'}, None
 
-    sched = sched_list[0]
+    sched = select_schedule_candidate(
+        sched_list, f_date, conn, uid,
+        origin_codes=_get_airport_codes(conn, flight[2], uid),
+        dest_codes=_get_airport_codes(conn, flight[3], uid),
+    )
+    if not sched:
+        return {'error': 'No schedule found on the requested local departure date'}, None
 
     update_fields = []
     update_values = []
@@ -3749,7 +3824,13 @@ def _build_schedule_preview(flight, conn, uid, f_num, f_date):
     if not sched_list:
         return {'error': 'No schedule data found (this flight may not operate on this date)'}, None
 
-    sched = sched_list[0]
+    sched = select_schedule_candidate(
+        sched_list, f_date, conn, uid,
+        origin_codes=_get_airport_codes(conn, flight[2], uid),
+        dest_codes=_get_airport_codes(conn, flight[3], uid),
+    )
+    if not sched:
+        return {'error': 'No schedule found on the requested local departure date'}, None
     local_values = _local_aeroapi_values(flight)
     remote_values = _schedule_remote_values(sched, conn, uid)
     return {
@@ -3867,7 +3948,14 @@ def apply_flight_aeroapi(flight_id):
                 return {'error': str(e)}
             if not sched_list:
                 return {'error': 'No schedule data found (this flight may not operate on this date)'}
-            related_fields, related_values = _collect_schedule_related_updates(sched_list[0], flight, conn, uid)
+            sched = select_schedule_candidate(
+                sched_list, flight[1], conn, uid,
+                origin_codes=_get_airport_codes(conn, flight[2], uid),
+                dest_codes=_get_airport_codes(conn, flight[3], uid),
+            )
+            if not sched:
+                return {'error': 'No schedule found on the requested local departure date'}
+            related_fields, related_values = _collect_schedule_related_updates(sched, flight, conn, uid)
         else:
             try:
                 selection = _resolve_aeroapi_selection_for_flight(flight, conn, uid, data.get('candidate_index'))
