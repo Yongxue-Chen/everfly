@@ -25,6 +25,6 @@ assert.equal(completed({}, now), false);
 assert.equal(completed({ ...flight, dest_timezone: 'Invalid', sta: '2027-01-02 01:00:00' }, now), false);
 assert.equal(completed({ ...flight, dest_timezone: 'America/New_York', sta: '2027-01-01 20:00:00' }, now), false);
 assert.equal(completed({ ...flight, dest_timezone: 'Europe/London', sta: '2027-07-01 13:00:00' }, new Date('2027-07-01T12:00:00Z')), true);
-assert.match(source, /color: completed \? '#2563eb' : '#f59e0b'/);
+assert.match(source, /color: completed \? '#6b8e7b' : '#f59e0b'/);
 assert.match(source, /dashArray: completed \? null : '8 6'/);
 console.log('Profile route status: 17 checks passed');

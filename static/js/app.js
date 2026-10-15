@@ -3965,7 +3965,7 @@ function refreshProfileMapLayers({ fitBounds = false } = {}) {
         const statusLabel = completed ? '已结束' : '未结束';
         longitudeOffsets.forEach(offset => {
             const line = L.polyline(shiftPathLongitude(curvePoints, offset), {
-                color: completed ? '#2563eb' : '#f59e0b', weight: 3, opacity: 0.8,
+                color: completed ? '#6b8e7b' : '#f59e0b', weight: 3, opacity: completed ? 0.65 : 0.8,
                 dashArray: completed ? null : '8 6'
             });
             line.bindPopup(`${escapeHtml(f.flight_number)}<br>${escapeHtml(f.date)}<br>${escapeHtml(f.origin.code)} -> ${escapeHtml(f.dest.code)}<br>${statusLabel}`);

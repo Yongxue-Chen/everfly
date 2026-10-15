@@ -1298,7 +1298,7 @@ tr:hover { background: #f5f9ff; }
 .journey-map-panel .map-container { max-width: none; margin: 0; border-radius: 16px; box-shadow: none; }
 .route-status-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; margin-bottom: 12px; color: var(--text-muted); font-size: .8rem; }
 .route-status-legend span { display: inline-flex; align-items: center; gap: 8px; }
-.route-status-legend i { display: inline-block; width: 28px; border-top: 3px solid #2563eb; }
+.route-status-legend i { display: inline-block; width: 28px; border-top: 3px solid #6b8e7b; }
 .route-status-legend .route-status-pending { border-top: 3px dashed #f59e0b; }
 .journey-insights .stats-container { max-width: none; margin: 0; grid-template-columns: repeat(3, minmax(0,1fr)); }
 .journey-insights .stats-card { min-height: 160px; border-radius: 16px; cursor: pointer; }
