@@ -58,8 +58,9 @@ const DATASETS = {
             { key: 'name', label: 'Name' },
             { key: 'iata_code', label: 'IATA' },
             { key: 'icao_code', label: 'ICAO' },
-            { key: 'frequent_flyer_program', label: 'FF Program' },
-            { key: 'frequent_flyer_id', label: 'FF ID' }
+            { key: 'alliance', label: 'Alliance' },
+            { key: 'frequent_flyer_program', label: 'Loyalty Program' },
+            { key: 'frequent_flyer_id', label: 'Member No.' }
         ],
         fields: [
             { key: 'name', label: 'Name', type: 'text', required: true },
@@ -67,9 +68,9 @@ const DATASETS = {
             { key: 'icao_code', label: 'ICAO Code', type: 'text', required: false },
             { key: 'callsign', label: 'Callsign', type: 'text', required: false },
             { key: 'country', label: 'Country', type: 'text', required: false },
-            { key: 'alliance', label: 'Alliance', type: 'text', required: false },
-            { key: 'frequent_flyer_program', label: 'FF Program', type: 'text', required: false },
-            { key: 'frequent_flyer_id', label: 'FF ID (Member No.)', type: 'text', required: false },
+            { key: 'alliance', label: 'Alliance', type: 'select', options: ['SkyTeam', 'Star Alliance', 'Oneworld'], required: false },
+            { key: 'frequent_flyer_program', label: 'Loyalty Program', type: 'text', required: false, placeholder: 'e.g. Flying Blue' },
+            { key: 'frequent_flyer_id', label: 'Member Number', type: 'text', required: false, placeholder: 'No spaces or airline prefix', help: 'Store the account number as issued. Do not add airline codes such as EK or TK; spaces and hyphens are removed on save.' },
             { key: 'website_url', label: 'Website URL', type: 'text', required: false, placeholder: 'https://example.com' }
         ]
     },
@@ -1188,8 +1189,20 @@ function renderEntityPanel(payload) {
     const relationshipLinks = entityRelationshipLinks(type, entity);
     const statsHtml = Object.entries(stats).filter(([, value]) => value !== null).map(([key, value]) => `
         <div class="entity-stat"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(key.replaceAll('_', ' '))}</span></div>`).join('');
-    const metadata = Object.entries(entity).filter(([key, value]) => value !== null && value !== '' && !['user_id', 'logo_url', 'logo_source_url'].includes(key)).slice(0, 18).map(([key, value]) => `
-        <div class="entity-field"><span>${escapeHtml(key.replaceAll('_', ' '))}</span><strong>${escapeHtml(value)}</strong></div>`).join('');
+    const entityFieldLabels = {
+        iata_code: 'IATA code',
+        icao_code: 'ICAO code',
+        callsign: 'Callsign',
+        country: 'Country',
+        alliance: 'Alliance',
+        frequent_flyer_program: 'Loyalty program',
+        frequent_flyer_id: 'Member number',
+        website_url: 'Official website'
+    };
+    const hiddenEntityFields = ['user_id', 'logo_url', 'logo_source_url', 'logo_file_id'];
+    if (type === 'airlines') hiddenEntityFields.push('id', 'name', 'iata_code', 'icao_code');
+    const metadata = Object.entries(entity).filter(([key, value]) => value !== null && value !== '' && !hiddenEntityFields.includes(key)).slice(0, 18).map(([key, value]) => `
+        <div class="entity-field"><span>${escapeHtml(entityFieldLabels[key] || key.replaceAll('_', ' '))}</span><strong class="${key === 'frequent_flyer_id' ? 'airline-member-number' : ''}">${escapeHtml(value)}</strong></div>`).join('');
     const relatedFlights = (related.flights || []).map(f => `
         <button class="entity-related-row" onclick="openEntityPanel('flights', ${Number(f.id)})"><span><b>${escapeHtml(f.flight_number || 'Flight')}</b><small>${escapeHtml(f.date || '')}</small></span><span>${escapeHtml(f.origin_code || '')} → ${escapeHtml(f.dest_code || '')}</span></button>`).join('');
     const relatedAirports = (related.airports || []).map(a => `
@@ -1678,6 +1691,9 @@ function renderDatasetCards(config, data) {
             `;
         } else if (State.currentDataset === 'airlines') {
             const codes = [item.iata_code, item.icao_code].filter(Boolean).join(' · ');
+            const allianceBadge = item.alliance
+                ? `<span class="airline-alliance-badge airline-alliance-${escapeHtml(item.alliance.toLowerCase().replaceAll(' ', '-'))}">${escapeHtml(item.alliance)}</span>`
+                : '';
             cardHTML = `
                 <div class="library-card-header">
                     <div class="library-card-logo-box">
@@ -1689,8 +1705,9 @@ function renderDatasetCards(config, data) {
                     </div>
                 </div>
                 <div class="library-card-body">
-                    ${item.frequent_flyer_program ? `<div class="library-card-info"><i class="fa-solid fa-id-card"></i> Program: ${escapeHtml(item.frequent_flyer_program)}</div>` : ''}
-                    ${item.frequent_flyer_id ? `<div class="library-card-info"><i class="fa-solid fa-user"></i> ID: ${escapeHtml(item.frequent_flyer_id)}</div>` : ''}
+                    ${allianceBadge ? `<div class="library-card-info"><i class="fa-solid fa-people-group"></i>${allianceBadge}</div>` : ''}
+                    ${item.frequent_flyer_program ? `<div class="library-card-info"><i class="fa-solid fa-id-card"></i> ${escapeHtml(item.frequent_flyer_program)}</div>` : ''}
+                    ${item.frequent_flyer_id ? `<div class="library-card-info"><i class="fa-solid fa-user"></i> <span class="airline-member-number">${escapeHtml(item.frequent_flyer_id)}</span></div>` : ''}
                     ${item.website_url ? `
                         <div class="library-card-info">
                             <i class="fa-solid fa-link"></i> 
@@ -2110,6 +2127,13 @@ function createForm(fields, item = {}) {
             if (col.step) input.step = col.step;
             if (item[col.key]) input.value = item[col.key];
             formGroup.appendChild(input);
+        }
+
+        if (col.help) {
+            const help = document.createElement('small');
+            help.className = 'form-help';
+            help.textContent = col.help;
+            formGroup.appendChild(help);
         }
 
         form.appendChild(formGroup);
@@ -4060,6 +4084,7 @@ function renderLibraryFilters(datasetKey) {
     } else if (datasetKey === 'airlines') {
         const alliances = getUniqueValues(data, 'alliance');
         const countries = getUniqueValues(data, 'country');
+        const programs = getUniqueValues(data, 'frequent_flyer_program');
 
         bar.innerHTML = `
             <label>Alliance: 
@@ -4072,6 +4097,12 @@ function renderLibraryFilters(datasetKey) {
                 <select id="filter-airline-country" onchange="applyLibraryFilter('country', this.value)">
                     <option value="">All</option>
                     ${countries.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('')}
+                </select>
+            </label>
+            <label>Loyalty Program:
+                <select id="filter-airline-program" onchange="applyLibraryFilter('frequent_flyer_program', this.value)">
+                    <option value="">All</option>
+                    ${programs.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('')}
                 </select>
             </label>
             <label>Logo: 

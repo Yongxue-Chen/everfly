@@ -581,6 +581,41 @@ def validate_tenant_relationships(conn, table_name, data, uid):
         if not row:
             raise ValueError(f"Invalid {field}: related record does not belong to current user")
 
+
+AIRLINE_ALLIANCE_ALIASES = {
+    'skyteam': 'SkyTeam',
+    '天合联盟': 'SkyTeam',
+    'star alliance': 'Star Alliance',
+    '星空联盟': 'Star Alliance',
+    'oneworld': 'Oneworld',
+    '寰宇一家': 'Oneworld',
+}
+
+
+def normalize_airline_payload(data):
+    """Keep airline alliance, loyalty program and member number semantically separate."""
+    normalized = dict(data)
+    for field in ('name', 'iata_code', 'icao_code', 'callsign', 'country',
+                  'alliance', 'frequent_flyer_program', 'frequent_flyer_id',
+                  'website_url'):
+        if field not in normalized or normalized[field] is None:
+            continue
+        value = str(normalized[field]).strip()
+        normalized[field] = value or None
+
+    alliance = normalized.get('alliance')
+    if alliance:
+        normalized['alliance'] = AIRLINE_ALLIANCE_ALIASES.get(alliance.casefold(), alliance)
+
+    for code_field in ('iata_code', 'icao_code', 'callsign'):
+        if normalized.get(code_field):
+            normalized[code_field] = normalized[code_field].upper()
+
+    member_number = normalized.get('frequent_flyer_id')
+    if member_number:
+        normalized['frequent_flyer_id'] = re.sub(r'[\s-]+', '', member_number).upper()
+    return normalized
+
 # --- CRUD Routes Generation Helper ---
 def create_crud_routes(endpoint, table_name, columns):
     # GET all
@@ -596,6 +631,9 @@ def create_crud_routes(endpoint, table_name, columns):
     def create_item():
         data = request.json
         valid_data = {k: v for k, v in data.items() if k in columns}
+
+        if table_name == 'airlines':
+            valid_data = normalize_airline_payload(valid_data)
         
         # Normalize empty strings to None only for numeric/decimal fields in airports
         if table_name == 'airports':
@@ -653,6 +691,9 @@ def create_crud_routes(endpoint, table_name, columns):
     def update_item(id):
         data = request.json
         valid_data = {k: v for k, v in data.items() if k in columns}
+
+        if table_name == 'airlines':
+            valid_data = normalize_airline_payload(valid_data)
         
         # Normalize empty strings to None only for numeric/decimal fields in airports
         if table_name == 'airports':
@@ -2345,11 +2386,11 @@ def get_stats():
         ORDER BY cnt DESC
     """, (uid, uid, uid))
     stats['top']['airlines'] = get_top("""
-        SELECT al.name, COUNT(*) as cnt, al.frequent_flyer_program
+        SELECT al.name, COUNT(*) as cnt, al.alliance
         FROM flights f
         JOIN airlines al ON f.airline_id = al.id AND al.user_id = ?
         WHERE f.user_id = ?
-        GROUP BY al.id, al.name, al.frequent_flyer_program
+        GROUP BY al.id, al.name, al.alliance
         ORDER BY cnt DESC
     """, (uid, uid))
     stats['top']['aircraft'] = get_top("""
@@ -2519,10 +2560,10 @@ def get_stats():
     ]
 
     stats['breakdowns']['alliance'] = {r[0]: r[1] for r in conn.execute("""
-        SELECT al.frequent_flyer_program, COUNT(*)
+        SELECT al.alliance, COUNT(*)
         FROM flights f JOIN airlines al ON f.airline_id = al.id AND al.user_id = ?
-        WHERE f.user_id = ? AND al.frequent_flyer_program IS NOT NULL AND al.frequent_flyer_program != ''
-        GROUP BY al.frequent_flyer_program
+        WHERE f.user_id = ? AND al.alliance IS NOT NULL AND al.alliance != ''
+        GROUP BY al.alliance
     """, (uid, uid)).fetchall()}
     stats['breakdowns']['manufacturer'] = {r[0]: r[1] for r in conn.execute("""
         SELECT am.manufacturer, COUNT(*)

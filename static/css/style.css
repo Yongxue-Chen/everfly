@@ -2209,6 +2209,36 @@ th[onclick] {
     text-align: center;
 }
 
+.airline-alliance-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 2px 8px;
+    border: 1px solid #cbdcf0;
+    border-radius: 999px;
+    background: #eff6fd;
+    color: #1c70bf;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+.airline-alliance-skyteam { background: #eef3fa; color: #284b7a; border-color: #cad7e7; }
+.airline-alliance-star-alliance { background: #f2f3f5; color: #252a32; border-color: #d6d9df; }
+.airline-alliance-oneworld { background: #f7eef8; color: #7c367f; border-color: #e4cde5; }
+
+.airline-member-number {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    letter-spacing: 0.04em;
+}
+
+.form-help {
+    display: block;
+    margin-top: 6px;
+    color: #64748b;
+    font-size: 0.72rem;
+    line-height: 1.4;
+}
+
 .library-card-link {
     color: #1c70bf;
     text-decoration: none;
