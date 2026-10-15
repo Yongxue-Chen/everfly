@@ -11,7 +11,11 @@ if ROOT not in sys.path:
 os.environ.setdefault("FLASK_SECRET_KEY", "test-secret")
 os.environ.setdefault("MASTER_SECRET_KEY", "yQfOtmNHMhk_0T_Bq0ZyJPBC5nTrwT4GrIaeAt1CexM=")
 
-from app import build_aeroapi_related_diffs, collect_aeroapi_related_updates  # noqa: E402
+from app import (  # noqa: E402
+    _airline_codes_from_flight_number,
+    build_aeroapi_related_diffs,
+    collect_aeroapi_related_updates,
+)
 
 
 class AeroApiRelatedUpdatesTest(unittest.TestCase):
@@ -36,7 +40,7 @@ class AeroApiRelatedUpdatesTest(unittest.TestCase):
             [
                 {"field": "origin_airport_id", "label": "Origin Airport", "remote": "SFO", "status": "missing"},
                 {"field": "dest_airport_id", "label": "Destination Airport", "remote": "LAX", "status": "missing"},
-                {"field": "airline_id", "label": "Airline", "remote": "DAL", "status": "missing"},
+                {"field": "airline_id", "label": "Airline", "remote": "VS", "status": "missing"},
             ],
             diffs,
         )
@@ -70,8 +74,28 @@ class AeroApiRelatedUpdatesTest(unittest.TestCase):
         )
         self.assertEqual([101, 202, 303], values)
         self.assertEqual([("KSFO", None), ("KLAX", None)], [call.args[:2] for call in airport_mock.call_args_list])
-        airline_mock.assert_called_once_with("DAL", None, unittest.mock.ANY)
+        airline_mock.assert_called_once_with("VIR", "VS", unittest.mock.ANY)
         self.assertEqual([(101, "T1"), (202, "T2")], terminal_updates)
+
+    def test_marketing_flight_number_wins_over_remote_operator(self):
+        self.assertEqual(("DLA", "EN"), _airline_codes_from_flight_number("EN251"))
+
+        flight = (
+            "EN251", "2026-12-20",
+            11, 22,
+            None, None, None, None,
+            None, None,
+            None, None, None, None,
+            None, None,
+        )
+        candidate = {"operator": "ITY"}
+
+        with patch("app.get_or_create_airline", return_value=41) as airline_mock:
+            fields, values = collect_aeroapi_related_updates(candidate, flight, object(), 1)
+
+        self.assertEqual(["airline_id = ?"], fields)
+        self.assertEqual([41], values)
+        airline_mock.assert_called_once_with("DLA", "EN", unittest.mock.ANY)
 
     def test_existing_route_and_airline_are_not_replaced(self):
         flight = (

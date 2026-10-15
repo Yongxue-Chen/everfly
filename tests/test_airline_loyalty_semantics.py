@@ -38,12 +38,16 @@ class AirlineLoyaltySemanticsTest(unittest.TestCase):
         self.assertIn("label: 'Alliance'", airlines_config)
         self.assertIn("label: 'Loyalty Program'", airlines_config)
         self.assertIn("label: 'Member No.'", airlines_config)
-        self.assertIn("options: ['SkyTeam', 'Star Alliance', 'Oneworld']", airlines_config)
+        self.assertIn("Object.entries(ALLIANCE_LABELS)", airlines_config)
         self.assertIn("Do not add airline codes such as EK or TK", airlines_config)
 
         self.assertIn("airline-alliance-badge", self.js_source)
         self.assertIn("airline-member-number", self.js_source)
         self.assertIn("filter-airline-program", self.js_source)
+        self.assertIn("SkyTeam (天合联盟)", self.js_source)
+        self.assertIn("Star Alliance (星空联盟)", self.js_source)
+        self.assertIn("Oneworld (寰宇一家)", self.js_source)
+        self.assertGreaterEqual(self.js_source.count("formatAllianceLabel("), 4)
 
     def test_dataset_sort_handles_empty_alliance_values(self):
         self.assertIn("function compareDatasetValues(valA, valB, direction = 'asc')", self.js_source)

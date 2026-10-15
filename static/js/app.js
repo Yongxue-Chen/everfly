@@ -2,6 +2,16 @@
 // --- Constants & Config ---
 const API_BASE = '/api';
 
+const ALLIANCE_LABELS = Object.freeze({
+    SkyTeam: 'SkyTeam (天合联盟)',
+    'Star Alliance': 'Star Alliance (星空联盟)',
+    Oneworld: 'Oneworld (寰宇一家)'
+});
+
+function formatAllianceLabel(value) {
+    return ALLIANCE_LABELS[value] || value || '';
+}
+
 // Init User Info
 if (typeof CURRENT_USER !== 'undefined' && CURRENT_USER) {
     const avatar = document.getElementById('user-avatar-initial');
@@ -68,7 +78,7 @@ const DATASETS = {
             { key: 'icao_code', label: 'ICAO Code', type: 'text', required: false },
             { key: 'callsign', label: 'Callsign', type: 'text', required: false },
             { key: 'country', label: 'Country', type: 'text', required: false },
-            { key: 'alliance', label: 'Alliance', type: 'select', options: ['SkyTeam', 'Star Alliance', 'Oneworld'], required: false },
+            { key: 'alliance', label: 'Alliance', type: 'select', options: Object.entries(ALLIANCE_LABELS).map(([value, label]) => ({ value, label })), required: false },
             { key: 'frequent_flyer_program', label: 'Loyalty Program', type: 'text', required: false, placeholder: 'e.g. Flying Blue' },
             { key: 'frequent_flyer_id', label: 'Member Number', type: 'text', required: false, placeholder: 'No spaces or airline prefix', help: 'Store the account number as issued. Do not add airline codes such as EK or TK; spaces and hyphens are removed on save.' },
             { key: 'website_url', label: 'Website URL', type: 'text', required: false, placeholder: 'https://example.com' }
@@ -1201,8 +1211,10 @@ function renderEntityPanel(payload) {
     };
     const hiddenEntityFields = ['user_id', 'logo_url', 'logo_source_url', 'logo_file_id'];
     if (type === 'airlines') hiddenEntityFields.push('id', 'name', 'iata_code', 'icao_code');
-    const metadata = Object.entries(entity).filter(([key, value]) => value !== null && value !== '' && !hiddenEntityFields.includes(key)).slice(0, 18).map(([key, value]) => `
-        <div class="entity-field"><span>${escapeHtml(entityFieldLabels[key] || key.replaceAll('_', ' '))}</span><strong class="${key === 'frequent_flyer_id' ? 'airline-member-number' : ''}">${escapeHtml(value)}</strong></div>`).join('');
+    const metadata = Object.entries(entity).filter(([key, value]) => value !== null && value !== '' && !hiddenEntityFields.includes(key)).slice(0, 18).map(([key, value]) => {
+        const displayValue = type === 'airlines' && key === 'alliance' ? formatAllianceLabel(value) : value;
+        return `<div class="entity-field"><span>${escapeHtml(entityFieldLabels[key] || key.replaceAll('_', ' '))}</span><strong class="${key === 'frequent_flyer_id' ? 'airline-member-number' : ''}">${escapeHtml(displayValue)}</strong></div>`;
+    }).join('');
     const relatedFlights = (related.flights || []).map(f => `
         <button class="entity-related-row" onclick="openEntityPanel('flights', ${Number(f.id)})"><span><b>${escapeHtml(f.flight_number || 'Flight')}</b><small>${escapeHtml(f.date || '')}</small></span><span>${escapeHtml(f.origin_code || '')} → ${escapeHtml(f.dest_code || '')}</span></button>`).join('');
     const relatedAirports = (related.airports || []).map(a => `
@@ -1704,7 +1716,7 @@ function renderDatasetCards(config, data) {
         } else if (State.currentDataset === 'airlines') {
             const codes = [item.iata_code, item.icao_code].filter(Boolean).join(' · ');
             const allianceBadge = item.alliance
-                ? `<span class="airline-alliance-badge airline-alliance-${escapeHtml(item.alliance.toLowerCase().replaceAll(' ', '-'))}">${escapeHtml(item.alliance)}</span>`
+                ? `<span class="airline-alliance-badge airline-alliance-${escapeHtml(item.alliance.toLowerCase().replaceAll(' ', '-'))}">${escapeHtml(formatAllianceLabel(item.alliance))}</span>`
                 : '';
             cardHTML = `
                 <div class="library-card-header">
@@ -1869,6 +1881,8 @@ function renderDatasetTable(config, data) {
                     identity.appendChild(link);
                 }
                 td.appendChild(identity);
+            } else if (State.currentDataset === 'airlines' && col.key === 'alliance') {
+                td.textContent = formatAllianceLabel(val) || '-';
             } else {
                 if (col.key === 'name' || (State.currentDataset === 'aircraft_models' && col.key === 'manufacturer')) {
                     const badges = getDataHealthBadges(State.currentDataset, item);
@@ -2068,8 +2082,8 @@ function createForm(fields, item = {}) {
                 items.forEach(opt => {
                     const el = document.createElement('option');
                     if (typeof opt === 'object') {
-                        el.value = opt.id || opt;
-                        el.textContent = opt[col.display || 'name'] || opt.label || opt;
+                        el.value = opt.value ?? opt.id ?? '';
+                        el.textContent = opt.label ?? opt[col.display || 'name'] ?? el.value;
                     } else {
                         el.value = opt;
                         el.textContent = opt;
@@ -4102,7 +4116,7 @@ function renderLibraryFilters(datasetKey) {
             <label>Alliance: 
                 <select id="filter-airline-alliance" onchange="applyLibraryFilter('alliance', this.value)">
                     <option value="">All</option>
-                    ${alliances.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('')}
+                    ${alliances.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(formatAllianceLabel(a))}</option>`).join('')}
                 </select>
             </label>
             <label>Country: 

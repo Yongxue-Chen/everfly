@@ -2174,15 +2174,70 @@ def get_or_create_airport(icao, iata, conn):
 
 def get_or_create_airline(icao, iata, conn):
     uid = g.user['id']
-    if not icao: return None 
-    cur = conn.execute("SELECT id FROM airlines WHERE icao_code = ? AND user_id = ?", (icao, uid))
-    row = cur.fetchone()
-    if row: return row[0]
-    
-    name = icao # Default
-    new_iata = iata
-    cur = conn.execute("INSERT INTO airlines (user_id, name, iata_code, icao_code) VALUES (?, ?, ?, ?)", (uid, name, new_iata, icao))
+    icao = re.sub(r'\s+', '', str(icao or '')).upper() or None
+    iata = re.sub(r'\s+', '', str(iata or '')).upper() or None
+    if not icao and not iata:
+        return None
+
+    row = None
+    if icao:
+        row = conn.execute(
+            "SELECT id, iata_code, icao_code FROM airlines WHERE icao_code = ? AND user_id = ?",
+            (icao, uid),
+        ).fetchone()
+    if not row and iata:
+        row = conn.execute(
+            "SELECT id, iata_code, icao_code FROM airlines WHERE iata_code = ? AND user_id = ?",
+            (iata, uid),
+        ).fetchone()
+    if row:
+        updates = []
+        values = []
+        if iata and not row[1]:
+            updates.append("iata_code = ?")
+            values.append(iata)
+        if icao and not row[2]:
+            updates.append("icao_code = ?")
+            values.append(icao)
+        if updates:
+            values.extend([row[0], uid])
+            conn.execute(
+                f"UPDATE airlines SET {', '.join(updates)} WHERE id = ? AND user_id = ?",
+                values,
+            )
+        return row[0]
+
+    name = iata or icao
+    cur = conn.execute(
+        "INSERT INTO airlines (user_id, name, iata_code, icao_code) VALUES (?, ?, ?, ?)",
+        (uid, name, iata, icao),
+    )
     return cur.lastrowid
+
+
+def _airline_codes_from_flight_number(flight_number):
+    """Resolve the marketing carrier codes embedded in a stored flight number."""
+    ident = re.sub(r'\s+', '', str(flight_number or '')).upper()
+    iata_match = re.fullmatch(r'([A-Z0-9]{2})([0-9][A-Z0-9]*)', ident)
+    if iata_match:
+        iata = iata_match.group(1)
+        icao = next((code for code, value in AIRLINES_ICAO_TO_IATA.items() if value == iata), None)
+        return icao, iata
+
+    icao_match = re.fullmatch(r'([A-Z]{3})([0-9][A-Z0-9]*)', ident)
+    if icao_match:
+        icao = icao_match.group(1)
+        return icao, AIRLINES_ICAO_TO_IATA.get(icao)
+    return None, None
+
+
+def _preferred_airline_codes(flight_number, remote_operator=None):
+    """Prefer the marketing carrier recorded by the user over a remote operator."""
+    icao, iata = _airline_codes_from_flight_number(flight_number)
+    if icao or iata:
+        return icao, iata
+    operator = re.sub(r'\s+', '', str(remote_operator or '')).upper() or None
+    return operator, AIRLINES_ICAO_TO_IATA.get(operator) if operator else None
 
 # --- Calculation API ---
 @app.route('/api/calculate_duration', methods=['POST'])
@@ -3224,8 +3279,13 @@ def build_schedule_related_diffs(sched, flight):
         if dest_label:
             diffs.append({'field': 'dest_airport_id', 'label': 'Destination Airport', 'remote': dest_label, 'status': 'missing'})
     ident_icao = sched.get('ident_icao') or ''
-    if not flight[9] and ident_icao:
-        diffs.append({'field': 'airline_id', 'label': 'Airline', 'remote': ident_icao[:3], 'status': 'missing'})
+    if not flight[9]:
+        airline_icao, airline_iata = _preferred_airline_codes(
+            flight[0], ident_icao[:3] or None
+        )
+        airline_label = airline_iata or airline_icao
+        if airline_label:
+            diffs.append({'field': 'airline_id', 'label': 'Airline', 'remote': airline_label, 'status': 'missing'})
     return diffs
 
 def _collect_schedule_related_updates(sched, flight, conn, uid):
@@ -3250,8 +3310,13 @@ def _collect_schedule_related_updates(sched, flight, conn, uid):
     # (ICAO idents are always a 3-letter airline code, IATA idents 2-char).
     ident_icao = sched.get('ident_icao') or ''
     ident_iata = sched.get('ident_iata') or ''
-    if ident_icao and not flight[9]:
-        al_id = get_or_create_airline(ident_icao[:3], ident_iata[:2] or None, conn)
+    if not flight[9]:
+        airline_icao, airline_iata = _preferred_airline_codes(
+            flight[0], ident_icao[:3] or None
+        )
+        if not airline_iata and ident_iata:
+            airline_iata = ident_iata[:2]
+        al_id = get_or_create_airline(airline_icao, airline_iata, conn)
         if al_id:
             update_fields.append("airline_id = ?")
             update_values.append(al_id)
@@ -3591,8 +3656,9 @@ def collect_aeroapi_related_updates(best_match, flight, conn, uid):
             _ensure_terminal_in_db(conn, uid, flight[3] if flight[3] else aid, api_dest_term)
 
     api_airline = best_match.get('operator')
-    if api_airline and not flight[9]:
-        al_id = get_or_create_airline(api_airline, None, conn)
+    if not flight[9]:
+        airline_icao, airline_iata = _preferred_airline_codes(flight[0], api_airline)
+        al_id = get_or_create_airline(airline_icao, airline_iata, conn)
         if al_id:
             update_fields.append("airline_id = ?")
             update_values.append(al_id)
@@ -3624,11 +3690,16 @@ def build_aeroapi_related_diffs(best_match, flight):
                 'status': 'missing',
             })
 
-    if not flight[9] and best_match.get('operator'):
+    if not flight[9]:
+        airline_icao, airline_iata = _preferred_airline_codes(flight[0], best_match.get('operator'))
+        airline_label = airline_iata or airline_icao
+    else:
+        airline_label = None
+    if airline_label:
         diffs.append({
             'field': 'airline_id',
             'label': 'Airline',
-            'remote': best_match.get('operator'),
+            'remote': airline_label,
             'status': 'missing',
         })
 
