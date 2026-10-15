@@ -1296,6 +1296,10 @@ tr:hover { background: #f5f9ff; }
 .journey-section-heading h2, .library-heading h2, .view-header h2 { margin: 0; color: #142943; font-size: 1.42rem; letter-spacing: -.035em; }
 .view-subtitle { margin: 5px 0 0; color: var(--text-muted); font-size: .86rem; }
 .journey-map-panel .map-container { max-width: none; margin: 0; border-radius: 16px; box-shadow: none; }
+.route-status-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; margin-bottom: 12px; color: var(--text-muted); font-size: .8rem; }
+.route-status-legend span { display: inline-flex; align-items: center; gap: 8px; }
+.route-status-legend i { display: inline-block; width: 28px; border-top: 3px solid #2563eb; }
+.route-status-legend .route-status-pending { border-top: 3px dashed #f59e0b; }
 .journey-insights .stats-container { max-width: none; margin: 0; grid-template-columns: repeat(3, minmax(0,1fr)); }
 .journey-insights .stats-card { min-height: 160px; border-radius: 16px; cursor: pointer; }
 .journey-insights .stats-card[style*="grid-column"] { grid-column: 1 / -1 !important; }

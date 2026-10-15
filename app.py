@@ -3107,7 +3107,7 @@ def get_detailed_flights():
     cursor = conn.execute('''
         SELECT f.*,
                oa.iata_code as origin_code, oa.name as origin_name, oa.lat as origin_lat, oa.lon as origin_lon, oa.city_id as origin_city_id,
-               da.iata_code as dest_code, da.name as dest_name, da.lat as dest_lat, da.lon as dest_lon, da.city_id as dest_city_id,
+               da.iata_code as dest_code, da.name as dest_name, da.lat as dest_lat, da.lon as dest_lon, da.city_id as dest_city_id, da.timezone as dest_timezone,
                al.name as airline_name, al.iata_code as airline_iata_code, al.icao_code as airline_icao_code,
                al.alliance as airline_alliance, al.country as airline_country, al.frequent_flyer_program as airline_ff_program,
                al.logo_url as airline_logo_url, al.logo_source_url as airline_logo_source_url,

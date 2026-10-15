@@ -3892,6 +3892,37 @@ function renderProfileMap(flights, selectedYear) {
     invalidateProfileMapSize();
 }
 
+function isProfileFlightCompleted(flight, now = new Date()) {
+    // Database arrival values are destination-local wall times, not browser-local.
+    let localNow;
+    try {
+        const parts = new Intl.DateTimeFormat('en-GB', {
+            timeZone: flight.dest_timezone || 'UTC', year: 'numeric', month: '2-digit',
+            day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+        }).formatToParts(now);
+        const values = Object.fromEntries(parts.map(p => [p.type, p.value]));
+        localNow = `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
+    } catch (_) {
+        localNow = now.toISOString().slice(0, 19).replace('T', ' ');
+    }
+    for (const arrival of [flight.ata, flight.arr_time_actual, flight.sta, flight.arr_time_scheduled]) {
+        if (!arrival) continue;
+        let value = String(arrival).trim();
+        if (/^\d{2}:\d{2}(:\d{2})?$/.test(value)) value = `${flight.date} ${value}`;
+        if (!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(value)) continue;
+        if (/(Z|[+-]\d{2}:?\d{2})$/i.test(value)) {
+            const timestamp = Date.parse(value.replace(' ', 'T'));
+            if (Number.isFinite(timestamp)) return timestamp <= now.getTime();
+        } else {
+            value = value.replace('T', ' ').slice(0, 19);
+            if (value.length === 16) value += ':00';
+            return value <= localNow;
+        }
+    }
+    // With no arrival time, keep today's flights unfinished until the day ends.
+    return /^\d{4}-\d{2}-\d{2}$/.test(flight.date || '') && flight.date < localNow.slice(0, 10);
+}
+
 function refreshProfileMapLayers({ fitBounds = false } = {}) {
     if (!State.map || !State.profileMapFlights) return;
 
@@ -3916,7 +3947,9 @@ function refreshProfileMapLayers({ fitBounds = false } = {}) {
     let drawnCount = 0;
 
     console.log("renderProfileMap: filtered flights =", filtered.length);
-    filtered.forEach(f => {
+    const now = new Date();
+    // Draw unfinished routes last; dashes reveal completed routes underneath.
+    filtered.slice().sort((a, b) => Number(isProfileFlightCompleted(b, now)) - Number(isProfileFlightCompleted(a, now))).forEach(f => {
         if (!f.origin || !f.dest) {
             console.log("Missing origin or dest");
             return;
@@ -3928,9 +3961,14 @@ function refreshProfileMapLayers({ fitBounds = false } = {}) {
 
         // Draw Geodesic Line
         const curvePoints = getGeodesicPath(lat1, lon1, lat2, lon2);
+        const completed = isProfileFlightCompleted(f, now);
+        const statusLabel = completed ? '已结束' : '未结束';
         longitudeOffsets.forEach(offset => {
-            const line = L.polyline(shiftPathLongitude(curvePoints, offset), { color: '#ffb800', weight: 2, opacity: 0.6 });
-            line.bindPopup(`${escapeHtml(f.flight_number)}<br>${escapeHtml(f.date)}<br>${escapeHtml(f.origin.code)} -> ${escapeHtml(f.dest.code)}`);
+            const line = L.polyline(shiftPathLongitude(curvePoints, offset), {
+                color: completed ? '#2563eb' : '#f59e0b', weight: 3, opacity: 0.8,
+                dashArray: completed ? null : '8 6'
+            });
+            line.bindPopup(`${escapeHtml(f.flight_number)}<br>${escapeHtml(f.date)}<br>${escapeHtml(f.origin.code)} -> ${escapeHtml(f.dest.code)}<br>${statusLabel}`);
             line.addTo(State.map);
             State.profileLayers.push(line);
         });
