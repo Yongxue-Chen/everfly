@@ -20,7 +20,7 @@
         const CURRENT_USER = {{ user| tojson | safe }};
         const CSRF_TOKEN = "{{ csrf_token() }}";
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=ui-stage5-1">
+    <link rel="stylesheet" href="/static/css/style.css?v=ui-stage6-1">
 </head>
 
 <body>
@@ -247,17 +247,17 @@
     </nav>
 
     <div id="entity-panel-overlay" class="entity-panel-overlay" onclick="closeEntityPanel()" hidden></div>
-    <aside id="entity-panel" class="entity-panel" aria-label="Entity details" hidden>
+    <aside id="entity-panel" class="entity-panel" role="dialog" aria-modal="true" aria-labelledby="entity-panel-title" tabindex="-1" hidden>
         <header class="entity-panel-header">
-            <button class="btn-icon entity-panel-back" aria-label="Back" onclick="goBackEntityPanel()"><i class="fa-solid fa-arrow-left"></i></button>
+            <button id="entity-panel-back" class="btn-icon entity-panel-back" type="button" aria-label="Back to previous details" onclick="goBackEntityPanel()" disabled><i class="fa-solid fa-arrow-left" aria-hidden="true"></i></button>
             <div id="entity-panel-title" class="entity-panel-title">Details</div>
-            <button class="btn-icon" aria-label="Close details" onclick="closeEntityPanel()"><i class="fa-solid fa-xmark"></i></button>
+            <button class="btn-icon entity-panel-close" type="button" aria-label="Close details" onclick="closeEntityPanel()"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
         </header>
         <div id="entity-panel-body" class="entity-panel-body"></div>
     </aside>
 
     <script src="/static/js/journey-stats.js?v=ui-stage2-3"></script>
-    <script src="/static/js/app.js?v=ui-stage5-1"></script>
+    <script src="/static/js/app.js?v=ui-stage6-1"></script>
 </body>
 
 </html>

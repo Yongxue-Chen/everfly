@@ -21,7 +21,11 @@ const fixture = [
             const pathname = new URL(route.request().url()).pathname;
             if (pathname === '/') return route.fulfill({contentType:'text/html',body:template});
             if (pathname.startsWith('/static/')) return route.fulfill({contentType:pathname.endsWith('.js')?'text/javascript':pathname.endsWith('.css')?'text/css':'image/png',body:fs.readFileSync(path.join(root,pathname))});
-            const data = pathname === '/api/flights/detailed' ? (empty ? [] : fixture) : pathname === '/api/cities' ? [{id:1,name:'A',country:'China',country_code:'CN'},{id:2,name:'B',country:'UK',country_code:'GB'}] : [];
+            let data = [];
+            if (pathname === '/api/flights/detailed') data = empty ? [] : fixture;
+            else if (pathname === '/api/cities') data = [{id:1,name:'A',country:'China',country_code:'CN'},{id:2,name:'B',country:'UK',country_code:'GB'}];
+            else if (pathname === '/api/entities/flights/1') data = {type:'flights',entity:{...fixture[0],airline_id:1,airline_name:'Test Air'},stats:{},related:{}};
+            else if (pathname === '/api/entities/airports/1') data = {type:'airports',entity:{id:1,name:'Alpha Airport',iata_code:'AAA',icao_code:'AAAA',city_id:1,country:'China',timezone:'Asia/Shanghai',lat:40,lon:10},stats:{flights:1},related:{flights:[]}};
             assert.equal(route.request().method(),'GET','UI tests must not write data');
             return route.fulfill({contentType:'application/json',body:JSON.stringify(data)});
         });
@@ -39,7 +43,7 @@ const fixture = [
         assert.equal(await page.locator('#settings-menu-button').getAttribute('aria-expanded'),'true');
         assert.equal(await page.locator('#settings-menu [role="menuitem"]').count(),2);
         assert.equal(await page.locator('#settings-menu').getByText('Library',{exact:true}).count(),0);
-        assert.equal(await page.locator('[role="dialog"]').count(),0,'Account button must not open profile modal');
+        assert.equal(await page.locator('[role="dialog"]:not(#entity-panel)').count(),0,'Account button must not open profile modal');
         await page.keyboard.press('Escape');
         assert.equal(await page.locator('#settings-menu-button').getAttribute('aria-expanded'),'false');
         assert.equal(await page.evaluate(()=>document.activeElement?.id),'settings-menu-button');
@@ -175,17 +179,46 @@ const fixture = [
         assert.equal(await page.locator('#flight-results-status').textContent(),'1 of 2 flights');
         await page.locator('#flight-filter-reset').click();
         assert.equal(await page.locator('#flights-table tbody tr').count(),2);
+        await page.locator('.mobile-nav-primary').focus();
+        await page.evaluate(()=>openEntityPanel('flights',1));
+        await page.waitForFunction(()=>State.entityPanelCurrent?.type==='flights');
+        assert.equal(await page.locator('#entity-panel').getAttribute('role'),'dialog');
+        assert.equal(await page.locator('#entity-panel').getAttribute('aria-modal'),'true');
+        assert.equal(await page.locator('#entity-panel-back').isDisabled(),true);
+        assert.equal(await page.evaluate(()=>document.activeElement?.id),'entity-panel');
+        assert.ok(await page.locator('body').evaluate(element=>element.classList.contains('entity-panel-open')));
+        assert.equal(await page.locator('.flight-hero-actions .action-label').textContent(),'Delete');
+        await page.evaluate(()=>openEntityPanel('airports',1));
+        await page.waitForFunction(()=>State.entityPanelCurrent?.type==='airports');
+        assert.equal(await page.locator('#entity-panel-back').isEnabled(),true);
+        assert.equal(await page.locator('.entity-field > span',{hasText:/^id$/i}).count(),0);
+        const panelFocusable = page.locator('#entity-panel button:not([disabled]), #entity-panel a[href]');
+        await panelFocusable.last().focus();
+        await page.keyboard.press('Tab');
+        assert.equal(await page.evaluate(()=>document.activeElement?.id),'entity-panel-back');
+        if (process.env.UI_SCREENSHOT_DIR) {
+            fs.mkdirSync(process.env.UI_SCREENSHOT_DIR,{recursive:true});
+            for (const width of [1440,390]) {
+                await page.setViewportSize({width,height:900});
+                await page.evaluate(()=>document.querySelector('#entity-panel-body').scrollTop=0);
+                assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`Entity panel overflow at ${width}`);
+                await page.screenshot({path:path.join(process.env.UI_SCREENSHOT_DIR,`entity-panel-stage6-${width}.png`),fullPage:false});
+            }
+        }
+        await page.keyboard.press('Escape');
+        assert.equal(await page.locator('#entity-panel').isHidden(),true);
+        assert.ok(await page.evaluate(()=>document.activeElement?.classList.contains('mobile-nav-primary')));
         await page.selectOption('#flight-sort-select','date:asc');
         assert.ok((await page.locator('#flights-table tbody tr').first().textContent()).includes('TEST1'));
         await page.locator('.mobile-nav-primary').click();
-        const dialog = page.locator('[role="dialog"]');
+        const dialog = page.locator('[role="dialog"]:not(#entity-panel)');
         assert.equal(await dialog.getAttribute('aria-modal'),'true');
         assert.equal(await dialog.locator('.modal-footer button').count(),2);
         assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('name')),'flight_number');
         assert.equal(await dialog.locator('[name="flight_number"]').getAttribute('required'),'');
         assert.equal(await dialog.locator('[name="date"]').getAttribute('required'),'');
         await page.keyboard.press('Escape');
-        assert.equal(await page.locator('[role="dialog"]').count(),0);
+        assert.equal(await page.locator('[role="dialog"]:not(#entity-panel)').count(),0);
         assert.ok(await page.locator('.mobile-nav-primary').evaluate(element => element === document.activeElement));
         if (process.env.UI_SCREENSHOT_DIR) {
             fs.mkdirSync(process.env.UI_SCREENSHOT_DIR,{recursive:true});
@@ -221,9 +254,9 @@ const fixture = [
         assert.equal(await page.locator('#btn-view-card').getAttribute('aria-pressed'),'true');
         assert.equal(await page.locator('#dataset-cards .library-card').count(),2);
         await page.locator('#dataset-add-button').click();
-        assert.equal(await page.locator('[role="dialog"] form.form-grid').count(),1);
-        const cityName = page.locator('[role="dialog"] [name="name"]');
-        assert.equal(await cityName.getAttribute('id'),await page.locator('[role="dialog"] label').first().getAttribute('for'));
+        assert.equal(await page.locator('[role="dialog"]:not(#entity-panel) form.form-grid').count(),1);
+        const cityName = page.locator('[role="dialog"]:not(#entity-panel) [name="name"]');
+        assert.equal(await cityName.getAttribute('id'),await page.locator('[role="dialog"]:not(#entity-panel) label').first().getAttribute('for'));
         await page.keyboard.press('Escape');
         await page.evaluate(()=>showToast('Library feedback ready'));
         assert.equal(await page.locator('.app-toast').textContent(),'Library feedback ready');

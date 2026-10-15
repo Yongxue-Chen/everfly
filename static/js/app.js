@@ -132,6 +132,9 @@ const State = {
     profileMapMoveHandlerBound: false,
     profileMapResizeObserverBound: false,
     entityPanelHistory: [],
+    entityPanelCurrent: null,
+    entityPanelTrigger: null,
+    entityPanelRequest: 0,
     journeyCharts: {},
     libraryViewMode: 'table',
     libraryFilters: {},
@@ -288,18 +291,17 @@ async function manageAirlineLogo(id) {
         } else {
             const sourceUrl = (data.source_url || '').trim();
             if (!sourceUrl) {
-                alert('Enter a public logo URL or choose a file.');
-                return false;
+                throw new Error('Enter a public logo URL or choose a file.');
             }
             result = await API.post(`airlines/${id}/logo`, { source_url: sourceUrl });
         }
         if (result.error) {
-            alert(result.error);
-            return false;
+            throw new Error(result.error);
         }
         openEntityPanel('airlines', id, false);
         if (State.currentView === 'flights') loadFlights();
         if (State.currentView === 'datasets' && State.currentDataset === 'airlines') loadDataset('airlines');
+        showToast('Airline logo updated.');
         return true;
     });
 }
@@ -450,34 +452,62 @@ function entityLinkButton(type, id, label, extraClass = '') {
 
 async function openEntityPanel(type, id, pushHistory = true) {
     if (!type || !id) return;
+    const wasClosed = document.getElementById('entity-panel')?.hidden !== false;
+    if (wasClosed) State.entityPanelTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (pushHistory) State.entityPanelHistory.push({ type, id: Number(id) });
     const panel = document.getElementById('entity-panel');
     const overlay = document.getElementById('entity-panel-overlay');
     const body = document.getElementById('entity-panel-body');
+    const requestId = ++State.entityPanelRequest;
     panel.hidden = false;
     overlay.hidden = false;
+    panel.setAttribute('aria-busy', 'true');
     document.body.classList.add('entity-panel-open');
-    body.innerHTML = '<div class="entity-panel-state"><i class="fa-solid fa-circle-notch fa-spin"></i> Loading details...</div>';
+    updateEntityPanelNavigation();
+    body.innerHTML = '<div class="entity-panel-state" role="status"><i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i><span>Loading details…</span></div>';
+    requestAnimationFrame(() => panel.focus());
     try {
         const payload = await API.get(`entities/${type}/${id}`);
+        if (requestId !== State.entityPanelRequest || panel.hidden) return;
         if (payload.error) throw new Error(payload.error);
         renderEntityPanel(payload);
     } catch (error) {
-        body.innerHTML = `<div class="entity-panel-state entity-panel-error">${escapeHtml(error.message || 'Unable to load details')}<button class="btn btn-secondary" onclick="openEntityPanel('${type}', ${Number(id)}, false)">Retry</button></div>`;
+        if (requestId !== State.entityPanelRequest || panel.hidden) return;
+        body.innerHTML = `<div class="entity-panel-state entity-panel-error" role="alert"><i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i><strong>Unable to load details</strong><span>${escapeHtml(error.message || 'Please try again.')}</span><button class="btn btn-secondary" type="button" onclick="openEntityPanel('${type}', ${Number(id)}, false)">Retry</button></div>`;
+    } finally {
+        if (requestId === State.entityPanelRequest) panel.removeAttribute('aria-busy');
     }
 }
 
 function closeEntityPanel() {
-    document.getElementById('entity-panel').hidden = true;
+    const panel = document.getElementById('entity-panel');
+    if (!panel || panel.hidden) return;
+    State.entityPanelRequest += 1;
+    panel.hidden = true;
     document.getElementById('entity-panel-overlay').hidden = true;
     document.body.classList.remove('entity-panel-open');
     State.entityPanelHistory = [];
+    State.entityPanelCurrent = null;
+    Object.values(State.miniMaps || {}).forEach(map => map?.remove?.());
+    State.miniMaps = {};
+    const trigger = State.entityPanelTrigger;
+    State.entityPanelTrigger = null;
+    if (trigger?.isConnected) trigger.focus();
+}
+
+function updateEntityPanelNavigation() {
+    const back = document.getElementById('entity-panel-back');
+    if (!back) return;
+    const canGoBack = State.entityPanelHistory.length > 1;
+    back.disabled = !canGoBack;
+    back.setAttribute('aria-label', canGoBack ? 'Back to previous details' : 'No previous details');
 }
 
 function goBackEntityPanel() {
     if (State.entityPanelHistory.length <= 1) return closeEntityPanel();
     State.entityPanelHistory.pop();
     const previous = State.entityPanelHistory[State.entityPanelHistory.length - 1];
+    updateEntityPanelNavigation();
     openEntityPanel(previous.type, previous.id, false);
 }
 
@@ -499,16 +529,53 @@ function editCurrentEntityPanel() {
     editEntityFromPanel(current.type, current.entity);
 }
 
-async function deleteCurrentEntityPanel() {
+async function deleteCurrentEntityPanel(button = null) {
     const current = State.entityPanelCurrent;
-    if (!current || !confirm(`Delete this ${ENTITY_LABELS[current.type] || 'record'}?`)) return;
-    const result = await API.delete(current.type, current.entity.id);
-    if (result.error) return alert(result.error);
-    closeEntityPanel();
-    if (State.currentView === 'profile') loadProfile();
-    if (State.currentView === 'flights') loadFlights();
-    if (State.currentView === 'datasets' && State.currentDataset === current.type) loadDataset(current.type);
+    if (!current) return;
+    const label = entityDisplayName(current.type, current.entity);
+    if (!confirm(`Delete ${label}? This cannot be undone.`)) return;
+    setButtonBusy(button, true, 'Deleting…');
+    try {
+        const result = await API.delete(current.type, current.entity.id);
+        if (result.error) throw new Error(result.error);
+        closeEntityPanel();
+        showToast(`${ENTITY_LABELS[current.type] || 'Record'} deleted.`);
+        if (State.currentView === 'profile') loadProfile();
+        if (State.currentView === 'flights') loadFlights();
+        if (State.currentView === 'datasets' && State.currentDataset === current.type) loadDataset(current.type, { resetControls: false });
+    } catch (error) {
+        showToast(error?.message || 'Delete failed.', 'error');
+    } finally {
+        setButtonBusy(button, false);
+    }
 }
+
+document.addEventListener('keydown', event => {
+    const panel = document.getElementById('entity-panel');
+    if (!panel || panel.hidden || modalStack.length) return;
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        closeEntityPanel();
+        return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = Array.from(panel.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'))
+        .filter(element => element.offsetParent !== null);
+    if (!focusable.length) {
+        event.preventDefault();
+        panel.focus();
+        return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+    }
+});
 
 function entityRelationshipLinks(type, entity) {
     const links = [];
@@ -692,7 +759,7 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
             </div>
             <div class="flight-hero-actions">
                 <button class="btn btn-sm btn-primary" onclick="editCurrentEntityPanel()"><i class="fa-solid fa-pen"></i> Edit</button>
-                <button class="btn btn-sm action-danger" onclick="deleteCurrentEntityPanel()"><i class="fa-solid fa-trash"></i></button>
+                <button class="btn btn-sm action-danger" type="button" aria-label="Delete ${escapeHtml(title)}" onclick="deleteCurrentEntityPanel(this)"><i class="fa-solid fa-trash" aria-hidden="true"></i><span class="action-label">Delete</span></button>
             </div>
         </div>
 
@@ -1263,10 +1330,22 @@ function renderEntityPanel(payload) {
         alliance: 'Alliance',
         frequent_flyer_program: 'Loyalty program',
         frequent_flyer_id: 'Member number',
-        website_url: 'Official website'
+        website_url: 'Official website',
+        timezone: 'Time zone',
+        country_code: 'Country code',
+        lat: 'Latitude',
+        lon: 'Longitude',
+        terminals: 'Terminals',
+        manufacturer: 'Manufacturer',
+        model: 'Model',
+        series: 'Series',
+        subtype: 'Subtype',
+        tags_generation: 'Generation options',
+        tags_winglets: 'Winglet options',
+        tags_config: 'Configuration options'
     };
-    const hiddenEntityFields = ['user_id', 'logo_url', 'logo_source_url', 'logo_file_id'];
-    if (type === 'airlines') hiddenEntityFields.push('id', 'name', 'iata_code', 'icao_code');
+    const hiddenEntityFields = ['id', 'name', 'user_id', 'logo_url', 'logo_source_url', 'logo_file_id', 'city_id'];
+    if (type === 'airlines') hiddenEntityFields.push('iata_code', 'icao_code');
     const metadata = Object.entries(entity).filter(([key, value]) => value !== null && value !== '' && !hiddenEntityFields.includes(key)).slice(0, 18).map(([key, value]) => {
         const displayValue = type === 'airlines' && key === 'alliance' ? formatAllianceLabel(value) : value;
         return `<div class="entity-field"><span>${escapeHtml(entityFieldLabels[key] || key.replaceAll('_', ' '))}</span><strong class="${key === 'frequent_flyer_id' ? 'airline-member-number' : ''}">${escapeHtml(displayValue)}</strong></div>`;
@@ -1285,7 +1364,7 @@ function renderEntityPanel(payload) {
     }
 
     document.getElementById('entity-panel-body').innerHTML = `
-        <section class="entity-hero">${type === 'airlines' ? airlineLogoMarkup(entity.logo_url, entity.logo_source_url, entity.iata_code || entity.icao_code || entity.name, 'detail') : `<div class="entity-mark">${escapeHtml((codes[0] || title || '?').slice(0, 3).toUpperCase())}</div>`}<div class="entity-hero-copy"><h2>${escapeHtml(title)}</h2><p>${codes.map(escapeHtml).join(' · ')}</p><div class="entity-hero-actions"><button class="btn btn-sm btn-primary" onclick="editCurrentEntityPanel()">Edit</button>${type === 'airlines' ? `<button class="btn btn-sm btn-secondary" onclick="manageAirlineLogo(${Number(entity.id)})">Manage logo</button>` : ''}<button class="btn btn-sm action-danger" onclick="deleteCurrentEntityPanel()"><i class="fa-solid fa-trash"></i> Delete</button></div></div></section>
+        <section class="entity-hero">${type === 'airlines' ? airlineLogoMarkup(entity.logo_url, entity.logo_source_url, entity.iata_code || entity.icao_code || entity.name, 'detail') : `<div class="entity-mark">${escapeHtml((codes[0] || title || '?').slice(0, 3).toUpperCase())}</div>`}<div class="entity-hero-copy"><h2>${escapeHtml(title)}</h2><p>${codes.map(escapeHtml).join(' · ')}</p><div class="entity-hero-actions"><button class="btn btn-sm btn-primary" type="button" onclick="editCurrentEntityPanel()"><i class="fa-solid fa-pen" aria-hidden="true"></i> Edit</button>${type === 'airlines' ? `<button class="btn btn-sm btn-secondary" type="button" onclick="manageAirlineLogo(${Number(entity.id)})"><i class="fa-regular fa-image" aria-hidden="true"></i> Manage logo</button>` : ''}<button class="btn btn-sm action-danger" type="button" onclick="deleteCurrentEntityPanel(this)"><i class="fa-solid fa-trash" aria-hidden="true"></i> Delete</button></div></div></section>
         ${statsHtml ? `<section><h3>Overview</h3><div class="entity-stats">${statsHtml}</div></section>` : ''}
         ${relationshipLinks ? `<section><h3>Connections</h3>${relationshipLinks}</section>` : ''}
         ${weatherHtml}
@@ -1338,10 +1417,13 @@ function _renderWeatherBody(w) {
     const vis = w.visibility_m != null ? (w.visibility_m >= 9999 ? '10+ km' : `${(w.visibility_m / 1000).toFixed(1)} km`) : '—';
     const frRaw = (w.flight_rules || '').toLowerCase();
     const frLabel = FLIGHT_RULES_LABELS[frRaw] || w.flight_rules || '—';
+    const conditionVisual = w.condition_emoji
+        ? escapeHtml(w.condition_emoji)
+        : '<i class="fa-solid fa-cloud-sun" aria-hidden="true"></i>';
 
     return `
         <div class="weather-main">
-            <span class="weather-emoji">${escapeHtml(w.condition_emoji || '🌤️')}</span>
+            <span class="weather-emoji">${conditionVisual}</span>
             <span class="weather-temp">${escapeHtml(temp)}</span>
             <span class="weather-condition">${escapeHtml(w.condition || 'Unknown')}</span>
         </div>
