@@ -3458,3 +3458,18 @@ body.entity-panel-open { overflow: hidden; }
     .entity-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .entity-field { grid-template-columns: minmax(94px, .8fr) 1.2fr; }
 }
+
+/* Stage 7: unified feedback, forms and control states */
+.app-toast-warning { border-color: #f0d49a; background: #fff9e9; color: #7a5610; }
+.app-toast-info { border-color: #b9d8f3; background: #f0f7fe; color: #245f91; }
+.form-section-divider { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; color: #657a91; font-size: .75rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.form-section-divider::after { content: ''; height: 1px; flex: 1; background: #dfe8f1; }
+.field-status { display: inline-flex; margin-left: 6px; padding: 2px 7px; border-radius: 999px; font-size: .68rem; font-weight: 800; vertical-align: middle; }
+.field-status-configured { background: #e7f7ed; color: #287348; }
+.field-status-missing { background: #fff2d8; color: #8b5d08; }
+.form-control-inline { display: grid; grid-template-columns: minmax(0, 1fr) 40px; align-items: stretch; gap: 7px; }
+.form-control-inline > .btn { display: inline-grid; min-height: 40px; place-items: center; padding: 0; }
+.map-controls [data-map-layer] { border-color: rgba(255, 255, 255, .68); background: rgba(255, 255, 255, .78); color: #50647a; backdrop-filter: blur(8px); }
+.map-controls [data-map-layer].active,
+.map-controls [data-map-layer][aria-pressed="true"] { border-color: #8bb8df; background: #fff; color: #075cae; box-shadow: 0 3px 10px rgba(27, 71, 112, .18); font-weight: 800; }
+.map-controls [data-map-layer]:focus-visible { outline: 2px solid #075cae; outline-offset: 2px; }

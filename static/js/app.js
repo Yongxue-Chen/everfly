@@ -217,7 +217,8 @@ function showToast(message, type = 'success') {
     const toast = document.createElement('div');
     toast.className = `app-toast app-toast-${type}`;
     toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
-    const icon = type === 'error' ? 'fa-circle-exclamation' : 'fa-circle-check';
+    const icons = { error: 'fa-circle-exclamation', warning: 'fa-triangle-exclamation', info: 'fa-circle-info', success: 'fa-circle-check' };
+    const icon = icons[type] || icons.success;
     toast.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i><span>${escapeHtml(message)}</span>`;
     region.appendChild(toast);
     requestAnimationFrame(() => toast.classList.add('show'));
@@ -269,13 +270,13 @@ async function manageAirlineLogo(id) {
         container.innerHTML = `
             <form class="form-grid">
                 <div class="form-group full-width">
-                    <label>Public logo URL</label>
-                    <input name="source_url" type="url" placeholder="https://example.com/airline-logo.svg">
+                    <label for="airline-logo-url">Public logo URL</label>
+                    <input id="airline-logo-url" name="source_url" type="url" inputmode="url" autocomplete="url" placeholder="https://example.com/airline-logo.svg">
                     <small>Recommended for the free plan. The original URL remains as a fallback.</small>
                 </div>
                 <div class="form-group full-width">
-                    <label>Or upload a logo</label>
-                    <input name="file" type="file" accept=".png,.jpg,.jpeg,.webp,.svg,image/png,image/jpeg,image/webp,image/svg+xml">
+                    <label for="airline-logo-file">Or upload a logo</label>
+                    <input id="airline-logo-file" name="file" type="file" accept=".png,.jpg,.jpeg,.webp,.svg,image/png,image/jpeg,image/webp,image/svg+xml">
                     <small>PNG, JPEG, WebP, or SVG, up to 1 MB. Uploads require ImageKit configuration.</small>
                 </div>
             </form>`;
@@ -364,29 +365,29 @@ async function openEditProfileModal() {
         apiKeyConfigured = status.configured;
     } catch (e) {}
 
-    const statusColor = apiKeyConfigured ? '#4caf50' : '#ff9800';
     const statusText = apiKeyConfigured ? 'Configured ✓' : 'Not set';
+    const statusClass = apiKeyConfigured ? 'configured' : 'missing';
 
     openModal('Edit Profile', () => {
         const div = document.createElement('div');
         div.innerHTML = `
-            <form id="edit-profile-form">
-                <div class="form-group">
-                    <label>Username</label>
-                    <input type="text" name="username" value="${escapeHtml(CURRENT_USER.username)}" required>
+            <form id="edit-profile-form" class="form-grid">
+                <div class="form-group form-group-wide">
+                    <label for="profile-username">Username</label>
+                    <input id="profile-username" type="text" name="username" value="${escapeHtml(CURRENT_USER.username)}" autocomplete="username" required>
                 </div>
                 <div class="form-group">
-                    <label>New Password (leave blank to keep current)</label>
-                    <input type="password" name="password" placeholder="New Password">
+                    <label for="profile-password">New password</label>
+                    <input id="profile-password" type="password" name="password" autocomplete="new-password" placeholder="Leave blank to keep current">
                 </div>
                 <div class="form-group">
-                    <label>Confirm Password</label>
-                    <input type="password" name="confirm_password" placeholder="Confirm Password">
+                    <label for="profile-confirm-password">Confirm new password</label>
+                    <input id="profile-confirm-password" type="password" name="confirm_password" autocomplete="new-password" placeholder="Repeat new password">
                 </div>
-                <hr style="margin: 16px 0; border-color: #444;">
-                <div class="form-group">
-                    <label>FlightAware API Key &nbsp;<span style="font-size:0.8em; color:${statusColor};">${statusText}</span></label>
-                    <input type="password" name="flightaware_api_key" placeholder="Leave blank to keep current">
+                <div class="form-section-divider form-group-wide"><span>Flight data integration</span></div>
+                <div class="form-group form-group-wide">
+                    <label for="profile-api-key">FlightAware API key <span class="field-status field-status-${statusClass}">${statusText}</span></label>
+                    <input id="profile-api-key" type="password" name="flightaware_api_key" autocomplete="off" placeholder="Leave blank to keep current">
                 </div>
             </form>
         `;
@@ -397,8 +398,7 @@ async function openEditProfileModal() {
         const data = Object.fromEntries(formData.entries());
 
         if (data.password && data.password !== data.confirm_password) {
-            alert("Passwords do not match!");
-            return false;
+            throw new Error('The new passwords do not match.');
         }
 
         const payload = {
@@ -408,8 +408,7 @@ async function openEditProfileModal() {
 
         const res = await API.post('profile/update', payload);
         if (res.error) {
-            alert(res.error);
-            return false;
+            throw new Error(res.error);
         }
 
         // Update local state
@@ -424,12 +423,12 @@ async function openEditProfileModal() {
         if (newApiKey) {
             const keyRes = await API.post('profile/api-key', { api_key: newApiKey });
             if (keyRes.error) {
-                alert('Profile saved, but API key error: ' + keyRes.error);
-                return false;
+                throw new Error(`Profile saved, but the API key could not be saved: ${keyRes.error}`);
             }
         }
 
-        alert(res.message + (newApiKey ? '\nFlightAware API key saved.' : ''));
+        showToast(newApiKey ? 'Profile and FlightAware API key saved.' : (res.message || 'Profile saved.'));
+        return true;
     });
 }
 
@@ -1527,6 +1526,11 @@ function getProfileMapPalette(type = State.profileMapType) {
 function setMapLayer(type) {
     if (!State.map) return;
     State.profileMapType = type === 'satellite' ? 'satellite' : 'map';
+    document.querySelectorAll('[data-map-layer]').forEach(button => {
+        const selected = button.dataset.mapLayer === State.profileMapType;
+        button.classList.toggle('active', selected);
+        button.setAttribute('aria-pressed', String(selected));
+    });
     if (State.profileBaseLayer) State.map.removeLayer(State.profileBaseLayer);
     if (type === 'satellite') {
         State.profileBaseLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
@@ -1724,13 +1728,13 @@ async function clearCurrentDataset() {
         const json = await res.json();
 
         if (json.error) {
-            alert('Error: ' + json.error);
+            showToast(json.error, 'error');
         } else {
-            alert(json.message);
+            showToast(json.message || `${config.label} cleared.`);
             loadDataset(State.currentDataset); // Refresh
         }
     } catch (e) {
-        alert('Failed: ' + e);
+        showToast(`Clear failed: ${e?.message || e}`, 'error');
     }
 }
 
@@ -2515,7 +2519,7 @@ function openImportModal() {
         div.innerHTML = `
             <p>Importing: <strong>${config.label}</strong></p>
             ${helpText}
-            <input type="file" id="csv-file-input" accept=".csv" style="margin-top:10px; display:block; width:100%;">
+            <div class="form-group"><label for="dataset-csv-file">CSV file</label><input type="file" id="dataset-csv-file" accept=".csv"></div>
         `;
         return div;
     };
@@ -2523,8 +2527,7 @@ function openImportModal() {
     openModal(`Import ${config.label} CSV`, contentFn, async () => {
         const fileInput = document.querySelector('input[type="file"]');
         if (!fileInput.files[0]) {
-            alert('Please select a file');
-            return false;
+            throw new Error('Select a CSV file to continue.');
         }
 
         const formData = new FormData();
@@ -2533,18 +2536,16 @@ function openImportModal() {
         try {
             const res = await API.upload(`import/${config.endpoint}`, formData);
             if (res.error) {
-                alert('Error: ' + res.error);
-                return false;
+                throw new Error(res.error);
             } else {
-                alert(res.message);
+                showToast(res.message || `${config.label} imported.`);
                 if (res.errors && res.errors.length > 0) {
-                    alert('Some rows failed:\n' + res.errors.slice(0, 10).join('\n') + (res.errors.length > 10 ? '\n...' : ''));
+                    showToast(`${res.errors.length} rows could not be imported.`, 'warning');
                 }
                 loadDataset(State.currentDataset);
             }
         } catch (e) {
-            alert('Upload failed: ' + e);
-            return false;
+            throw new Error(`Upload failed: ${e?.message || e}`);
         }
     });
 }
@@ -2818,7 +2819,7 @@ async function updateFlightFromAeroAPI(id, button = null) {
     try {
         const preview = await API.post(`flights/${id}/aeroapi_preview`, {});
         if (preview.error) {
-            alert('Update failed: ' + preview.error);
+            showToast(`Update failed: ${preview.error}`, 'error');
             return;
         }
         if (preview.ambiguous) {
@@ -2828,7 +2829,7 @@ async function updateFlightFromAeroAPI(id, button = null) {
 
         openAeroApiDiffModal(id, preview);
     } catch (e) {
-        alert('Error: ' + e);
+        showToast(`AeroAPI request failed: ${e?.message || e}`, 'error');
     } finally {
         if (button) {
             button.disabled = false;
@@ -2840,7 +2841,7 @@ async function updateFlightFromAeroAPI(id, button = null) {
 
 function openAeroApiCandidateModal(id, candidates) {
     if (!candidates.length) {
-        alert('No AeroAPI candidates found.');
+        showToast('No AeroAPI candidates found.', 'info');
         return;
     }
 
@@ -2885,6 +2886,7 @@ function openAeroApiCandidateModal(id, candidates) {
             radio.name = 'aeroapi-candidate';
             radio.value = candidate.index;
             radio.required = true;
+            radio.setAttribute('aria-label', `Select ${candidate.ident_iata || candidate.ident || candidate.ident_icao || 'flight'} ${routeText(candidate)}`);
             if (position === 0) radio.checked = true;
             radioTd.appendChild(radio);
 
@@ -2915,19 +2917,16 @@ function openAeroApiCandidateModal(id, candidates) {
     }, async () => {
         const selected = document.querySelector('input[name="aeroapi-candidate"]:checked');
         if (!selected) {
-            alert('Select a flight candidate.');
-            return false;
+            throw new Error('Select a flight candidate.');
         }
 
         const candidateIndex = Number(selected.value);
         const preview = await API.post(`flights/${id}/aeroapi_preview`, { candidate_index: candidateIndex });
         if (preview.error) {
-            alert('Update failed: ' + preview.error);
-            return false;
+            throw new Error(`Update failed: ${preview.error}`);
         }
         if (preview.ambiguous) {
-            alert('Select one AeroAPI flight before reviewing fields.');
-            return false;
+            throw new Error('Select one AeroAPI flight before reviewing fields.');
         }
 
         closeModal();
@@ -2941,7 +2940,7 @@ function openAeroApiDiffModal(id, preview) {
     const relatedDiffs = preview.related_diffs || [];
     const selectable = diffs.filter(d => d.status !== 'same');
     if ((diffs.length === 0 || selectable.length === 0) && relatedDiffs.length === 0) {
-        alert('No AeroAPI differences found.');
+        showToast('This flight already matches AeroAPI.', 'info');
         return;
     }
 
@@ -2988,6 +2987,7 @@ function openAeroApiDiffModal(id, preview) {
             cb.name = 'aeroapi-field';
             cb.value = diff.field;
             cb.checked = !!diff.default_selected;
+            cb.setAttribute('aria-label', `Replace ${diff.label || diff.field} with AeroAPI value`);
             if (diff.status === 'same') cb.disabled = true;
             actionTd.appendChild(cb);
 
@@ -3030,8 +3030,7 @@ function openAeroApiDiffModal(id, preview) {
     }, async (data) => {
         const checked = Array.from(document.querySelectorAll('input[name="aeroapi-field"]:checked')).map(cb => cb.value);
         if (checked.length === 0 && relatedDiffs.length === 0) {
-            alert('No fields selected.');
-            return false;
+            throw new Error('Select at least one field to update.');
         }
 
         const res = await API.post(`flights/${id}/aeroapi_apply`, {
@@ -3039,11 +3038,11 @@ function openAeroApiDiffModal(id, preview) {
             candidate_index: preview.candidate_index
         });
         if (res.error) {
-            alert('Update failed: ' + res.error);
-            return false;
+            throw new Error(`Update failed: ${res.error}`);
         }
-        alert(`Updated ${res.fields_updated || 0} fields.`);
+        showToast(`Updated ${res.fields_updated || 0} fields.`);
         loadFlights();
+        return true;
     });
 }
 
@@ -3053,18 +3052,17 @@ async function updateMissingFlights() {
 
     try {
         const res = await API.post('flights/update_aeroapi_missing', {});
-        alert(`Bulk update complete.\nUpdated: ${res.updated}\nTotal Candidates: ${res.total_candidates}`);
+        if (res.error) throw new Error(res.error);
+        showToast(`Bulk update complete: ${res.updated || 0} of ${res.total_candidates || 0} candidates updated.`);
         loadFlights();
     } catch (e) {
-        alert('Bulk update error: ' + e);
+        showToast(`Bulk update failed: ${e?.message || e}`, 'error');
     } finally {
         if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-cloud-download-alt"></i> Update Missing'; }
     }
 }
 
 function openImportFlightsModal() {
-    const old = State.currentDataset;
-    State.currentDataset = 'flights';
     const config = { label: 'Flights', endpoint: 'flights' };
 
     openModal('Import Flights CSV', () => {
@@ -3086,17 +3084,15 @@ function openImportFlightsModal() {
                 • <code>class</code>: Cabin class (Economy/Business)<br>
                 • <code>note</code>: Notes
             </div>
-            <p>Choose a CSV file to import:</p>
-            <input type="file" id="csv-file-input" accept=".csv" style="width:100%;">
+            <div class="form-group"><label for="flight-csv-file">CSV file</label><input type="file" id="flight-csv-file" accept=".csv"></div>
         `;
         const input = div.querySelector('input');
         // No onchange handler needed
         return div;
     }, async () => {
-        const fileInput = document.getElementById('csv-file-input');
+        const fileInput = document.getElementById('flight-csv-file');
         if (!fileInput || !fileInput.files[0]) {
-            alert('Please select a file');
-            return false;
+            throw new Error('Select a CSV file to continue.');
         }
 
         try {
@@ -3105,25 +3101,28 @@ function openImportFlightsModal() {
             const res = await API.upload(`import/flights`, formData);
 
             if (res.error) {
-                alert('Import Error: ' + res.error);
-                return false;
+                throw new Error(`Import failed: ${res.error}`);
             } else {
-                const errorMsg = (res.errors && res.errors.length) ? "\nErrors: " + res.errors.join(", ") : "";
-                alert(res.message + errorMsg);
+                showToast(res.message || 'Flights imported.');
+                if (res.errors?.length) showToast(`${res.errors.length} rows could not be imported.`, 'warning');
                 loadFlights();
-                State.currentDataset = old;
             }
         } catch (e) {
-            alert('Import failed: ' + e);
-            return false;
+            throw new Error(e?.message || `Import failed: ${e}`);
         }
     });
 }
 
 async function deleteFlight(id) {
     if (!confirm('Delete flight?')) return;
-    await API.delete('flights', id);
-    loadFlights();
+    try {
+        const result = await API.delete('flights', id);
+        if (result.error) throw new Error(result.error);
+        showToast('Flight deleted.');
+        loadFlights();
+    } catch (error) {
+        showToast(error?.message || 'Delete failed.', 'error');
+    }
 }
 
 async function openEditFlightModal(item) {
@@ -3229,52 +3228,45 @@ async function openEditFlightModal(item) {
 
         // --- Dynamic Add Helper ---
         const injectAddButton = (select, parentSelect, parentList, parentField, apiEndpoint, refreshFn, itemKey) => {
+            const optionLabel = select.closest('.form-group')?.querySelector('label')?.textContent?.trim() || 'option';
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'btn btn-sm btn-secondary';
-            btn.innerText = '+';
-            btn.title = 'Add New Item';
-            btn.onclick = async () => {
+            btn.innerHTML = '<i class="fa-solid fa-plus" aria-hidden="true"></i>';
+            btn.title = `Add ${optionLabel.toLowerCase()}`;
+            btn.setAttribute('aria-label', `Add ${optionLabel.toLowerCase()}`);
+            btn.onclick = () => {
                 const parentId = parentSelect.value;
-                if (!parentId) return alert('Please select a parent item first.');
-
-                const newValue = prompt(`Enter new value for ${parentField}:`);
-                if (!newValue) return;
-
+                if (!parentId) return showToast('Select the related airport or aircraft first.', 'info');
                 const parentObj = parentList.find(x => x.id == parentId);
                 if (!parentObj) return;
-
-                let current = parentObj[parentField] || '';
-                // Check duplicate
-                if (current.split(',').map(s => s.trim()).includes(newValue.trim())) {
-                    alert('Item already exists.');
-                    return;
-                }
-
-                parentObj[parentField] = current ? current + ', ' + newValue : newValue;
-
-                try {
-                    // Update Backend
-                    await API.put(apiEndpoint, parentId, parentObj);
-
-                    // Update Local Item state so refreshFn selects it (if refreshFn uses item)
-                    // Terminal refresh uses 'item', Variant refresh uses 'item'
+                openModal(`Add ${optionLabel}`, () => createForm([
+                    { key: 'value', label: optionLabel, type: 'text', required: true, placeholder: `Enter ${optionLabel.toLowerCase()}` }
+                ]), async ({ value }) => {
+                    const newValue = String(value || '').trim();
+                    const current = parentObj[parentField] || '';
+                    if (current.split(',').map(entry => entry.trim().toLowerCase()).includes(newValue.toLowerCase())) {
+                        throw new Error('That option already exists.');
+                    }
+                    const updatedParent = { ...parentObj, [parentField]: current ? `${current}, ${newValue}` : newValue };
+                    const result = await API.put(apiEndpoint, parentId, updatedParent);
+                    if (result.error) throw new Error(result.error);
+                    Object.assign(parentObj, updatedParent);
                     item[itemKey] = newValue;
-
-                    // Refresh Options
                     refreshFn(parentId);
-
-                    // Explicitly set value just in case
                     select.value = newValue;
-                } catch (e) {
-                    alert('Update failed: ' + e);
-                }
+                    showToast(`${optionLabel} added.`);
+                    return true;
+                });
             };
 
             // Append to wrapper
             if (select.parentNode) {
-                select.parentNode.appendChild(btn);
-                select.style.flex = '1';
+                const group = select.parentNode;
+                const row = document.createElement('div');
+                row.className = 'form-control-inline';
+                group.insertBefore(row, select);
+                row.append(select, btn);
             }
         };
 
@@ -3360,10 +3352,11 @@ async function openEditFlightModal(item) {
     }, async (data) => {
         const res = await API.put('flights', item.id, data);
         if (res.error) {
-            alert('Save failed: ' + res.error);
-            return false;
+            throw new Error(`Save failed: ${res.error}`);
         }
+        showToast('Flight updated.');
         loadFlights();
+        return true;
     });
 }
 
@@ -3391,20 +3384,19 @@ async function openAddFlightModal() {
         try {
             const res = await API.post('flights', data);
             if (res.error) {
-                alert('Error: ' + res.error);
-                return false;
+                throw new Error(res.error);
             }
 
             const flightId = res.id || res.lastrowid; // Check what API returns
 
             if (State.currentView === 'flights') loadFlights();
             if (State.currentView === 'profile') loadProfile(); // Update profile counts
+            showToast('Flight added.');
 
             // Manual update only via cloud button
 
         } catch (e) {
-            alert('Error creating flight: ' + e);
-            return false;
+            throw new Error(`Could not add flight: ${e?.message || e}`);
         }
     });
 }
@@ -4819,6 +4811,6 @@ window.addEventListener('DOMContentLoaded', () => {
         console.log("FlightLog: Navigated to", initialView);
     } catch (e) {
         console.error("FlightLog Init Error:", e);
-        alert("App Initialization Failed: " + e.message);
+        showToast(`App initialization failed: ${e.message}`, 'error');
     }
 });

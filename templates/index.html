@@ -20,7 +20,7 @@
         const CURRENT_USER = {{ user| tojson | safe }};
         const CSRF_TOKEN = "{{ csrf_token() }}";
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=ui-stage6-1">
+    <link rel="stylesheet" href="/static/css/style.css?v=ui-stage7-1">
 </head>
 
 <body>
@@ -37,8 +37,8 @@
             <a href="/profile" class="nav-item active" data-route-view="profile" data-view-nav="profile" aria-current="page">Journey</a>
             <a href="/flights" class="nav-item" data-route-view="flights" data-view-nav="flights">Flights</a>
             <a href="/library" class="nav-item" data-route-view="datasets" data-view-nav="datasets">Library</a>
-            <button class="btn btn-primary" onclick="openAddFlightModal()">
-                <i class="fa-solid fa-plus"></i> Add flight
+            <button type="button" class="btn btn-primary" onclick="openAddFlightModal()">
+                <i class="fa-solid fa-plus" aria-hidden="true"></i> Add flight
             </button>
             <div class="dropdown" id="settings-dropdown">
                 <button type="button" id="settings-menu-button" class="user-info dropdown-toggle account-menu-toggle" onclick="toggleDropdown()" aria-expanded="false" aria-haspopup="menu" aria-controls="settings-menu" aria-label="Account menu">
@@ -111,8 +111,8 @@
                     <div class="map-container">
                         <div id="flight-map"></div>
                         <div class="map-controls">
-                            <button onclick="setMapLayer('map')">Map</button>
-                            <button onclick="setMapLayer('satellite')">Satellite</button>
+                            <button type="button" data-map-layer="map" aria-pressed="true" onclick="setMapLayer('map')">Map</button>
+                            <button type="button" data-map-layer="satellite" aria-pressed="false" onclick="setMapLayer('satellite')">Satellite</button>
                         </div>
                     </div>
                 </section>
@@ -236,7 +236,7 @@
             <i class="fa-solid fa-plane-departure" aria-hidden="true"></i>
             <span>Flights</span>
         </a>
-        <button class="mobile-nav-item mobile-nav-primary" onclick="openAddFlightModal()">
+        <button type="button" class="mobile-nav-item mobile-nav-primary" aria-label="Add flight" onclick="openAddFlightModal()">
             <i class="fa-solid fa-plus" aria-hidden="true"></i>
             <span>Add</span>
         </button>
@@ -257,7 +257,7 @@
     </aside>
 
     <script src="/static/js/journey-stats.js?v=ui-stage2-3"></script>
-    <script src="/static/js/app.js?v=ui-stage6-1"></script>
+    <script src="/static/js/app.js?v=ui-stage7-1"></script>
 </body>
 
 </html>

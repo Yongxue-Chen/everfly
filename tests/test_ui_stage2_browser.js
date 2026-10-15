@@ -14,7 +14,9 @@ const fixture = [
     try {
         const page = await browser.newPage({viewport:{width:390,height:844}});
         const errors = [];
+        const nativeDialogs = [];
         page.on('pageerror', e => errors.push(e.message));
+        page.on('dialog', dialog => { nativeDialogs.push({type:dialog.type(),message:dialog.message()}); dialog.dismiss(); });
         let empty = false;
         const template = fs.readFileSync(path.join(root,'templates/index.html'),'utf8').replace(/{{ user\| tojson \| safe }}/, '{"id":1,"username":"UI Test"}').replace('{{ csrf_token() }}','test');
         await page.route('http://ui.test/**', async route => {
@@ -47,6 +49,30 @@ const fixture = [
         await page.keyboard.press('Escape');
         assert.equal(await page.locator('#settings-menu-button').getAttribute('aria-expanded'),'false');
         assert.equal(await page.evaluate(()=>document.activeElement?.id),'settings-menu-button');
+        assert.equal(await page.locator('[data-map-layer="map"]').getAttribute('aria-pressed'),'true');
+        await page.evaluate(()=>setMapLayer('satellite'));
+        assert.equal(await page.locator('[data-map-layer="satellite"]').getAttribute('aria-pressed'),'true');
+        assert.equal(await page.locator('[data-map-layer="map"]').getAttribute('aria-pressed'),'false');
+        await page.evaluate(()=>setMapLayer('map'));
+        await page.locator('#settings-menu-button').click();
+        await page.locator('#settings-menu').getByText('Edit Profile',{exact:true}).click();
+        const profileDialog = page.locator('[role="dialog"]:not(#entity-panel)');
+        await profileDialog.waitFor();
+        assert.equal(await profileDialog.locator('label[for="profile-username"]').count(),1);
+        assert.equal(await profileDialog.locator('#profile-username').getAttribute('autocomplete'),'username');
+        assert.equal(await profileDialog.locator('#profile-password').getAttribute('autocomplete'),'new-password');
+        if (process.env.UI_SCREENSHOT_DIR) {
+            fs.mkdirSync(process.env.UI_SCREENSHOT_DIR,{recursive:true});
+            for (const width of [1440,390]) {
+                await page.setViewportSize({width,height:900});
+                await page.screenshot({path:path.join(process.env.UI_SCREENSHOT_DIR,`profile-form-stage7-${width}.png`),fullPage:false});
+            }
+        }
+        await profileDialog.locator('#profile-password').fill('first-password');
+        await profileDialog.locator('#profile-confirm-password').fill('different-password');
+        await profileDialog.locator('.modal-footer .btn-primary').click();
+        assert.equal(await profileDialog.locator('.modal-message').textContent(),'The new passwords do not match.');
+        await page.evaluate(()=>closeModal({force:true}));
         await page.evaluate(()=>{ window.navigationSentinel = true; });
         await page.locator('.mobile-nav-item[data-mobile-view="flights"]').click();
         await page.waitForFunction(()=>State.currentView==='flights');
@@ -171,7 +197,7 @@ const fixture = [
         assert.equal(await page.inputValue('#year-filter'),'2099');
         assert.equal(await page.inputValue('#journey-year-metric'),'distance');
         await page.evaluate(()=>navigateTo('flights'));
-        await page.waitForFunction(()=>document.querySelectorAll('#flights-table tbody tr').length===2);
+        await page.waitForFunction(()=>document.querySelectorAll('#flights-table tbody tr').length===2 && document.querySelector('#flight-results-status').textContent==='2 flights');
         assert.equal(await page.locator('#flight-results-status').textContent(),'2 flights');
         await page.locator('#flight-search').fill('BBB');
         assert.equal(await page.locator('#flights-table tbody tr').count(),1);
@@ -285,6 +311,7 @@ const fixture = [
         await page.waitForFunction(()=>State.cache.stats?.totals.flights===0);
         await page.locator('[data-journey-tab="statistics"]').click();
         assert.equal(await page.locator('.donut-sample-count').last().textContent(),'No data available');
+        assert.deepEqual(nativeDialogs,[],'Routine interactions must not use blocking browser dialogs');
         assert.deepEqual(errors,[]);
         console.log('Stage 2 browser checks passed: six widths, tabs, scope, charts, map, metric switch, empty data.');
     } finally { await browser.close(); }
