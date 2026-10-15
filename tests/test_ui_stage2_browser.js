@@ -47,6 +47,23 @@ const fixture = [
             }));
             assert.deepEqual(filterStyles[0], filterStyles[1], `Filter typography must match at ${width}px`);
             if (width <= 768) assert.ok(filterStyles[0].font.includes('16px'), 'Mobile selects need 16px text');
+            const monthLayout = await page.evaluate(() => {
+                const grid = document.querySelector('.month-of-year-grid');
+                const original = grid.innerHTML;
+                grid.outerHTML = renderMonthOfYearStats([{month:'2024-01',count:100}, {month:'2024-02',count:25}, {month:'2024-07',count:100}]);
+                const updated = document.querySelector('.month-of-year-grid');
+                const rect = el => { const r = el.getBoundingClientRect(); return {top:r.top,bottom:r.bottom}; };
+                const result = [...updated.children].map(el => ({item:rect(el),bar:rect(el.querySelector('i')),count:rect(el.querySelector('strong')),label:rect(el.querySelector('.month-of-year-label'))}));
+                updated.innerHTML = original;
+                return result;
+            });
+            monthLayout.forEach(({item,bar,count,label}) => {
+                assert.ok(count.bottom < bar.top, 'Count sits above its bar');
+                assert.ok(count.top >= item.top, 'Maximum count fits inside chart');
+                assert.ok(label.top > bar.bottom, 'Month sits below its bar');
+            });
+            assert.ok(monthLayout[0].count.top < monthLayout[1].count.top, 'Count follows bar height');
+            if (width <= 768) assert.ok(monthLayout[6].item.top - monthLayout[0].item.bottom >= 28, 'Mobile rows have breathing room');
             if (width >= 1024) {
                 assert.ok(await page.evaluate(()=>document.querySelector('.journey-filters').getBoundingClientRect().x > document.querySelector('.journey-hero-copy').getBoundingClientRect().x));
             }

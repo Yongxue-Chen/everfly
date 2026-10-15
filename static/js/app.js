@@ -3416,9 +3416,8 @@ function renderMonthOfYearStats(monthRows) {
     const max = Math.max(...totals.map(row => row.count), 1);
     return `<div class="month-of-year-grid">${totals.map(row => `
         <button class="month-of-year-item" onclick="openFlightListModal('Month pattern', filterFlightsForInsight('monthOfYear', ${row.month}))" title="${row.count} flights in month ${row.month}">
-            <span>${String(row.month).padStart(2, '0')}</span>
-            <i style="--month-level:${Math.max(8, Math.round((row.count / max) * 100))}%"></i>
-            <strong>${row.count}</strong>
+            <span class="month-of-year-plot"><i style="--month-level:${Math.max(8, Math.round((row.count / max) * 100))}%"><strong>${row.count}</strong></i></span>
+            <span class="month-of-year-label">${String(row.month).padStart(2, '0')}</span>
         </button>
     `).join('')}</div>`;
 }

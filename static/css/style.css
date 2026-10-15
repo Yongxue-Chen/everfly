@@ -1714,21 +1714,40 @@ tr:hover { background: #f5f9ff; }
 .month-of-year-item {
     min-width: 0;
     display: grid;
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: minmax(0, 1fr) auto;
     gap: 7px;
     height: 190px;
     text-align: center;
 }
 
-.month-of-year-item span,
+.month-of-year-item .month-of-year-label,
 .month-of-year-item strong {
     color: #61738a;
     font-size: .66rem;
     font-weight: 800;
+    line-height: 16px;
+}
+
+.month-of-year-plot {
+    position: relative;
+    display: block;
+    min-height: 0;
+    margin-top: 24px;
+}
+
+.month-of-year-item strong {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    font-style: normal;
 }
 
 .month-of-year-item i {
-    align-self: end;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
     display: block;
     min-height: 8px;
     height: var(--month-level);
@@ -1887,6 +1906,7 @@ tr:hover { background: #f5f9ff; }
     .month-of-year-grid {
         grid-template-columns: repeat(6, minmax(0, 1fr));
         min-height: 180px;
+        row-gap: 28px;
     }
 
     .month-of-year-item {
