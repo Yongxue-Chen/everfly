@@ -33,9 +33,9 @@ class CompleteCloudPremiumUiTest(unittest.TestCase):
         self.assertIn('.flight-row', self.css)
         self.assertIn('border-radius: 18px', self.css)
 
-    def test_static_assets_use_cloud_premium_version(self):
-        self.assertIn('/static/css/style.css?v=cloud-premium-8', self.template)
-        self.assertIn('/static/js/app.js?v=cloud-premium-8', self.template)
+    def test_static_assets_use_ui_stage_version(self):
+        self.assertIn('/static/css/style.css?v=ui-stage1-1', self.template)
+        self.assertIn('/static/js/app.js?v=ui-stage1-1', self.template)
 
 if __name__ == "__main__":
     unittest.main()

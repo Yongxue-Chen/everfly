@@ -3291,7 +3291,78 @@ function renderJourneyChart(key, config) {
     const canvas = document.getElementById(key);
     if (!canvas || typeof Chart === 'undefined') return;
     destroyJourneyChart(key);
+    if (config.type === 'doughnut') {
+        config.options.plugins.legend = { display: false };
+        config.options.layout = { padding: 2 };
+        config.options.cutout = '64%';
+        config.options.radius = '100%';
+        config.options.animation = false;
+        const values = config.data.datasets[0].data;
+        const total = values.reduce((sum, value) => sum + Number(value || 0), 0);
+        canvas.setAttribute('role', 'img');
+        canvas.setAttribute('aria-label', total ? config.data.labels.map((label, i) => `${label}: ${values[i]}`).join(', ') : 'No data available');
+        if (!total) {
+            config.plugins = [...(config.plugins || []), {
+                id: 'emptyDonut',
+                afterDraw(chart) {
+                    const { ctx, chartArea: area } = chart;
+                    const radius = Math.min(area.width, area.height) / 2 - 2;
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.arc((area.left + area.right) / 2, (area.top + area.bottom) / 2, radius * 0.82, 0, Math.PI * 2);
+                    ctx.strokeStyle = '#e6ebf1';
+                    ctx.lineWidth = radius * 0.36;
+                    ctx.stroke();
+                    ctx.restore();
+                }
+            }];
+        }
+    }
     State.journeyCharts[key] = new Chart(canvas.getContext('2d'), config);
+    if (config.type === 'doughnut') renderJourneyDonutLegend(canvas, State.journeyCharts[key]);
+}
+
+function renderJourneyDonutLegend(canvas, chart) {
+    const wrapper = canvas.closest('.donut-chart-wrapper');
+    if (!wrapper) return;
+    wrapper.querySelector('.donut-legend')?.remove();
+    const legend = document.createElement('div');
+    legend.className = 'donut-legend';
+    const dataset = chart.data.datasets[0];
+    const total = dataset.data.reduce((sum, value) => sum + Number(value || 0), 0);
+    const summary = document.createElement('p');
+    summary.className = 'donut-sample-count';
+    summary.textContent = total ? `${total.toLocaleString()} records · count / share` : 'No data available';
+    legend.append(summary);
+    if (total) chart.data.labels.forEach((label, index) => {
+        const count = Number(dataset.data[index] || 0);
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'donut-legend-row';
+        row.setAttribute('aria-pressed', String(chart.getDataVisibility(index)));
+        row.setAttribute('aria-label', `${label}: ${count}, ${(count / total * 100).toFixed(1)}%. Toggle visibility`);
+        const swatch = document.createElement('i');
+        swatch.className = 'donut-legend-swatch';
+        swatch.setAttribute('aria-hidden', 'true');
+        swatch.style.backgroundColor = dataset.backgroundColor[index % dataset.backgroundColor.length];
+        const name = document.createElement('span');
+        name.className = 'donut-legend-label';
+        name.textContent = label;
+        const number = document.createElement('span');
+        number.className = 'donut-legend-number';
+        number.textContent = count.toLocaleString();
+        const share = document.createElement('span');
+        share.className = 'donut-legend-share';
+        share.textContent = `${(count / total * 100).toFixed(1)}%`;
+        row.append(swatch, name, number, share);
+        row.onclick = () => {
+            chart.toggleDataVisibility(index);
+            chart.update();
+            row.setAttribute('aria-pressed', String(chart.getDataVisibility(index)));
+        };
+        legend.append(row);
+    });
+    wrapper.append(legend);
 }
 
 function renderMonthOfYearStats(monthRows) {
@@ -3425,7 +3496,7 @@ function renderJourneyTrends(stats) {
                 const bucket = buckets[elements[0].index]?.name;
                 openFlightListModal('Route distance mix', filterFlightsForInsight('distanceBucket', bucket));
             },
-            plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 } } } },
+            plugins: { legend: { display: false } },
             cutout: '60%'
         }
     });
@@ -3464,7 +3535,7 @@ function renderJourneyTrends(stats) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 } } } },
+            plugins: { legend: { display: false } },
             cutout: '60%'
         }
     });
@@ -3482,7 +3553,7 @@ function renderJourneyTrends(stats) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 } } } },
+            plugins: { legend: { display: false } },
             cutout: '60%'
         }
     });
@@ -3502,7 +3573,7 @@ function renderJourneyTrends(stats) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 9 } } } },
+            plugins: { legend: { display: false } },
             cutout: '60%'
         }
     });
