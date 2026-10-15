@@ -230,9 +230,8 @@ body {
     top: 10px;
     right: 10px;
     z-index: 1000;
-    background: rgba(255, 255, 255, 0.9);
-    padding: 5px;
-    border-radius: 4px;
+    background: transparent;
+    padding: 0;
     display: flex;
     gap: 5px;
 }
@@ -812,13 +811,11 @@ tr:hover {
         top: 8px;
         max-width: calc(100% - 72px);
         display: grid;
-        grid-template-columns: minmax(88px, 1fr) auto auto;
+        grid-template-columns: auto auto;
         justify-content: flex-end;
         align-items: center;
         gap: 4px;
-        padding: 4px;
-        border-radius: 8px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+        padding: 0;
     }
 
     .map-controls select,

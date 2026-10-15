@@ -62,6 +62,9 @@ const fixture = [
             await page.setViewportSize({width,height:844});
             await page.waitForTimeout(200);
             assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`Overflow at ${width}`);
+            assert.deepEqual(await page.locator('.map-controls').evaluate(el => {
+                const s = getComputedStyle(el); return [s.backgroundColor,s.padding,s.boxShadow];
+            }), ['rgba(0, 0, 0, 0)','0px','none']);
             assert.ok(await page.evaluate(()=>Chart.getChart('classDonutChart').width>0));
             const filterStyles = await page.evaluate(() => ['year-filter', 'journey-status-filter'].map(id => {
                 const element = document.getElementById(id);
