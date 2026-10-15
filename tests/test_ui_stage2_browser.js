@@ -53,11 +53,18 @@ const fixture = [
         await page.selectOption('#year-filter','all');
         await page.selectOption('#journey-status-filter','all');
         assert.deepEqual(await page.locator('#journey-trends .stats-header').allTextContents(),[
-            'Flight Profile Insights (Preferences & Distributions)', 'Yearly rhythm', 'Footprint collection timeline',
+            'Yearly rhythm', 'Footprint collection timeline',
             'Monthly flight heatmap (Contribution Graph)', 'Last twelve months', 'Month pattern'
         ]);
-        assert.ok(await page.evaluate(()=>Boolean(document.querySelector('.journey-highlight-panel').compareDocumentPosition(document.querySelector('.journey-insights')) & Node.DOCUMENT_POSITION_FOLLOWING)));
-        assert.ok(await page.evaluate(()=>Boolean(document.querySelector('.journey-insights').compareDocumentPosition(document.querySelector('.journey-trends-panel')) & Node.DOCUMENT_POSITION_FOLLOWING)));
+        assert.deepEqual(await page.locator('.journey-summary-panel .journey-section-heading h2').allTextContents(),[
+            'Records and patterns', 'Your aviation world', 'Flight Profile Insights'
+        ]);
+        assert.equal(await page.locator('.journey-summary-panel #journey-highlights').count(),1);
+        assert.equal(await page.locator('.journey-summary-panel #profile-stats-dashboard').count(),1);
+        assert.equal(await page.locator('.journey-summary-panel #journey-profile-insights').count(),1);
+        assert.equal(await page.locator('#journey-trends [data-journey-profile-card]').count(),0);
+        assert.equal(await page.locator('#journey-profile-insights [data-journey-profile-card]').count(),1);
+        assert.ok(await page.evaluate(()=>Boolean(document.querySelector('.journey-summary-panel').compareDocumentPosition(document.querySelector('.journey-trends-panel')) & Node.DOCUMENT_POSITION_FOLLOWING)));
         for (const width of [1440,1024,768,576,390,320]) {
             await page.setViewportSize({width,height:844});
             await page.waitForTimeout(200);

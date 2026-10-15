@@ -3435,8 +3435,7 @@ function renderJourneyTrends(stats, scopedStats) {
     const durationMap = byYear(stats.duration_by_year, 'duration');
 
     container.innerHTML = `
-        <article class="journey-chart-card journey-chart-wide">
-            <div class="stats-header">Flight Profile Insights (Preferences & Distributions)</div>
+        <article class="journey-chart-card journey-chart-wide" data-journey-profile-card>
             <div class="preference-donut-box">
                 <div class="donut-chart-wrapper">
                     <span class="donut-chart-title">Cabin Class</span>
@@ -3483,6 +3482,10 @@ function renderJourneyTrends(stats, scopedStats) {
         
 
     `;
+
+    const profileContainer = document.getElementById('journey-profile-insights');
+    const profileCard = container.querySelector('[data-journey-profile-card]');
+    if (profileContainer && profileCard) profileContainer.replaceChildren(profileCard);
 
     const yearMetric = State.journeyMetric || 'flights';
     const metricOptions = {
