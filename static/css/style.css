@@ -1440,14 +1440,8 @@ tr:hover { background: #f5f9ff; }
     box-shadow: var(--shadow-soft);
 }
 
-.journey-summary-group + .journey-summary-group {
-    margin-top: 28px;
-    padding-top: 24px;
-    border-top: 1px solid #e8eef5;
-}
-
-.journey-profile-insights { grid-template-columns: minmax(0, 1fr); }
-.journey-profile-insights .journey-chart-card { padding: 0; border: 0; box-shadow: none; }
+.journey-summary-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.journey-summary-card > .stats-header { margin-bottom: 16px; }
 
 .journey-highlights {
     display: grid;

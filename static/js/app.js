@@ -3485,7 +3485,11 @@ function renderJourneyTrends(stats, scopedStats) {
 
     const profileContainer = document.getElementById('journey-profile-insights');
     const profileCard = container.querySelector('[data-journey-profile-card]');
-    if (profileContainer && profileCard) profileContainer.replaceChildren(profileCard);
+    if (profileContainer && profileCard) {
+        const title = profileContainer.querySelector('.stats-header');
+        profileContainer.replaceChildren(title, ...profileCard.childNodes);
+        profileCard.remove();
+    }
 
     const yearMetric = State.journeyMetric || 'flights';
     const metricOptions = {
