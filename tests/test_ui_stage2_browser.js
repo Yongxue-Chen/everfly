@@ -31,6 +31,8 @@ const fixture = [
         assert.equal(await page.inputValue('#journey-status-filter'),'all');
         assert.equal(await page.locator('#journey-hero #year-filter').count(),1);
         assert.equal(await page.locator('#journey-hero #journey-status-filter').count(),1);
+        assert.deepEqual(await page.locator('#journey-metrics .journey-metric > span').allTextContents(),['Distance','Flight time']);
+        assert.equal(await page.locator('#journey-metrics .journey-metric').count(),2);
         assert.equal(await page.locator('.journey-trends-panel').isVisible(),false);
         assert.equal(await page.locator('.journey-recent-flight').count(),2);
         await page.locator('[data-journey-tab="statistics"]').click();

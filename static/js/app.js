@@ -3885,8 +3885,6 @@ const showStatsModal = (title, data) => {
 function renderJourneyHero(flights) {
     const totalDist = flights.reduce((sum, f) => sum + (parseFloat(f.distance) || 0), 0);
     const totalMin = flights.reduce((sum, f) => sum + Number(f.duration_actual ?? f.duration_scheduled ?? 0), 0);
-    const airportIds = new Set(flights.flatMap(f => [f.origin_airport_id, f.dest_airport_id]).filter(Boolean));
-    const airlineIds = new Set(flights.map(f => f.airline_id).filter(Boolean));
     const count = document.getElementById('journey-flight-count');
     const summary = document.getElementById('journey-summary');
     const metrics = document.getElementById('journey-metrics');
@@ -3908,16 +3906,6 @@ function renderJourneyHero(flights) {
             <span>Flight time</span>
             <strong>${Math.floor(totalMin / 60).toLocaleString()}h</strong>
             <small class="journey-metric-sub">${flightDays} days in the air</small>
-        </div>
-        <div class="journey-metric">
-            <span>Airports</span>
-            <strong>${airportIds.size}</strong>
-            <small class="journey-metric-sub">${State.journeyStatus === 'completed' ? 'visited' : 'in selected flights'}</small>
-        </div>
-        <div class="journey-metric">
-            <span>Airlines</span>
-            <strong>${airlineIds.size}</strong>
-            <small class="journey-metric-sub">${State.journeyStatus === 'completed' ? 'flown' : 'in selected flights'}</small>
         </div>`;
 }
 

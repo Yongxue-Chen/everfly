@@ -3249,7 +3249,7 @@ th[onclick] {
 #journey-hero h1 { font-size: 30px; letter-spacing: -.02em; line-height: 1.2; }
 #journey-hero .journey-eyebrow, #journey-hero p { color: #61738a; }
 #journey-hero p { margin-top: 8px; font-size: 13px; }
-#journey-metrics { grid-column: 1 / -1; grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: none; }
+#journey-metrics { grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: none; }
 #journey-metrics .journey-metric { background: #f5f8fc; border: 0; padding: 16px; }
 #journey-metrics .journey-metric span, #journey-metrics .journey-metric-sub { color: #61738a; font-size: 12px; }
 #journey-metrics .journey-metric strong { color: #142943; font-size: 23px; }
