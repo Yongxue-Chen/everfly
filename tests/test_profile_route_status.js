@@ -25,6 +25,28 @@ assert.equal(completed({}, now), false);
 assert.equal(completed({ ...flight, dest_timezone: 'Invalid', sta: '2027-01-02 01:00:00' }, now), false);
 assert.equal(completed({ ...flight, dest_timezone: 'America/New_York', sta: '2027-01-01 20:00:00' }, now), false);
 assert.equal(completed({ ...flight, dest_timezone: 'Europe/London', sta: '2027-07-01 13:00:00' }, new Date('2027-07-01T12:00:00Z')), true);
-assert.match(source, /color: completed \? '#6b8e7b' : '#f59e0b'/);
+assert.match(source, /color: completed \? '#697386' : '#e07a5f'/);
 assert.match(source, /dashArray: completed \? null : '8 6'/);
 console.log('Profile route status: 17 checks passed');
+
+const removed = [];
+const map = { removeLayer: layer => removed.push(layer) };
+const layerContext = vm.createContext({
+    State: { map },
+    L: { tileLayer: (url, options) => ({ url, options, addTo() { return this; } }) }
+});
+vm.runInContext(source.slice(source.indexOf('function setMapLayer('), source.indexOf('function getVisibleWorldLongitudeOffsets(')), layerContext);
+layerContext.setMapLayer('map');
+const standard = layerContext.State.profileBaseLayer;
+assert.equal(standard.options.className, 'profile-neutral-basemap');
+assert.ok(standard.options.attribution.includes('OpenStreetMap'));
+layerContext.setMapLayer('satellite');
+assert.equal(removed[0], standard);
+assert.equal(layerContext.State.profileBaseLayer.options.className, undefined);
+layerContext.setMapLayer('map');
+assert.equal(removed.length, 2);
+assert.equal(layerContext.State.profileBaseLayer.options.className, 'profile-neutral-basemap');
+assert.ok(source.includes("fillColor: '#345d80'"));
+const css = fs.readFileSync(path.join(__dirname, '../static/css/style.css'), 'utf8');
+assert.ok(css.includes('#flight-map .profile-neutral-basemap { filter: grayscale(1)'));
+console.log('Basemap switching and palette: 8 checks passed');

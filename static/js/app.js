@@ -1369,23 +1369,23 @@ function initMap() {
         State.map = L.map('flight-map', {
             minZoom: 1
         }).setView([20, 0], 2);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(State.map);
+        setMapLayer('map');
         bindProfileMapResizeObserver();
     }
 }
 
 function setMapLayer(type) {
     if (!State.map) return;
-    // Basic implementation for layer switching could be improved with actual layers
+    if (State.profileBaseLayer) State.map.removeLayer(State.profileBaseLayer);
     if (type === 'satellite') {
-        // Placeholder for satellite tile provider (e.g., Esri)
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        State.profileBaseLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
             attribution: 'Tiles &copy; Esri'
         }).addTo(State.map);
     } else {
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(State.map);
+        State.profileBaseLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            className: 'profile-neutral-basemap'
+        }).addTo(State.map);
     }
 }
 
@@ -3965,7 +3965,7 @@ function refreshProfileMapLayers({ fitBounds = false } = {}) {
         const statusLabel = completed ? '已结束' : '未结束';
         longitudeOffsets.forEach(offset => {
             const line = L.polyline(shiftPathLongitude(curvePoints, offset), {
-                color: completed ? '#6b8e7b' : '#f59e0b', weight: 3, opacity: completed ? 0.65 : 0.8,
+                color: completed ? '#697386' : '#e07a5f', weight: 2.6, opacity: completed ? 0.75 : 0.9,
                 dashArray: completed ? null : '8 6'
             });
             line.bindPopup(`${escapeHtml(f.flight_number)}<br>${escapeHtml(f.date)}<br>${escapeHtml(f.origin.code)} -> ${escapeHtml(f.dest.code)}<br>${statusLabel}`);
@@ -3983,7 +3983,7 @@ function refreshProfileMapLayers({ fitBounds = false } = {}) {
     Object.entries(airports).forEach(([code, data]) => {
         longitudeOffsets.forEach(offset => {
             const loc = [data.loc[0], data.loc[1] + offset];
-            const m = L.circleMarker(loc, { radius: 4, color: '#00b0ff', fillColor: '#00b0ff', fillOpacity: 0.8 });
+            const m = L.circleMarker(loc, { radius: 4.5, color: '#ffffff', weight: 1.4, fillColor: '#345d80', fillOpacity: 1 });
             m.bindPopup(`<b>${escapeHtml(code)}</b><br>${escapeHtml(data.name)}`);
             m.addTo(State.map);
             State.profileLayers.push(m);
