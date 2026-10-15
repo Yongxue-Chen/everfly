@@ -3112,8 +3112,8 @@ function monthKeyFromDate(date) {
 
 function buildRecentTwelveMonths(monthRows) {
     const counts = Object.fromEntries((monthRows || []).map(row => [row.month, Number(row.count || 0)]));
-    const latestDataMonth = (monthRows || []).map(row => row.month).sort().pop();
-    const end = latestDataMonth ? parseLocalMonth(latestDataMonth) : new Date();
+    const selectedYear = State.journeyYear || 'all';
+    const end = selectedYear === 'all' ? new Date() : new Date(Number(selectedYear), 11, 1);
     end.setDate(1);
     const months = [];
     for (let i = 11; i >= 0; i--) {
@@ -3132,7 +3132,7 @@ function buildContinuousYears(stats) {
     ])).filter(Boolean);
     if (!years.length) return [];
     const start = Math.min(...years);
-    const end = Math.max(new Date().getFullYear(), Math.max(...years));
+    const end = Math.max(...years);
     return Array.from({ length: end - start + 1 }, (_, index) => start + index);
 }
 
@@ -3161,12 +3161,15 @@ function distanceBucketForFlight(flight) {
 }
 
 function filterFlightsForInsight(kind, value) {
-    return (State.cache.flights || []).filter(flight => {
+    return (State.journeyFlights || State.cache.flights || []).filter(flight => {
         if (kind === 'all') return true;
         if (kind === 'year') return normalizeYear(flight.date) === String(value);
         if (kind === 'month') return normalizeMonth(flight.date) === String(value);
         if (kind === 'monthOfYear') return Number(String(flight.date || '').slice(5, 7)) === Number(value);
         if (kind === 'distanceBucket') return distanceBucketForFlight(flight) === value;
+        if (kind === 'cabin') return ((flight.flight_class || '').trim() || 'Unknown') === value;
+        if (kind === 'seat') return journeySeatType(flight) === value;
+        if (kind === 'dayNight') return journeyDayNight(flight) === value;
         if (kind === 'route') return `${flight.origin_code}-${flight.dest_code}` === value;
         if (kind === 'airlineCategory') return airlineCategoryForFlight(flight) === value;
         if (kind === 'airline') return flight.airline_name === value;
@@ -3250,15 +3253,15 @@ function renderJourneyHighlights(stats) {
         {
             icon: 'fa-plane-arrival',
             label: 'On-time performance',
-            value: `${otp.on_time_rate}% on-time`,
-            meta: `Avg delay: Dep ${otp.avg_departure_delay}m / Arr ${otp.avg_arrival_delay}m`,
+            value: otp.total_tracked ? `${otp.on_time_rate}% on-time` : 'No actual arrival data',
+            meta: `${otp.total_tracked} tracked · Dep ${otp.avg_departure_delay}m / Arr ${otp.avg_arrival_delay}m delay`,
             flights: () => filterFlightsForInsight('delayed')
         },
         {
             icon: 'fa-screwdriver-wrench',
             label: 'Data health',
             value: qualityTotal ? `${formatCompactNumber(qualityTotal)} gaps` : 'All tidy',
-            meta: qualityTotal ? 'Missing fields across flights and Library' : 'No obvious missing metadata',
+            meta: qualityTotal ? 'Missing fields in selected flights' : 'No obvious missing metadata',
             flights: () => [
                 ...filterFlightsForInsight('missing', 'aircraft'),
                 ...filterFlightsForInsight('missing', 'registration'),
@@ -3294,6 +3297,12 @@ function renderJourneyChart(key, config) {
     const hasDatasetLegend = key === 'yearComboChart' || key === 'footprintGrowthChart';
     if (hasDatasetLegend) config.options.plugins.legend = { display: false };
     if (config.type === 'doughnut') {
+        const insight = { classDonutChart: 'cabin', seatDonutChart: 'seat', dayNightDonutChart: 'dayNight' }[key];
+        if (insight) config.options.onClick = (event, elements) => {
+            if (!elements.length) return;
+            const label = config.data.labels[elements[0].index];
+            openFlightListModal(label, filterFlightsForInsight(insight, label));
+        };
         config.options.plugins.legend = { display: false };
         config.options.layout = { padding: 2 };
         config.options.cutout = '64%';
@@ -3427,13 +3436,13 @@ function renderJourneyTrends(stats) {
     container.innerHTML = `
         <article class="journey-chart-card journey-chart-wide">
             <div class="stats-header">Yearly rhythm</div>
-            <p class="journey-chart-note">Left axis: flights and hours. Right axis: total distance in km.</p>
+            <label class="journey-chart-note">统计指标 <select id="journey-year-metric"><option value="flights">航班次数</option><option value="distance">里程（km）</option><option value="hours">时长（小时）</option></select></label>
             <div class="journey-chart-box"><canvas id="yearComboChart"></canvas></div>
         </article>
 
         <article class="journey-chart-card journey-chart-wide">
             <div class="stats-header">Footprint collection timeline</div>
-            <p class="journey-chart-note">Growth curve of cumulative airports, cities, and countries unlocked over the years.</p>
+            <p class="journey-chart-note">当前筛选范围内，机场、城市和国家的累计数量；选择单年时并非历史总量。</p>
             <div class="journey-chart-box"><canvas id="footprintGrowthChart"></canvas></div>
         </article>
         
@@ -3444,7 +3453,7 @@ function renderJourneyTrends(stats) {
                 ${renderFlightHeatmap(months)}
             </article>
             <div class="journey-heatmap-side">
-                <article class="journey-chart-card"><div class="stats-header">Recent months</div><div class="journey-chart-box"><canvas id="monthlyChart"></canvas></div></article>
+                <article class="journey-chart-card"><div class="stats-header">${State.journeyYear && State.journeyYear !== 'all' ? '所选年份各月' : '最近十二个月（截至本月）'}</div><div class="journey-chart-box"><canvas id="monthlyChart"></canvas></div></article>
                 <article class="journey-chart-card"><div class="stats-header">Month pattern</div><p class="journey-chart-note">Flights grouped by calendar month, January through December.</p>${renderMonthOfYearStats(months)}</article>
             </div>
         </div>
@@ -3472,15 +3481,21 @@ function renderJourneyTrends(stats) {
         </article>
     `;
 
+    const yearMetric = State.journeyMetric || 'flights';
+    const metricOptions = {
+        flights: { label: 'Flights', data: years.map(y => flightMap[y] || 0), color: '#1c70bf' },
+        distance: { label: 'Distance (km)', data: years.map(y => distanceMap[y] || 0), color: '#00a0b5' },
+        hours: { label: 'Hours', data: years.map(y => Math.round((durationMap[y] || 0) / 60)), color: '#ef8b2c' }
+    };
+    const metric = metricOptions[yearMetric];
+    const metricSelect = document.getElementById('journey-year-metric');
+    metricSelect.value = yearMetric;
+    metricSelect.onchange = () => { State.journeyMetric = metricSelect.value; renderJourneyTrends(State.cache.stats); document.getElementById('journey-year-metric').focus(); };
     renderJourneyChart('yearComboChart', {
         type: 'bar',
         data: {
             labels: years,
-            datasets: [
-                { type: 'bar', label: 'Flights', data: years.map(y => flightMap[y] || 0), backgroundColor: 'rgba(28, 112, 191, .18)', borderColor: '#1c70bf', borderWidth: 1, borderRadius: 4, yAxisID: 'y' },
-                { type: 'line', label: 'Distance (km)', data: years.map(y => distanceMap[y] || 0), borderColor: '#00a0b5', backgroundColor: 'rgba(0,160,181,.08)', tension: .35, pointRadius: 3, yAxisID: 'y1' },
-                { type: 'line', label: 'Hours', data: years.map(y => Math.round((durationMap[y] || 0) / 60)), borderColor: '#ef8b2c', backgroundColor: 'rgba(239,139,44,.08)', tension: .35, pointRadius: 3, yAxisID: 'y' }
-            ]
+            datasets: [{ label: metric.label, data: metric.data, backgroundColor: metric.color, borderColor: metric.color, borderWidth: 1, borderRadius: 4 }]
         },
         options: {
             responsive: true,
@@ -3493,8 +3508,7 @@ function renderJourneyTrends(stats) {
             },
             plugins: { legend: { position: 'bottom' } },
             scales: {
-                y: { beginAtZero: true, title: { display: true, text: 'Flights / Hours' }, grid: { color: '#eef3f8' } },
-                y1: { beginAtZero: true, position: 'right', title: { display: true, text: 'Distance (km)' }, grid: { drawOnChartArea: false } },
+                y: { beginAtZero: true, title: { display: true, text: metric.label }, grid: { color: '#eef3f8' } },
                 x: { grid: { display: false } }
             }
         }
@@ -3532,25 +3546,15 @@ function renderJourneyTrends(stats) {
         }
     });
 
-    const cabinCounts = {};
-    const seatCounts = { Window: 0, Aisle: 0, Middle: 0 };
-    const flights = State.cache.flights || [];
+    const cabinCounts = Object.create(null);
+    const seatCounts = { Window: 0, Aisle: 0, Middle: 0, Unknown: 0 };
+    const flights = State.journeyFlights || State.cache.flights || [];
     
     flights.forEach(f => {
-        const cls = (f.flight_class || 'Unknown').trim();
+        const cls = (f.flight_class || '').trim() || 'Unknown';
         cabinCounts[cls] = (cabinCounts[cls] || 0) + 1;
         
-        const seat = (f.seat_number || '').trim().toUpperCase();
-        if (seat) {
-            const lastChar = seat.slice(-1);
-            if (['A', 'F', 'K', 'L'].includes(lastChar)) {
-                seatCounts.Window++;
-            } else if (['C', 'D', 'G', 'H', 'J'].includes(lastChar)) {
-                seatCounts.Aisle++;
-            } else if (['B', 'E'].includes(lastChar)) {
-                seatCounts.Middle++;
-            }
-        }
+        seatCounts[journeySeatType(f)]++;
     });
 
     renderJourneyChart('classDonutChart', {
@@ -3559,7 +3563,7 @@ function renderJourneyTrends(stats) {
             labels: Object.keys(cabinCounts),
             datasets: [{
                 data: Object.values(cabinCounts),
-                backgroundColor: ['#1c70bf', '#00a0b5', '#6cae75', '#ef8b2c', '#c86c8f'],
+                backgroundColor: Object.keys(cabinCounts).map(label => ({ Economy: '#00a0b5', 'Premium Economy': '#6cae75', Business: '#1c70bf', First: '#c86c8f', Unknown: '#aeb9c6' })[label] || '#ef8b2c'),
                 borderWidth: 0
             }]
         },
@@ -3574,10 +3578,10 @@ function renderJourneyTrends(stats) {
     renderJourneyChart('seatDonutChart', {
         type: 'doughnut',
         data: {
-            labels: ['Window', 'Aisle', 'Middle'],
+            labels: ['Window', 'Aisle', 'Middle', 'Unknown'],
             datasets: [{
-                data: [seatCounts.Window, seatCounts.Aisle, seatCounts.Middle],
-                backgroundColor: ['#3b82f6', '#10b981', '#f59e0b'],
+                data: [seatCounts.Window, seatCounts.Aisle, seatCounts.Middle, seatCounts.Unknown],
+                backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#aeb9c6'],
                 borderWidth: 0
             }]
         },
@@ -3861,49 +3865,15 @@ const showStatsModal = (title, data) => {
 
 function renderJourneyHero(flights) {
     const totalDist = flights.reduce((sum, f) => sum + (parseFloat(f.distance) || 0), 0);
-    const totalMin = flights.reduce((sum, f) => sum + (f.duration_actual || f.duration_scheduled || 0), 0);
+    const totalMin = flights.reduce((sum, f) => sum + Number(f.duration_actual ?? f.duration_scheduled ?? 0), 0);
     const airportIds = new Set(flights.flatMap(f => [f.origin_airport_id, f.dest_airport_id]).filter(Boolean));
     const airlineIds = new Set(flights.map(f => f.airline_id).filter(Boolean));
-    const latest = flights[0] || {};
     const count = document.getElementById('journey-flight-count');
     const summary = document.getElementById('journey-summary');
-    const route = document.getElementById('journey-route');
     const metrics = document.getElementById('journey-metrics');
     
-    if (count) count.textContent = `${flights.length.toLocaleString()} flights`;
-    if (summary) summary.textContent = `${Math.round(totalDist).toLocaleString()} km across ${airportIds.size} airports`;
-    if (route) route.innerHTML = latest.origin_code && latest.dest_code ? `<strong>${escapeHtml(latest.origin_code)}</strong><span></span><i class="fa-solid fa-plane"></i><span></span><strong>${escapeHtml(latest.dest_code)}</strong>` : '<strong>Ready for your next journey</strong>';
-    
-    // Inject latest flight data health reminder
-    let reminder = document.getElementById('journey-health-reminder');
-    if (latest.id) {
-        const missingFields = [];
-        if (!latest.aircraft_model_id) missingFields.push('aircraft model');
-        if (!latest.registration) missingFields.push('registration');
-        if (!latest.distance) missingFields.push('distance');
-        if (!latest.atd || !latest.ata || !latest.std || !latest.sta) missingFields.push('flight times');
-        
-        if (missingFields.length > 0) {
-            if (!reminder) {
-                reminder = document.createElement('div');
-                reminder.id = 'journey-health-reminder';
-                reminder.className = 'journey-health-reminder';
-                if (route && route.parentNode) {
-                    route.parentNode.insertBefore(reminder, route.nextSibling);
-                }
-            }
-            reminder.onclick = () => openEntityPanel('flights', latest.id);
-            reminder.innerHTML = `
-                <i class="fa-solid fa-circle-exclamation"></i>
-                <span>Latest flight <b>${escapeHtml(latest.flight_number || 'Flight')}</b> is missing: ${missingFields.join(', ')}. Complete now →</span>
-            `;
-            reminder.style.display = 'flex';
-        } else if (reminder) {
-            reminder.style.display = 'none';
-        }
-    } else if (reminder) {
-        reminder.style.display = 'none';
-    }
+    if (count) count.textContent = `${flights.length.toLocaleString()} 次航班`;
+    if (summary) summary.textContent = State.journeyStatus === 'completed' ? '已完成的飞行记录 · 时长缺少实际值时采用计划值' : '包含未完成行程 · 里程与时长可能为计划值';
 
     const earthRoundsVal = totalDist / 40075;
     const earthRounds = earthRoundsVal >= 10 ? earthRoundsVal.toFixed(1) : earthRoundsVal.toFixed(2);
@@ -3911,24 +3881,24 @@ function renderJourneyHero(flights) {
 
     if (metrics) metrics.innerHTML = `
         <div class="journey-metric">
-            <span>Distance</span>
+            <span>飞行里程</span>
             <strong>${Math.round(totalDist).toLocaleString()} km</strong>
             <small class="journey-metric-sub">约绕地球 ${earthRounds} 圈</small>
         </div>
         <div class="journey-metric">
-            <span>In the air</span>
+            <span>飞行时长</span>
             <strong>${Math.floor(totalMin / 60).toLocaleString()}h</strong>
             <small class="journey-metric-sub">约 ${flightDays} 天在空中</small>
         </div>
         <div class="journey-metric">
-            <span>Airports</span>
+            <span>机场</span>
             <strong>${airportIds.size}</strong>
-            <small class="journey-metric-sub">visited</small>
+            <small class="journey-metric-sub">${State.journeyStatus === 'completed' ? '已到访' : '涉及机场'}</small>
         </div>
         <div class="journey-metric">
-            <span>Airlines</span>
+            <span>航空公司</span>
             <strong>${airlineIds.size}</strong>
-            <small class="journey-metric-sub">carriers</small>
+            <small class="journey-metric-sub">${State.journeyStatus === 'completed' ? '已搭乘' : '涉及航司'}</small>
         </div>`;
 }
 
@@ -3939,62 +3909,82 @@ const renderHeaderStats = (flights) => {
 
 async function loadProfile() {
     try {
-        const [stats, flights] = await Promise.all([
-            API.get('stats'),
+        const [cities, flights] = await Promise.all([
+            API.get('cities'),
             API.get('flights/detailed')
         ]);
         State.cache.flights = flights;
-        State.cache.stats = stats;
-        console.log(`Data fetched: ${flights.length} flights`);
-
-        // 1. Header Stats
-        try {
-            renderHeaderStats(flights);
-            console.log("Header stats rendered");
-        } catch (e) {
-            console.error("Header error: " + e.message);
-        }
-
-        // 2. Dashboard
-        try {
-            renderJourneyHighlights(stats);
-            renderJourneyTrends(stats);
-            renderStatsDashboard(stats, document.getElementById('profile-stats-dashboard'));
-            console.log("Dashboard rendered");
-        } catch (e) {
-            console.error("Dashboard error: " + e.message);
-        }
-
-        // 3. Map
-        try {
-            renderProfileMap(flights, 'all');
-            console.log("Map rendered");
-        } catch (e) {
-            console.error("Map error: " + e.message);
-        }
-
-        // Year Logic
+        State.journeyCities = cities;
+        State.journeyYear ||= 'all';
+        State.journeyStatus ||= 'completed';
+        State.journeyTab ||= 'overview';
         const yearSelect = document.getElementById('year-filter');
         if (yearSelect) {
-            yearSelect.innerHTML = '<option value="all">All Years</option>';
+            yearSelect.innerHTML = '<option value="all">全部年份</option>';
             const years = new Set(flights.map(f => f.date ? f.date.substring(0, 4) : null).filter(y => y));
             const sortedYears = Array.from(years).sort().reverse();
             sortedYears.forEach(year => yearSelect.options.add(new Option(year, year)));
-
-            // Remove old listeners by cloning or reassigning
-            const newSelect = yearSelect.cloneNode(true);
-            yearSelect.parentNode.replaceChild(newSelect, yearSelect);
-            newSelect.onchange = () => {
-                const val = newSelect.value;
-                const filtered = val === 'all' ? flights : flights.filter(f => f.date && f.date.startsWith(val));
-                renderHeaderStats(filtered);
-                renderProfileMap(flights, val);
-                invalidateProfileMapSize();
-            };
+            if (State.journeyYear !== 'all' && !years.has(State.journeyYear)) State.journeyYear = 'all';
+            yearSelect.value = State.journeyYear;
+            yearSelect.onchange = () => { State.journeyYear = yearSelect.value; updateJourneyScope(); };
         }
-
+        const status = document.getElementById('journey-status-filter');
+        status.value = State.journeyStatus;
+        status.onchange = () => { State.journeyStatus = status.value; updateJourneyScope(); };
+        document.querySelectorAll('[data-journey-tab]').forEach(button => {
+            button.onclick = () => { State.journeyTab = button.dataset.journeyTab; showJourneyTab(); };
+        });
+        updateJourneyScope();
     } catch (e) {
         console.error("Profile load error", e);
+        document.getElementById('journey-scope-note').textContent = '加载失败，请刷新重试。';
+    }
+}
+
+function updateJourneyScope() {
+    const now = new Date();
+    State.journeyFlights = selectJourneyFlights(State.cache.flights || [], State.journeyYear, State.journeyStatus, f => isProfileFlightCompleted(f, now));
+    State.cache.stats = aggregateJourneyStats(State.journeyFlights, State.journeyCities || []);
+    renderHeaderStats(State.journeyFlights);
+    const label = { completed: '已完成', pending: '未完成', all: '全部航班' }[State.journeyStatus];
+    document.getElementById('journey-scope-note').textContent = `${State.journeyYear === 'all' ? '全部年份' : State.journeyYear} · ${label} · ${State.journeyFlights.length} 次航班。地图、指标、统计与点击明细使用相同范围。`;
+    renderJourneyRecent(State.journeyFlights);
+    showJourneyTab();
+}
+
+function showJourneyTab() {
+    document.querySelectorAll('[data-journey-view]').forEach(section => { section.hidden = section.dataset.journeyView !== State.journeyTab; });
+    document.querySelectorAll('[data-journey-tab]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.journeyTab === State.journeyTab)));
+    // Render only visible charts: Chart.js cannot measure hidden containers reliably.
+    if (State.journeyTab === 'statistics') {
+        renderJourneyHighlights(State.cache.stats);
+        renderJourneyTrends(State.cache.stats);
+        renderStatsDashboard(State.cache.stats, document.getElementById('profile-stats-dashboard'));
+    } else {
+        renderProfileMap(State.journeyFlights, 'all');
+    }
+}
+
+function renderJourneyRecent(flights) {
+    const container = document.getElementById('journey-recent');
+    container.replaceChildren();
+    const now = new Date();
+    const completed = flights.filter(f => isProfileFlightCompleted(f, now)).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 3);
+    const pending = flights.filter(f => !isProfileFlightCompleted(f, now)).sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))).slice(0, 3);
+    for (const [title, rows] of [['近期已完成', completed], ['接下来的行程', pending]]) {
+        if (State.journeyStatus === 'completed' && title === '接下来的行程') continue;
+        if (State.journeyStatus === 'pending' && title === '近期已完成') continue;
+        const card = document.createElement('article');
+        card.innerHTML = `<h2>${title}</h2>`;
+        if (!rows.length) card.insertAdjacentHTML('beforeend', '<p>当前筛选范围内暂无航班。</p>');
+        rows.forEach(f => {
+            const button = document.createElement('button');
+            button.type = 'button'; button.className = 'journey-recent-flight';
+            button.innerHTML = `<span>${escapeHtml(f.date || '日期未知')} · ${escapeHtml(f.flight_number || '航班号未知')}</span><strong>${escapeHtml(f.origin_code || '—')} → ${escapeHtml(f.dest_code || '—')}</strong><small>${escapeHtml(f.airline_name || '航司未知')} · 查看详情</small>`;
+            button.onclick = () => openEntityPanel('flights', f.id);
+            card.append(button);
+        });
+        container.append(card);
     }
 }
 
@@ -4132,7 +4122,7 @@ function refreshProfileMapLayers({ fitBounds = false } = {}) {
 
 function renderFlightHeatmap(months) {
     const dataByYearMonth = {};
-    let minYear = new Date().getFullYear();
+    let minYear = State.journeyYear && State.journeyYear !== 'all' ? Number(State.journeyYear) : (months.length ? Math.min(...months.map(m => Number(m.month.slice(0, 4)))) : new Date().getFullYear());
     let maxYear = minYear;
 
     months.forEach(m => {

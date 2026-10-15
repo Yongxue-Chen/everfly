@@ -20,7 +20,7 @@
         const CURRENT_USER = {{ user| tojson | safe }};
         const CSRF_TOKEN = "{{ csrf_token() }}";
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=ui-stage1-2">
+    <link rel="stylesheet" href="/static/css/style.css?v=ui-stage2-1">
 </head>
 
 <body>
@@ -73,20 +73,30 @@
         <!-- Profile View -->
         <section id="view-profile" class="view active">
             <div class="journey-shell">
+                <div class="journey-toolbar">
+                    <div class="journey-view-switch" aria-label="首页视图">
+                        <button type="button" data-journey-tab="overview" aria-pressed="true">概览</button>
+                        <button type="button" data-journey-tab="statistics" aria-pressed="false">统计</button>
+                    </div>
+                    <div class="journey-filters">
+                        <label>年份 <select id="year-filter"><option value="all">全部年份</option></select></label>
+                        <label>航班范围 <select id="journey-status-filter"><option value="completed">已完成</option><option value="pending">未完成</option><option value="all">全部航班</option></select></label>
+                    </div>
+                    <p id="journey-scope-note" role="status"></p>
+                </div>
                 <section id="journey-hero" class="journey-hero" aria-label="Flight journey overview">
                     <div class="journey-hero-copy">
-                        <span class="journey-eyebrow">Your flying life</span>
+                        <span class="journey-eyebrow">飞行档案</span>
                         <h1 id="journey-flight-count">Flight journey</h1>
                         <p id="journey-summary">Loading your aviation archive...</p>
-                        <div id="journey-route" class="journey-route" aria-label="Latest route"></div>
                     </div>
                     <div id="journey-metrics" class="journey-metrics"></div>
                 </section>
-                <section class="journey-highlight-panel" aria-label="Journey highlights">
+                <section class="journey-highlight-panel" data-journey-view="statistics" hidden aria-label="Journey highlights">
                     <div class="journey-section-heading"><div><span class="journey-eyebrow">Highlights</span><h2>Records and patterns</h2></div></div>
                     <div id="journey-highlights" class="journey-highlights"></div>
                 </section>
-                <section class="journey-map-panel">
+                <section class="journey-map-panel" data-journey-view="overview">
                     <div class="journey-section-heading"><div><span class="journey-eyebrow">Explore</span><h2>Your flight map</h2></div></div>
                     <div class="route-status-legend" aria-label="航线状态图例">
                         <span><i class="route-status-completed" aria-hidden="true"></i>已结束</span>
@@ -97,17 +107,17 @@
                     <div class="map-container">
                         <div id="flight-map"></div>
                         <div class="map-controls">
-                            <select id="year-filter"><option value="all">All Years</option></select>
                             <button onclick="setMapLayer('map')">Map</button>
                             <button onclick="setMapLayer('satellite')">Satellite</button>
                         </div>
                     </div>
                 </section>
-                <section class="journey-trends-panel" aria-label="Flight trends">
+                <section id="journey-recent" class="journey-recent" data-journey-view="overview" aria-label="近期行程"></section>
+                <section class="journey-trends-panel" data-journey-view="statistics" hidden aria-label="Flight trends">
                     <div class="journey-section-heading"><div><span class="journey-eyebrow">Trends</span><h2>How your flying changes</h2></div></div>
                     <div id="journey-trends" class="journey-trends"></div>
                 </section>
-                <section class="journey-insights">
+                <section class="journey-insights" data-journey-view="statistics" hidden>
                     <div class="journey-section-heading"><div><span class="journey-eyebrow">Library insights</span><h2>Your aviation world</h2></div></div>
                     <div id="profile-stats-dashboard" class="stats-container"></div>
                 </section>
@@ -278,7 +288,8 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js?v=ui-stage1-2"></script>
+    <script src="/static/js/journey-stats.js?v=ui-stage2-1"></script>
+    <script src="/static/js/app.js?v=ui-stage2-1"></script>
 </body>
 
 </html>

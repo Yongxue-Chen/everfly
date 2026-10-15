@@ -49,8 +49,8 @@ class JourneyLibraryInsightsTest(unittest.TestCase):
         self.assertIn("distanceBucketChart", self.js)
 
     def test_journey_charts_are_labeled_and_deduplicated(self):
-        self.assertIn("text: 'Flights / Hours'", self.js)
-        self.assertIn("text: 'Distance (km)'", self.js)
+        self.assertIn("text: metric.label", self.js)
+        self.assertIn("label: 'Distance (km)'", self.js)
         self.assertIn("renderMonthOfYearStats", self.js)
         self.assertIn("month-of-year-grid", self.js)
         self.assertIn("Month pattern", self.js)
