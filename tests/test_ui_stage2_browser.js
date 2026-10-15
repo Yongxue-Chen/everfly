@@ -26,9 +26,11 @@ const fixture = [
             return route.fulfill({contentType:'application/json',body:JSON.stringify(data)});
         });
         await page.goto('http://ui.test/',{waitUntil:'networkidle'});
-        await page.waitForFunction(()=>State.journeyFlights?.length===1);
+        await page.waitForFunction(()=>State.journeyFlights?.length===2);
+        assert.equal(await page.inputValue('#year-filter'),'all');
+        assert.equal(await page.inputValue('#journey-status-filter'),'all');
         assert.equal(await page.locator('.journey-trends-panel').isVisible(),false);
-        assert.equal(await page.locator('.journey-recent-flight').count(),1);
+        assert.equal(await page.locator('.journey-recent-flight').count(),2);
         await page.locator('[data-journey-tab="statistics"]').click();
         for (const width of [1440,1024,768,576,390,320]) {
             await page.setViewportSize({width,height:844});
@@ -36,6 +38,9 @@ const fixture = [
             assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`Overflow at ${width}`);
             assert.ok(await page.evaluate(()=>Chart.getChart('classDonutChart').width>0));
         }
+        await page.selectOption('#journey-status-filter','pending');
+        assert.equal(await page.evaluate(()=>filterFlightsForInsight('missing','health').length),0);
+        assert.equal(await page.locator('.journey-highlight-card').last().locator('strong').textContent(),'All tidy');
         await page.selectOption('#journey-status-filter','all');
         assert.equal(await page.evaluate(()=>State.cache.stats.totals.flights),2);
         await page.selectOption('#year-filter','2099');
@@ -44,7 +49,16 @@ const fixture = [
         await page.selectOption('#journey-status-filter','completed');
         assert.equal(await page.evaluate(()=>State.cache.stats.totals.flights),0);
         assert.equal(await page.locator('.donut-sample-count').first().textContent(),'No data available');
+        await page.evaluate(()=>{
+            window.originalFootprint = Chart.getChart('footprintGrowthChart');
+            window.originalFootprintData = JSON.stringify(window.originalFootprint.data);
+            window.originalFootprint.setDatasetVisibility(1,false);
+            window.originalFootprint.update('none');
+        });
         await page.selectOption('#journey-year-metric','distance');
+        assert.ok(await page.evaluate(()=>Chart.getChart('footprintGrowthChart')===window.originalFootprint));
+        assert.ok(await page.evaluate(()=>JSON.stringify(Chart.getChart('footprintGrowthChart').data)===window.originalFootprintData));
+        assert.equal(await page.evaluate(()=>Chart.getChart('footprintGrowthChart').isDatasetVisible(1)),false);
         assert.equal(await page.evaluate(()=>Chart.getChart('yearComboChart').data.datasets[0].label),'Distance (km)');
         await page.locator('[data-journey-tab="overview"]').click();
         assert.equal(await page.evaluate(()=>State.profileMapFlights.length),0);

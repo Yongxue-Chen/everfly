@@ -278,7 +278,11 @@ function bindProfileMapResizeObserver() {
     const container = document.querySelector('#view-profile .map-container');
     if (!container) return;
 
-    const observer = new ResizeObserver(() => invalidateProfileMapSize());
+    const observer = new ResizeObserver(() => {
+        if (!container.clientWidth || !container.clientHeight) return;
+        State.map.invalidateSize({ pan: false });
+        if (State.profileMapFlights) refreshProfileMapLayers({ fitBounds: true });
+    });
     observer.observe(container);
     State.profileMapResizeObserverBound = true;
 }
@@ -1367,7 +1371,7 @@ window.addEventListener('popstate', (e) => {
 function initMap() {
     if (document.getElementById('flight-map')) {
         State.map = L.map('flight-map', {
-            minZoom: 1
+            minZoom: 0, zoomSnap: 0.25, zoomDelta: 0.5
         }).setView([20, 0], 2);
         setMapLayer('map');
         bindProfileMapResizeObserver();
@@ -3184,6 +3188,9 @@ function filterFlightsForInsight(kind, value) {
             return t2 > t1;
         }
         if (kind === 'missing') {
+            const missing = journeyMissingFields(flight, isProfileFlightCompleted);
+            if (value === 'health') return missing.length > 0;
+            if (!isProfileFlightCompleted(flight)) return false;
             if (value === 'aircraft') return !flight.aircraft_model_id;
             if (value === 'registration') return !flight.registration;
             if (value === 'actual_times') return !flight.atd || !flight.ata;
@@ -3221,7 +3228,7 @@ function renderJourneyHighlights(stats) {
     if (!container) return;
     const records = stats.records || {};
     const quality = stats.quality || {};
-    const qualityTotal = (Number(quality.missing_aircraft || 0) +
+    const qualityTotal = (Number(quality.missing_date || 0) + Number(quality.missing_flight_number || 0) + Number(quality.missing_aircraft || 0) +
                           Number(quality.missing_registration || 0) +
                           Number(quality.missing_actual_times || 0) +
                           Number(quality.missing_distance || 0) +
@@ -3262,12 +3269,7 @@ function renderJourneyHighlights(stats) {
             label: 'Data health',
             value: qualityTotal ? `${formatCompactNumber(qualityTotal)} gaps` : 'All tidy',
             meta: qualityTotal ? 'Missing fields in selected flights' : 'No obvious missing metadata',
-            flights: () => [
-                ...filterFlightsForInsight('missing', 'aircraft'),
-                ...filterFlightsForInsight('missing', 'registration'),
-                ...filterFlightsForInsight('missing', 'actual_times'),
-                ...filterFlightsForInsight('missing', 'distance')
-            ].filter((flight, index, rows) => rows.findIndex(row => row.id === flight.id) === index)
+            flights: () => filterFlightsForInsight('missing', 'health')
         }
     ];
     container.innerHTML = '';
@@ -3436,13 +3438,13 @@ function renderJourneyTrends(stats) {
     container.innerHTML = `
         <article class="journey-chart-card journey-chart-wide">
             <div class="stats-header">Yearly rhythm</div>
-            <label class="journey-chart-note">统计指标 <select id="journey-year-metric"><option value="flights">航班次数</option><option value="distance">里程（km）</option><option value="hours">时长（小时）</option></select></label>
+            <label class="journey-chart-note">Metric <select id="journey-year-metric"><option value="flights">Flights</option><option value="distance">Distance (km)</option><option value="hours">Hours</option></select></label>
             <div class="journey-chart-box"><canvas id="yearComboChart"></canvas></div>
         </article>
 
         <article class="journey-chart-card journey-chart-wide">
             <div class="stats-header">Footprint collection timeline</div>
-            <p class="journey-chart-note">当前筛选范围内，机场、城市和国家的累计数量；选择单年时并非历史总量。</p>
+            <p class="journey-chart-note">Cumulative airports, cities and countries within the selected scope, not lifetime totals when a year is selected.</p>
             <div class="journey-chart-box"><canvas id="footprintGrowthChart"></canvas></div>
         </article>
         
@@ -3453,7 +3455,7 @@ function renderJourneyTrends(stats) {
                 ${renderFlightHeatmap(months)}
             </article>
             <div class="journey-heatmap-side">
-                <article class="journey-chart-card"><div class="stats-header">${State.journeyYear && State.journeyYear !== 'all' ? '所选年份各月' : '最近十二个月（截至本月）'}</div><div class="journey-chart-box"><canvas id="monthlyChart"></canvas></div></article>
+                <article class="journey-chart-card"><div class="stats-header">${State.journeyYear && State.journeyYear !== 'all' ? 'Months in selected year' : 'Last twelve months'}</div><div class="journey-chart-box"><canvas id="monthlyChart"></canvas></div></article>
                 <article class="journey-chart-card"><div class="stats-header">Month pattern</div><p class="journey-chart-note">Flights grouped by calendar month, January through December.</p>${renderMonthOfYearStats(months)}</article>
             </div>
         </div>
@@ -3483,14 +3485,23 @@ function renderJourneyTrends(stats) {
 
     const yearMetric = State.journeyMetric || 'flights';
     const metricOptions = {
-        flights: { label: 'Flights', data: years.map(y => flightMap[y] || 0), color: '#1c70bf' },
-        distance: { label: 'Distance (km)', data: years.map(y => distanceMap[y] || 0), color: '#00a0b5' },
-        hours: { label: 'Hours', data: years.map(y => Math.round((durationMap[y] || 0) / 60)), color: '#ef8b2c' }
+        flights: { label: 'Flights', data: years.map(y => flightMap[y] || 0), color: '#6d829f' },
+        distance: { label: 'Distance (km)', data: years.map(y => distanceMap[y] || 0), color: '#579c98' },
+        hours: { label: 'Hours', data: years.map(y => Math.round((durationMap[y] || 0) / 60)), color: '#cf8b78' }
     };
     const metric = metricOptions[yearMetric];
     const metricSelect = document.getElementById('journey-year-metric');
     metricSelect.value = yearMetric;
-    metricSelect.onchange = () => { State.journeyMetric = metricSelect.value; renderJourneyTrends(State.cache.stats); document.getElementById('journey-year-metric').focus(); };
+    metricSelect.onchange = () => {
+        State.journeyMetric = metricSelect.value;
+        const next = metricOptions[State.journeyMetric];
+        const chart = State.journeyCharts.yearComboChart;
+        Object.assign(chart.data.datasets[0], { label: next.label, data: next.data, backgroundColor: next.color, borderColor: next.color });
+        chart.options.scales.y.title.text = next.label;
+        chart.setDatasetVisibility(0, true);
+        chart.update();
+        renderJourneyDatasetLegend(document.getElementById('yearComboChart'), chart);
+    };
     renderJourneyChart('yearComboChart', {
         type: 'bar',
         data: {
@@ -3516,7 +3527,7 @@ function renderJourneyTrends(stats) {
 
     renderJourneyChart('monthlyChart', {
         type: 'bar',
-        data: { labels: recentMonths.map(d => d.month), datasets: [{ label: 'Flights', data: recentMonths.map(d => d.count), backgroundColor: 'rgba(28, 112, 191, 0.85)', borderColor: '#1c70bf', borderWidth: 1, borderRadius: 4 }] },
+        data: { labels: recentMonths.map(d => d.month), datasets: [{ label: 'Flights', data: recentMonths.map(d => d.count), backgroundColor: '#6d829f', borderColor: '#6d829f', borderWidth: 0, borderRadius: 5 }] },
         options: {
             responsive: true,
             maintainAspectRatio: false,
@@ -3643,9 +3654,9 @@ function renderJourneyTrends(stats) {
         data: {
             labels: growthYears,
             datasets: [
-                { label: 'Airports', data: airportsData, borderColor: '#1c70bf', backgroundColor: 'rgba(28, 112, 191, .08)', fill: true, tension: 0.25, pointRadius: 3 },
-                { label: 'Cities', data: citiesData, borderColor: '#00a0b5', backgroundColor: 'rgba(0, 160, 181, .08)', fill: true, tension: 0.25, pointRadius: 3 },
-                { label: 'Countries', data: countriesData, borderColor: '#ef8b2c', backgroundColor: 'rgba(239, 139, 44, .08)', fill: true, tension: 0.25, pointRadius: 3 }
+                { label: 'Airports', data: airportsData, borderColor: '#6d829f', backgroundColor: 'rgba(109,130,159,.05)', fill: true, tension: 0.25, pointRadius: 2, borderWidth: 2.5 },
+                { label: 'Cities', data: citiesData, borderColor: '#579c98', backgroundColor: 'rgba(87,156,152,.04)', fill: true, tension: 0.25, pointRadius: 2, borderWidth: 2.5 },
+                { label: 'Countries', data: countriesData, borderColor: '#cf8b78', backgroundColor: 'rgba(207,139,120,.04)', fill: true, tension: 0.25, pointRadius: 2, borderWidth: 2.5 }
             ]
         },
         options: {
@@ -3872,8 +3883,8 @@ function renderJourneyHero(flights) {
     const summary = document.getElementById('journey-summary');
     const metrics = document.getElementById('journey-metrics');
     
-    if (count) count.textContent = `${flights.length.toLocaleString()} 次航班`;
-    if (summary) summary.textContent = State.journeyStatus === 'completed' ? '已完成的飞行记录 · 时长缺少实际值时采用计划值' : '包含未完成行程 · 里程与时长可能为计划值';
+    if (count) count.textContent = `${flights.length.toLocaleString()} flights`;
+    if (summary) summary.textContent = State.journeyStatus === 'completed' ? 'Completed flights · Scheduled duration used when actual duration is missing' : 'Includes unfinished flights · Distance and duration may be planned values';
 
     const earthRoundsVal = totalDist / 40075;
     const earthRounds = earthRoundsVal >= 10 ? earthRoundsVal.toFixed(1) : earthRoundsVal.toFixed(2);
@@ -3881,24 +3892,24 @@ function renderJourneyHero(flights) {
 
     if (metrics) metrics.innerHTML = `
         <div class="journey-metric">
-            <span>飞行里程</span>
+            <span>Distance</span>
             <strong>${Math.round(totalDist).toLocaleString()} km</strong>
-            <small class="journey-metric-sub">约绕地球 ${earthRounds} 圈</small>
+            <small class="journey-metric-sub">${earthRounds} times around Earth</small>
         </div>
         <div class="journey-metric">
-            <span>飞行时长</span>
+            <span>Flight time</span>
             <strong>${Math.floor(totalMin / 60).toLocaleString()}h</strong>
-            <small class="journey-metric-sub">约 ${flightDays} 天在空中</small>
+            <small class="journey-metric-sub">${flightDays} days in the air</small>
         </div>
         <div class="journey-metric">
-            <span>机场</span>
+            <span>Airports</span>
             <strong>${airportIds.size}</strong>
-            <small class="journey-metric-sub">${State.journeyStatus === 'completed' ? '已到访' : '涉及机场'}</small>
+            <small class="journey-metric-sub">${State.journeyStatus === 'completed' ? 'visited' : 'in selected flights'}</small>
         </div>
         <div class="journey-metric">
-            <span>航空公司</span>
+            <span>Airlines</span>
             <strong>${airlineIds.size}</strong>
-            <small class="journey-metric-sub">${State.journeyStatus === 'completed' ? '已搭乘' : '涉及航司'}</small>
+            <small class="journey-metric-sub">${State.journeyStatus === 'completed' ? 'flown' : 'in selected flights'}</small>
         </div>`;
 }
 
@@ -3916,11 +3927,11 @@ async function loadProfile() {
         State.cache.flights = flights;
         State.journeyCities = cities;
         State.journeyYear ||= 'all';
-        State.journeyStatus ||= 'completed';
+        State.journeyStatus ||= 'all';
         State.journeyTab ||= 'overview';
         const yearSelect = document.getElementById('year-filter');
         if (yearSelect) {
-            yearSelect.innerHTML = '<option value="all">全部年份</option>';
+            yearSelect.innerHTML = '<option value="all">All years</option>';
             const years = new Set(flights.map(f => f.date ? f.date.substring(0, 4) : null).filter(y => y));
             const sortedYears = Array.from(years).sort().reverse();
             sortedYears.forEach(year => yearSelect.options.add(new Option(year, year)));
@@ -3937,17 +3948,17 @@ async function loadProfile() {
         updateJourneyScope();
     } catch (e) {
         console.error("Profile load error", e);
-        document.getElementById('journey-scope-note').textContent = '加载失败，请刷新重试。';
+        document.getElementById('journey-scope-note').textContent = 'Unable to load flights. Please refresh to retry.';
     }
 }
 
 function updateJourneyScope() {
     const now = new Date();
     State.journeyFlights = selectJourneyFlights(State.cache.flights || [], State.journeyYear, State.journeyStatus, f => isProfileFlightCompleted(f, now));
-    State.cache.stats = aggregateJourneyStats(State.journeyFlights, State.journeyCities || []);
+    State.cache.stats = aggregateJourneyStats(State.journeyFlights, State.journeyCities || [], f => isProfileFlightCompleted(f, now));
     renderHeaderStats(State.journeyFlights);
-    const label = { completed: '已完成', pending: '未完成', all: '全部航班' }[State.journeyStatus];
-    document.getElementById('journey-scope-note').textContent = `${State.journeyYear === 'all' ? '全部年份' : State.journeyYear} · ${label} · ${State.journeyFlights.length} 次航班。地图、指标、统计与点击明细使用相同范围。`;
+    const label = { completed: 'Completed', pending: 'Upcoming / ongoing', all: 'All flights' }[State.journeyStatus];
+    document.getElementById('journey-scope-note').textContent = `${State.journeyYear === 'all' ? 'All years' : State.journeyYear} · ${label} · ${State.journeyFlights.length} flights. Map, statistics and details share this scope.`;
     renderJourneyRecent(State.journeyFlights);
     showJourneyTab();
 }
@@ -3971,16 +3982,16 @@ function renderJourneyRecent(flights) {
     const now = new Date();
     const completed = flights.filter(f => isProfileFlightCompleted(f, now)).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 3);
     const pending = flights.filter(f => !isProfileFlightCompleted(f, now)).sort((a, b) => String(a.date || '').localeCompare(String(b.date || ''))).slice(0, 3);
-    for (const [title, rows] of [['近期已完成', completed], ['接下来的行程', pending]]) {
-        if (State.journeyStatus === 'completed' && title === '接下来的行程') continue;
-        if (State.journeyStatus === 'pending' && title === '近期已完成') continue;
+    for (const [title, rows] of [['Recent flights', completed], ['Upcoming / ongoing', pending]]) {
+        if (State.journeyStatus === 'completed' && title === 'Upcoming / ongoing') continue;
+        if (State.journeyStatus === 'pending' && title === 'Recent flights') continue;
         const card = document.createElement('article');
         card.innerHTML = `<h2>${title}</h2>`;
-        if (!rows.length) card.insertAdjacentHTML('beforeend', '<p>当前筛选范围内暂无航班。</p>');
+        if (!rows.length) card.insertAdjacentHTML('beforeend', '<p>No flights in this scope.</p>');
         rows.forEach(f => {
             const button = document.createElement('button');
             button.type = 'button'; button.className = 'journey-recent-flight';
-            button.innerHTML = `<span>${escapeHtml(f.date || '日期未知')} · ${escapeHtml(f.flight_number || '航班号未知')}</span><strong>${escapeHtml(f.origin_code || '—')} → ${escapeHtml(f.dest_code || '—')}</strong><small>${escapeHtml(f.airline_name || '航司未知')} · 查看详情</small>`;
+            button.innerHTML = `<span>${escapeHtml(f.date || 'Unknown date')} · ${escapeHtml(f.flight_number || 'Unknown flight')}</span><strong>${escapeHtml(f.origin_code || '—')} → ${escapeHtml(f.dest_code || '—')}</strong><small>${escapeHtml(f.airline_name || 'Unknown airline')} · View details</small>`;
             button.onclick = () => openEntityPanel('flights', f.id);
             card.append(button);
         });
@@ -3996,8 +4007,14 @@ function renderProfileMap(flights, selectedYear) {
     State.profileMapFlights = flights;
     State.profileMapSelectedYear = selectedYear;
     bindProfileMapMoveHandler();
+    State.map.invalidateSize({ pan: false });
     refreshProfileMapLayers({ fitBounds: true });
-    invalidateProfileMapSize();
+    requestAnimationFrame(() => {
+        if (document.getElementById('flight-map')?.clientWidth) {
+            State.map.invalidateSize({ pan: false });
+            refreshProfileMapLayers({ fitBounds: true });
+        }
+    });
 }
 
 function isProfileFlightCompleted(flight, now = new Date()) {
@@ -4070,8 +4087,10 @@ function refreshProfileMapLayers({ fitBounds = false } = {}) {
         if (isNaN(lat1) || isNaN(lon1) || isNaN(lat2) || isNaN(lon2)) return;
 
         // Draw Geodesic Line
-        const curvePoints = getGeodesicPath(lat1, lon1, lat2, lon2);
         const completed = isProfileFlightCompleted(f, now);
+        // Align opposite-direction dashes so return flights do not fill the gaps.
+        const reverseDash = !completed && (lon1 > lon2 || (lon1 === lon2 && lat1 > lat2));
+        const curvePoints = reverseDash ? getGeodesicPath(lat2, lon2, lat1, lon1) : getGeodesicPath(lat1, lon1, lat2, lon2);
         const statusLabel = completed ? '已结束' : '未结束';
         longitudeOffsets.forEach(offset => {
             const points = shiftPathLongitude(curvePoints, offset);
@@ -4113,7 +4132,7 @@ function refreshProfileMapLayers({ fitBounds = false } = {}) {
     // Fit Bounds
     if (fitBounds && fitLayers.length > 0) {
         const group = new L.featureGroup(fitLayers);
-        State.map.fitBounds(group.getBounds(), { padding: [50, 50] });
+        State.map.fitBounds(group.getBounds(), { padding: [24, 24], maxZoom: 6, animate: false });
     }
     console.log(`Map rendering complete: ${drawnCount} routes drawn across ${longitudeOffsets.length} world copies, ${Object.keys(airports).length} airports`);
 }

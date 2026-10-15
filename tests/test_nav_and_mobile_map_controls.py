@@ -29,7 +29,8 @@ class NavAndMobileMapControlsTest(unittest.TestCase):
         self.assertIn('document.querySelector(`.nav-item[data-view-nav="${viewName}"]`)', source)
         self.assertIn("function invalidateProfileMapSize()", source)
         self.assertIn("State.map.invalidateSize({ pan: false })", source)
-        self.assertIn("minZoom: 1", source)
+        self.assertIn("minZoom: 0", source)
+        self.assertIn("zoomSnap: 0.25", source)
         self.assertIn("ResizeObserver", source)
 
     def test_mobile_map_controls_are_anchored_to_right(self):

@@ -119,3 +119,17 @@ layerContext.setMapLayer('satellite');
 assert.equal(drawn.filter(l => l.kind === 'line').length, 8);
 assert.equal(drawn[1].options.color, '#cbd5e1');
 console.log('Repeated and return routes: 7 checks passed');
+layerContext.getGeodesicPath = (a, b, c, d) => [[a, b], [c, d]];
+layerContext.L.polyline = (points, options) => Object.assign(fakeLayer('line', options), { points });
+const pending = { ...repeat, done: false, flight_number: 'MH003' };
+layerContext.State.profileMapFlights = [pending, { ...pending, flight_number: 'MH004', origin: pending.dest, dest: pending.origin }];
+for (const type of ['map', 'satellite']) {
+    drawn.length = 0;
+    layerContext.setMapLayer(type);
+    const routes = drawn.filter(l => l.kind === 'line' && l.options.interactive !== false);
+    assert.equal(routes.length, 2);
+    assert.deepEqual(routes[0].points, routes[1].points, 'Return-flight dashes must have identical path direction');
+    assert.ok(routes.every(l=>l.options.dashArray === '8 6'));
+}
+assert.equal(completed({date:'2026-11-29',sta:'2026-11-30 07:15:00',dest_timezone:'Asia/Kuala_Lumpur'},new Date('2026-10-15T12:00:00Z')),false);
+console.log('Pending round-trip dash alignment: 7 checks passed');

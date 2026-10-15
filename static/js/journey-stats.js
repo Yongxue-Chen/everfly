@@ -15,7 +15,22 @@ function journeyDayNight(flight) {
     return Number(time[1]) >= 6 && Number(time[1]) < 18 ? 'Day' : 'Night';
 }
 
-function aggregateJourneyStats(flights, cities) {
+function journeyMissingFields(flight, isCompleted) {
+    const missing = [];
+    const date = String(flight.date || '');
+    const timestamp = Date.parse(`${date}T00:00:00Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== date) missing.push('date');
+    if (!String(flight.flight_number || '').trim()) missing.push('flight_number');
+    if (isCompleted(flight)) {
+        if (!flight.aircraft_model_id) missing.push('aircraft');
+        if (!flight.registration) missing.push('registration');
+        if (!flight.atd || !flight.ata) missing.push('actual_times');
+        if (!Number(flight.distance)) missing.push('distance');
+    }
+    return missing;
+}
+
+function aggregateJourneyStats(flights, cities, isCompleted = () => true) {
     const stats = { totals: { flights: flights.length }, top: {}, breakdowns: { alliance: Object.create(null), manufacturer: Object.create(null) },
         records: {}, distributions: {}, quality: {} };
     const cityMap = new Map(cities.map(c => [String(c.id), c]));
@@ -78,8 +93,9 @@ function aggregateJourneyStats(flights, cities) {
         const bucket = !km ? 'Unknown' : km < 500 ? '<500 km' : km < 1500 ? '500-1,499 km' : km < 4000 ? '1,500-3,999 km' : km < 7000 ? '4,000-6,999 km' : '7,000+ km';
         buckets[bucket]++;
         dayNight[journeyDayNight(f)]++;
-        for (const [key, missing] of [['missing_aircraft', !f.aircraft_model_id], ['missing_registration', !f.registration], ['missing_actual_times', !f.atd || !f.ata], ['missing_distance', !km]]) {
-            stats.quality[key] = (stats.quality[key] || 0) + Number(missing);
+        for (const field of journeyMissingFields(f, isCompleted)) {
+            const key = `missing_${field}`;
+            stats.quality[key] = (stats.quality[key] || 0) + 1;
         }
         const dep = delay(f.atd, f.std), arr = delay(f.ata, f.sta);
         if (dep !== null) departures.push(dep);

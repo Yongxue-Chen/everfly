@@ -20,7 +20,7 @@
         const CURRENT_USER = {{ user| tojson | safe }};
         const CSRF_TOKEN = "{{ csrf_token() }}";
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=ui-stage2-1">
+    <link rel="stylesheet" href="/static/css/style.css?v=ui-stage2-2">
 </head>
 
 <body>
@@ -74,19 +74,19 @@
         <section id="view-profile" class="view active">
             <div class="journey-shell">
                 <div class="journey-toolbar">
-                    <div class="journey-view-switch" aria-label="首页视图">
-                        <button type="button" data-journey-tab="overview" aria-pressed="true">概览</button>
-                        <button type="button" data-journey-tab="statistics" aria-pressed="false">统计</button>
+                    <div class="journey-view-switch" aria-label="Journey view">
+                        <button type="button" data-journey-tab="overview" aria-pressed="true">Overview</button>
+                        <button type="button" data-journey-tab="statistics" aria-pressed="false">Statistics</button>
                     </div>
                     <div class="journey-filters">
-                        <label>年份 <select id="year-filter"><option value="all">全部年份</option></select></label>
-                        <label>航班范围 <select id="journey-status-filter"><option value="completed">已完成</option><option value="pending">未完成</option><option value="all">全部航班</option></select></label>
+                        <label>Year <select id="year-filter"><option value="all">All years</option></select></label>
+                        <label>Flight status <select id="journey-status-filter"><option value="all">All flights</option><option value="completed">Completed</option><option value="pending">Upcoming / ongoing</option></select></label>
                     </div>
                     <p id="journey-scope-note" role="status"></p>
                 </div>
                 <section id="journey-hero" class="journey-hero" aria-label="Flight journey overview">
                     <div class="journey-hero-copy">
-                        <span class="journey-eyebrow">飞行档案</span>
+                        <span class="journey-eyebrow">Flight archive</span>
                         <h1 id="journey-flight-count">Flight journey</h1>
                         <p id="journey-summary">Loading your aviation archive...</p>
                     </div>
@@ -288,8 +288,8 @@
         </div>
     </div>
 
-    <script src="/static/js/journey-stats.js?v=ui-stage2-1"></script>
-    <script src="/static/js/app.js?v=ui-stage2-1"></script>
+    <script src="/static/js/journey-stats.js?v=ui-stage2-2"></script>
+    <script src="/static/js/app.js?v=ui-stage2-2"></script>
 </body>
 
 </html>
