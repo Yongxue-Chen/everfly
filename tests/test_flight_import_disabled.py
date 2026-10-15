@@ -8,7 +8,7 @@ INDEX_TEMPLATE = os.path.join(ROOT, "templates", "index.html")
 
 
 class FlightImportDisabledTest(unittest.TestCase):
-    def test_flight_history_import_csv_entry_is_disabled(self):
+    def test_flight_history_hides_unavailable_import_action(self):
         with open(INDEX_TEMPLATE, encoding="utf-8") as fh:
             source = fh.read()
 
@@ -18,9 +18,8 @@ class FlightImportDisabledTest(unittest.TestCase):
             flags=re.DOTALL,
         ).group(0)
 
-        self.assertIn("Import CSV", flights_section)
-        self.assertIn("disabled", flights_section)
-        self.assertIn("cursor: not-allowed", flights_section)
+        self.assertNotIn("Import CSV", flights_section)
+        self.assertNotIn("Update Missing", flights_section)
         self.assertNotIn("openImportFlightsModal()", flights_section)
 
     def test_dataset_import_csv_entry_remains_visible_but_disabled(self):

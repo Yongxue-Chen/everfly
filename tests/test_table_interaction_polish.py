@@ -42,7 +42,7 @@ class TableInteractionPolishTest(unittest.TestCase):
 
     def test_flight_aeroapi_update_button_is_visible_and_bound(self):
         self.assertIn("flight-update-summary action-api", self.js)
-        self.assertIn("updateFlightFromAeroAPI(f.id)", self.js)
+        self.assertIn("updateFlightFromAeroAPI(f.id, btn)", self.js)
         self.assertIn(">API</span>", self.js)
         self.assertIn(".action-api", self.css)
         self.assertIn(".flight-update span", self.css)

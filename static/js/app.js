@@ -124,7 +124,7 @@ const State = {
         flights: []
     },
     flightSort: { key: 'date', dir: 'desc' },
-    flightFilters: {},
+    flightQuery: '',
     flightHealthOnly: false,
     profileLayers: [],
     profileMapFlights: null,
@@ -238,7 +238,7 @@ async function manageAirlineLogo(id) {
             </form>`;
         return container;
     }, async data => {
-        const overlay = modalStack[modalStack.length - 1];
+        const overlay = modalStack[modalStack.length - 1]?.overlay;
         const file = overlay?.querySelector('input[name="file"]')?.files?.[0];
         let result;
         if (file) {
@@ -2014,9 +2014,34 @@ function renderDatasetTable(config, data) {
 // --- Modals ---
 // --- Modals (Stacked) ---
 const modalStack = [];
+let modalSequence = 0;
+
+function serializeModalForm(form) {
+    if (!form) return '';
+    const values = [];
+    for (const element of form.elements) {
+        if (!element.name || element.disabled) continue;
+        if ((element.type === 'checkbox' || element.type === 'radio') && !element.checked) continue;
+        if (element.type === 'file') {
+            values.push([element.name, Array.from(element.files || []).map(file => `${file.name}:${file.size}`)]);
+        } else {
+            values.push([element.name, element.value]);
+        }
+    }
+    return JSON.stringify(values);
+}
+
+function setModalMessage(record, message = '', type = 'error') {
+    if (!record?.message) return;
+    record.message.textContent = message;
+    record.message.className = `modal-message modal-message-${type}`;
+    record.message.hidden = !message;
+}
 
 function openModal(title, contentFn, onSave) {
     const zIndex = 2000 + (modalStack.length * 10);
+    const titleId = `modal-title-${++modalSequence}`;
+    const trigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     // Create DOM
     const overlay = document.createElement('div');
@@ -2025,11 +2050,15 @@ function openModal(title, contentFn, onSave) {
 
     const modal = document.createElement('div');
     modal.className = 'modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-labelledby', titleId);
+    modal.tabIndex = -1;
 
     // Header
     const header = document.createElement('div');
     header.className = 'modal-header';
-    header.innerHTML = `<h3>${escapeHtml(title)}</h3><button class="close-btn">&times;</button>`;
+    header.innerHTML = `<h3 id="${titleId}">${escapeHtml(title)}</h3><button type="button" class="close-btn" aria-label="Close dialog"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>`;
     header.querySelector('.close-btn').onclick = () => closeModal();
 
     // Body
@@ -2040,9 +2069,21 @@ function openModal(title, contentFn, onSave) {
     // Footer
     const footer = document.createElement('div');
     footer.className = 'modal-footer';
+    const message = document.createElement('p');
+    message.className = 'modal-message modal-message-error';
+    message.setAttribute('role', 'alert');
+    message.hidden = true;
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'btn btn-text';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = () => closeModal();
     const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
     saveBtn.className = 'btn btn-primary';
     saveBtn.textContent = 'Save';
+
+    const record = { overlay, modal, trigger, message, saveBtn, initialFormState: '' };
 
     if (onSave) {
         saveBtn.onclick = async () => {
@@ -2059,22 +2100,30 @@ function openModal(title, contentFn, onSave) {
             }
 
             saveBtn.disabled = true;
-            saveBtn.textContent = 'Saving...';
+            saveBtn.setAttribute('aria-busy', 'true');
+            saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i><span>Saving…</span>';
+            modal.setAttribute('aria-busy', 'true');
+            setModalMessage(record);
 
             try {
                 const result = await onSave(data);
-                if (result !== false) closeModal(); // Only close if not explicitly false
+                if (result !== false) closeModal({ force: true });
             } catch (e) {
-                alert(e);
+                setModalMessage(record, e?.message || String(e));
             } finally {
                 saveBtn.disabled = false;
+                saveBtn.removeAttribute('aria-busy');
                 saveBtn.textContent = 'Save';
+                modal.removeAttribute('aria-busy');
             }
         };
     } else {
         saveBtn.style.display = 'none';
+        cancelBtn.textContent = 'Close';
     }
 
+    footer.appendChild(message);
+    footer.appendChild(cancelBtn);
     footer.appendChild(saveBtn);
     modal.appendChild(header);
     modal.appendChild(body);
@@ -2082,14 +2131,62 @@ function openModal(title, contentFn, onSave) {
     overlay.appendChild(modal);
 
     document.body.appendChild(overlay);
-    modalStack.push(overlay);
+    record.initialFormState = serializeModalForm(body.querySelector('form'));
+    modalStack.push(record);
+    document.body.classList.add('modal-open');
+    overlay.addEventListener('mousedown', event => {
+        if (event.target === overlay) closeModal();
+    });
+    body.querySelector('form')?.addEventListener('submit', event => {
+        event.preventDefault();
+        if (!saveBtn.hidden && saveBtn.style.display !== 'none') saveBtn.click();
+    });
+    requestAnimationFrame(() => {
+        const firstControl = body.querySelector('input:not([type="hidden"]), select, textarea, button')
+            || modal.querySelector('button');
+        (firstControl || modal).focus();
+    });
 }
 
-function closeModal() {
+function closeModal({ force = false } = {}) {
     if (modalStack.length === 0) return;
-    const overlay = modalStack.pop();
-    overlay.remove();
+    const record = modalStack[modalStack.length - 1];
+    const form = record.modal.querySelector('form');
+    const changed = form && serializeModalForm(form) !== record.initialFormState;
+    if (!force && changed && !confirm('Discard unsaved changes?')) return;
+    modalStack.pop();
+    record.overlay.remove();
+    document.body.classList.toggle('modal-open', modalStack.length > 0);
+    if (record.trigger?.isConnected) record.trigger.focus();
+    else modalStack[modalStack.length - 1]?.modal.focus();
 }
+
+document.addEventListener('keydown', event => {
+    if (!modalStack.length) return;
+    const record = modalStack[modalStack.length - 1];
+    if (event.key === 'Escape') {
+        event.preventDefault();
+        closeModal();
+        return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = Array.from(record.modal.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'))
+        .filter(element => element.offsetParent !== null);
+    if (!focusable.length) {
+        event.preventDefault();
+        record.modal.focus();
+        return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+    }
+});
 
 // --- Forms ---
 function createForm(fields, item = {}) {
@@ -2369,17 +2466,32 @@ async function loadFlights() {
 }
 
 async function fetchFlights() {
-    const flights = await API.get('flights/detailed');
-    // Pre-process dates for sorting: Use full STD string for precision
-    flights.forEach(f => {
-        // Use full STD string for Date column display/sort if Date is missing
-        f.date = f.std || f.date || '';
-        // Create timestamp for accurate sorting (handles timezones correctly)
-        f._std_ts = f.std ? Date.parse(f.std) : (f.date ? Date.parse(f.date) : 0);
-    });
-    State.cache.flights = flights;
-    updateFlightHealthControl();
-    renderFlights();
+    setFlightListLoading(true);
+    try {
+        const flights = await API.get('flights/detailed');
+        if (!Array.isArray(flights)) throw new Error(flights?.error || 'Flights could not be loaded.');
+        flights.forEach(f => {
+            f.date = f.std || f.date || '';
+            f._std_ts = f.std ? Date.parse(f.std) : (f.date ? Date.parse(f.date) : 0);
+        });
+        State.cache.flights = flights;
+        updateFlightHealthControl();
+        renderFlights();
+    } catch (error) {
+        State.cache.flights = [];
+        renderFlights({ error: error?.message || 'Flights could not be loaded.' });
+    } finally {
+        setFlightListLoading(false);
+    }
+}
+
+function setFlightListLoading(loading) {
+    const table = document.getElementById('flights-table');
+    const status = document.getElementById('flight-results-status');
+    const toolbar = document.querySelector('.flight-list-toolbar');
+    if (table) table.setAttribute('aria-busy', String(loading));
+    if (toolbar) toolbar.classList.toggle('is-loading', loading);
+    if (loading && status) status.textContent = 'Loading flights…';
 }
 
 function flightHealthGaps(flight) {
@@ -2410,55 +2522,40 @@ function toggleFlightHealthFilter() {
     renderFlights();
 }
 
-function sortFlights(key) {
-    if (State.flightSort.key === key) {
-        State.flightSort.dir = State.flightSort.dir === 'asc' ? 'desc' : 'asc';
-    } else {
-        State.flightSort.key = key;
-        State.flightSort.dir = 'asc'; // Default NEW sort is Ascending (Oldest first)
-    }
-    renderFlights();
-}
-
 function filterFlights() {
-    const filterRow = document.querySelector('.filter-row');
-    if (!filterRow) return;
-    const ths = filterRow.querySelectorAll('th');
-
-    State.flightFilters = {};
-    const map = [
-        ['date', 'flight_number'],
-        null,
-        ['origin_name', 'origin_code'],
-        ['dest_name', 'dest_code'],
-        null,
-        'airline_name',
-        ['aircraft_model', 'registration', 'tag_generation', 'tag_winglets', 'tag_config'],
-        ['seat_number', 'seat_type', 'flight_class'],
-        'note',
-    ];
-
-    ths.forEach((th, idx) => {
-        const input = th.querySelector('input');
-        if (input && input.value && map[idx]) {
-            State.flightFilters[map[idx]] = input.value.toLowerCase();
-        }
-    });
-
+    State.flightQuery = document.getElementById('flight-search')?.value.trim().toLowerCase() || '';
     renderFlights();
 }
 
-function renderFlights() {
+function setFlightSort(value) {
+    const [key, dir] = String(value || 'date:desc').split(':');
+    State.flightSort = { key, dir: dir === 'asc' ? 'asc' : 'desc' };
+    renderFlights();
+}
+
+function resetFlightFilters() {
+    State.flightQuery = '';
+    State.flightHealthOnly = false;
+    const search = document.getElementById('flight-search');
+    if (search) search.value = '';
+    updateFlightHealthControl();
+    renderFlights();
+    search?.focus();
+}
+
+function renderFlights({ error = '' } = {}) {
     let data = [...State.cache.flights];
 
     if (State.flightHealthOnly) data = data.filter(flight => flightHealthGaps(flight).length);
 
-    const filters = State.flightFilters;
-    if (Object.keys(filters).length > 0) {
-        data = data.filter(item => Object.entries(filters).every(([key, filterValue]) => {
-            const keys = key.split(',');
-            return keys.some(field => (item[field] || '').toString().toLowerCase().includes(filterValue));
-        }));
+    const query = State.flightQuery;
+    if (query) {
+        const searchableFields = [
+            'date', 'flight_number', 'origin_name', 'origin_code', 'dest_name', 'dest_code',
+            'airline_name', 'aircraft_model', 'registration', 'seat_number', 'seat_type',
+            'flight_class', 'note', 'tag_generation', 'tag_winglets', 'tag_config'
+        ];
+        data = data.filter(item => searchableFields.some(field => String(item[field] || '').toLowerCase().includes(query)));
     }
 
     const { key, dir } = State.flightSort;
@@ -2484,6 +2581,42 @@ function renderFlights() {
 
     const tbody = document.querySelector('#flights-table tbody');
     tbody.innerHTML = '';
+    const total = State.cache.flights.length;
+    const status = document.getElementById('flight-results-status');
+    const reset = document.getElementById('flight-filter-reset');
+    const empty = document.getElementById('flights-empty-state');
+    const tableWrap = document.querySelector('#view-flights .table-responsive');
+    const filtered = Boolean(query || State.flightHealthOnly);
+    if (status) status.textContent = error
+        ? `Unable to load flights: ${error}`
+        : filtered ? `${data.length} of ${total} flights` : `${total} ${total === 1 ? 'flight' : 'flights'}`;
+    if (reset) reset.hidden = !filtered;
+    if (empty) {
+        empty.hidden = data.length > 0 || Boolean(error);
+        const text = empty.querySelector('p');
+        const action = empty.querySelector('button');
+        if (text) text.textContent = total === 0 && !filtered
+            ? 'Add your first flight to start building your archive.'
+            : 'Try clearing the search or data-health filter.';
+        if (action) {
+            action.textContent = total === 0 && !filtered ? 'Add flight' : 'Clear filters';
+            action.onclick = total === 0 && !filtered ? openAddFlightModal : resetFlightFilters;
+        }
+    }
+    if (tableWrap) tableWrap.hidden = data.length === 0;
+    if (error) {
+        if (empty) {
+            empty.hidden = false;
+            empty.querySelector('h3').textContent = 'Flights unavailable';
+            empty.querySelector('p').textContent = error;
+            const action = empty.querySelector('button');
+            action.textContent = 'Try again';
+            action.onclick = fetchFlights;
+        }
+        return;
+    } else if (empty) {
+        empty.querySelector('h3').textContent = 'No flights found';
+    }
     const safe = (value) => escapeHtml(value || '-');
 
     data.forEach(f => {
@@ -2544,12 +2677,18 @@ function renderFlights() {
             <td class="flight-cell flight-note" data-label="Note" style="max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(f.note || '')}">${escapeHtml(f.note || '')}</td>
         `;
         tr.onclick = () => openEntityPanel('flights', f.id);
-        tr.querySelectorAll('.flight-update-summary').forEach(btn => { btn.onclick = (e) => { e.stopPropagation(); updateFlightFromAeroAPI(f.id); }; });
+        tr.querySelectorAll('.flight-update-summary').forEach(btn => { btn.onclick = (e) => { e.stopPropagation(); updateFlightFromAeroAPI(f.id, btn); }; });
         tbody.appendChild(tr);
     });
 }
 
-async function updateFlightFromAeroAPI(id) {
+async function updateFlightFromAeroAPI(id, button = null) {
+    const original = button?.innerHTML;
+    if (button) {
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        button.innerHTML = '<i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i><span>Loading</span>';
+    }
     try {
         const preview = await API.post(`flights/${id}/aeroapi_preview`, {});
         if (preview.error) {
@@ -2562,7 +2701,15 @@ async function updateFlightFromAeroAPI(id) {
         }
 
         openAeroApiDiffModal(id, preview);
-    } catch (e) { alert('Error: ' + e); }
+    } catch (e) {
+        alert('Error: ' + e);
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.removeAttribute('aria-busy');
+            button.innerHTML = original;
+        }
+    }
 }
 
 function openAeroApiCandidateModal(id, candidates) {
@@ -3098,8 +3245,8 @@ async function openAddFlightModal() {
     // Simplified Quick Add Mode
     // Only ask for Flight Number and Date
     const flightFields = [
-        { key: 'flight_number', label: 'Flight Number', type: 'text', placeholder: 'e.g. CA123' },
-        { key: 'date', label: 'Date', type: 'date' } // Use date input, backend stores YYYY-MM-DD
+        { key: 'flight_number', label: 'Flight Number', type: 'text', placeholder: 'e.g. CA123', required: true },
+        { key: 'date', label: 'Date', type: 'date', required: true } // Use date input, backend stores YYYY-MM-DD
     ];
 
     openModal('Add Flight (Quick)', () => {
@@ -3119,7 +3266,7 @@ async function openAddFlightModal() {
             const res = await API.post('flights', data);
             if (res.error) {
                 alert('Error: ' + res.error);
-                return;
+                return false;
             }
 
             const flightId = res.id || res.lastrowid; // Check what API returns
@@ -3131,6 +3278,7 @@ async function openAddFlightModal() {
 
         } catch (e) {
             alert('Error creating flight: ' + e);
+            return false;
         }
     });
 }

@@ -39,7 +39,7 @@ const fixture = [
         assert.equal(await page.locator('#settings-menu-button').getAttribute('aria-expanded'),'true');
         assert.equal(await page.locator('#settings-menu [role="menuitem"]').count(),2);
         assert.equal(await page.locator('#settings-menu').getByText('Library',{exact:true}).count(),0);
-        assert.equal(await page.locator('#modal-container').isVisible(),false,'Account button must not open profile modal');
+        assert.equal(await page.locator('[role="dialog"]').count(),0,'Account button must not open profile modal');
         await page.keyboard.press('Escape');
         assert.equal(await page.locator('#settings-menu-button').getAttribute('aria-expanded'),'false');
         assert.equal(await page.evaluate(()=>document.activeElement?.id),'settings-menu-button');
@@ -97,7 +97,15 @@ const fixture = [
         for (const width of [1440,1024,768,576,390,320]) {
             await page.setViewportSize({width,height:844});
             await page.waitForTimeout(200);
-            assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`Overflow at ${width}`);
+            const overflow = await page.evaluate(() => ({
+                page: document.documentElement.scrollWidth,
+                viewport: innerWidth,
+                elements: [...document.querySelectorAll('body *')].filter(element => {
+                    const rect = element.getBoundingClientRect();
+                    return rect.width > 0 && (rect.right > innerWidth + 1 || rect.left < -1);
+                }).slice(0, 8).map(element => ({ className: element.className, id: element.id, left: element.getBoundingClientRect().left, right: element.getBoundingClientRect().right }))
+            }));
+            assert.ok(overflow.page<=overflow.viewport,`Overflow at ${width}: ${JSON.stringify(overflow.elements)}`);
             assert.deepEqual(await page.locator('.map-controls').evaluate(el => {
                 const s = getComputedStyle(el); return [s.backgroundColor,s.padding,s.boxShadow];
             }), ['rgba(0, 0, 0, 0)','0px','none']);
@@ -160,6 +168,32 @@ const fixture = [
         assert.equal(await page.inputValue('#journey-year-metric'),'distance');
         await page.evaluate(()=>navigateTo('flights'));
         await page.waitForFunction(()=>document.querySelectorAll('#flights-table tbody tr').length===2);
+        assert.equal(await page.locator('#flight-results-status').textContent(),'2 flights');
+        await page.locator('#flight-search').fill('BBB');
+        assert.equal(await page.locator('#flights-table tbody tr').count(),1);
+        assert.ok((await page.locator('#flights-table tbody tr').textContent()).includes('TEST1'));
+        assert.equal(await page.locator('#flight-results-status').textContent(),'1 of 2 flights');
+        await page.locator('#flight-filter-reset').click();
+        assert.equal(await page.locator('#flights-table tbody tr').count(),2);
+        await page.selectOption('#flight-sort-select','date:asc');
+        assert.ok((await page.locator('#flights-table tbody tr').first().textContent()).includes('TEST1'));
+        await page.locator('.mobile-nav-primary').click();
+        const dialog = page.locator('[role="dialog"]');
+        assert.equal(await dialog.getAttribute('aria-modal'),'true');
+        assert.equal(await dialog.locator('.modal-footer button').count(),2);
+        assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('name')),'flight_number');
+        assert.equal(await dialog.locator('[name="flight_number"]').getAttribute('required'),'');
+        assert.equal(await dialog.locator('[name="date"]').getAttribute('required'),'');
+        await page.keyboard.press('Escape');
+        assert.equal(await page.locator('[role="dialog"]').count(),0);
+        assert.ok(await page.locator('.mobile-nav-primary').evaluate(element => element === document.activeElement));
+        if (process.env.UI_SCREENSHOT_DIR) {
+            fs.mkdirSync(process.env.UI_SCREENSHOT_DIR,{recursive:true});
+            for (const width of [1440,390]) {
+                await page.setViewportSize({width,height:900});
+                await page.screenshot({path:path.join(process.env.UI_SCREENSHOT_DIR,`flights-stage4-${width}.png`),fullPage:true});
+            }
+        }
         assert.equal(await page.locator('#flight-health-filter span').textContent(),'Needs attention · 1');
         assert.equal(await page.locator('#flights-table tbody .flight-row-needs-attention').count(),1);
         assert.equal(await page.locator('#flights-table tbody .flight-health-warning').count(),1);
