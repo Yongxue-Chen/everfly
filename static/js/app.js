@@ -1374,8 +1374,15 @@ function initMap() {
     }
 }
 
+function getProfileMapPalette(type = State.profileMapType) {
+    return type === 'satellite'
+        ? { completed: '#cbd5e1', pending: '#ff997c', airport: '#ffffff', border: '#17212b', completedOpacity: 0.95, pendingOpacity: 0.95 }
+        : { completed: '#697386', pending: '#e07a5f', airport: '#345d80', border: '#ffffff', completedOpacity: 0.8, pendingOpacity: 0.9 };
+}
+
 function setMapLayer(type) {
     if (!State.map) return;
+    State.profileMapType = type === 'satellite' ? 'satellite' : 'map';
     if (State.profileBaseLayer) State.map.removeLayer(State.profileBaseLayer);
     if (type === 'satellite') {
         State.profileBaseLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
@@ -1383,10 +1390,19 @@ function setMapLayer(type) {
         }).addTo(State.map);
     } else {
         State.profileBaseLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors',
-            className: 'profile-neutral-basemap'
+            attribution: '© OpenStreetMap contributors'
         }).addTo(State.map);
     }
+    const palette = getProfileMapPalette();
+    const legend = document.querySelector('.route-status-legend');
+    if (legend) {
+        legend.querySelector('.route-status-completed').style.borderColor = palette.completed;
+        legend.querySelector('.route-status-pending').style.borderColor = palette.pending;
+        const airport = legend.querySelector('.route-status-airport');
+        airport.style.backgroundColor = palette.airport;
+        airport.style.boxShadow = `0 0 0 1px ${palette.border}`;
+    }
+    refreshProfileMapLayers();
 }
 
 function getVisibleWorldLongitudeOffsets(map, bufferCopies = 1) {
@@ -3932,6 +3948,8 @@ function refreshProfileMapLayers({ fitBounds = false } = {}) {
     }
 
     const selectedYear = State.profileMapSelectedYear;
+    const palette = getProfileMapPalette();
+    const satellite = State.profileMapType === 'satellite';
     const flights = State.profileMapFlights;
     const filtered = selectedYear === 'all' ? flights : flights.filter(f => f.date && f.date.startsWith(selectedYear));
     const longitudeOffsets = getVisibleWorldLongitudeOffsets(State.map, 1);
@@ -3964,8 +3982,17 @@ function refreshProfileMapLayers({ fitBounds = false } = {}) {
         const completed = isProfileFlightCompleted(f, now);
         const statusLabel = completed ? '已结束' : '未结束';
         longitudeOffsets.forEach(offset => {
-            const line = L.polyline(shiftPathLongitude(curvePoints, offset), {
-                color: completed ? '#697386' : '#e07a5f', weight: 2.6, opacity: completed ? 0.75 : 0.9,
+            const points = shiftPathLongitude(curvePoints, offset);
+            if (satellite) {
+                const outline = L.polyline(points, {
+                    color: palette.border, weight: 4.5, opacity: 0.6,
+                    dashArray: completed ? null : '8 6', interactive: false
+                }).addTo(State.map);
+                State.profileLayers.push(outline);
+            }
+            const line = L.polyline(points, {
+                color: completed ? palette.completed : palette.pending, weight: 2.6,
+                opacity: completed ? palette.completedOpacity : palette.pendingOpacity,
                 dashArray: completed ? null : '8 6'
             });
             line.bindPopup(`${escapeHtml(f.flight_number)}<br>${escapeHtml(f.date)}<br>${escapeHtml(f.origin.code)} -> ${escapeHtml(f.dest.code)}<br>${statusLabel}`);
@@ -3983,7 +4010,7 @@ function refreshProfileMapLayers({ fitBounds = false } = {}) {
     Object.entries(airports).forEach(([code, data]) => {
         longitudeOffsets.forEach(offset => {
             const loc = [data.loc[0], data.loc[1] + offset];
-            const m = L.circleMarker(loc, { radius: 4.5, color: '#ffffff', weight: 1.4, fillColor: '#345d80', fillOpacity: 1 });
+            const m = L.circleMarker(loc, { radius: 4.5, color: palette.border, weight: 1.4, fillColor: palette.airport, fillOpacity: 1 });
             m.bindPopup(`<b>${escapeHtml(code)}</b><br>${escapeHtml(data.name)}`);
             m.addTo(State.map);
             State.profileLayers.push(m);
