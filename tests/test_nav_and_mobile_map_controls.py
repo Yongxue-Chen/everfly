@@ -14,7 +14,8 @@ class NavAndMobileMapControlsTest(unittest.TestCase):
             source = fh.read()
 
         self.assertIn('data-view-nav="datasets"', source)
-        self.assertIn("onclick=\"navigateTo('datasets')\"", source)
+        self.assertIn('href="/library"', source)
+        self.assertIn('data-route-view="datasets"', source)
         self.assertIn(">Library<", source)
         self.assertNotIn("data-dataset-nav=", source)
         self.assertNotIn("navigateToDataset('cities')", source)
@@ -26,7 +27,8 @@ class NavAndMobileMapControlsTest(unittest.TestCase):
             template = fh.read()
 
         self.assertIn("data-view-nav=\"datasets\"", template)
-        self.assertIn('document.querySelector(`.nav-item[data-view-nav="${viewName}"]`)', source)
+        self.assertIn("document.querySelectorAll('.nav-item[data-view-nav]')", source)
+        self.assertIn("event.metaKey || event.ctrlKey || event.shiftKey || event.altKey", source)
         self.assertIn("function invalidateProfileMapSize()", source)
         self.assertIn("State.map.invalidateSize({ pan: false })", source)
         self.assertIn("minZoom: 0", source)

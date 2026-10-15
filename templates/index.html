@@ -20,7 +20,7 @@
         const CURRENT_USER = {{ user| tojson | safe }};
         const CSRF_TOKEN = "{{ csrf_token() }}";
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=ui-stage2-11">
+    <link rel="stylesheet" href="/static/css/style.css?v=ui-stage3-1">
 </head>
 
 <body>
@@ -28,37 +28,29 @@
     <!-- Header / Toolbar -->
     <header class="navbar">
         <div class="navbar-left">
-            <a href="#" class="navbar-brand" onclick="navigateTo('profile'); return false;">
+            <a href="/profile" class="navbar-brand" data-route-view="profile">
                 <img src="/static/images/logo.png" alt="everfly Logo" height="32">
                 everfly
             </a>
         </div>
         <div class="navbar-right">
-            <div class="nav-item active" data-view-nav="profile" onclick="navigateTo('profile')">Journey</div>
-            <div class="nav-item" data-view-nav="flights" onclick="navigateTo('flights')">Flights</div>
-            <div class="nav-item" data-view-nav="datasets" onclick="navigateTo('datasets')">Library</div>
+            <a href="/profile" class="nav-item active" data-route-view="profile" data-view-nav="profile" aria-current="page">Journey</a>
+            <a href="/flights" class="nav-item" data-route-view="flights" data-view-nav="flights">Flights</a>
+            <a href="/library" class="nav-item" data-route-view="datasets" data-view-nav="datasets">Library</a>
             <button class="btn btn-primary" onclick="openAddFlightModal()">
                 <i class="fa-solid fa-plus"></i> Add flight
             </button>
-            <div class="user-info" onclick="openEditProfileModal(); toggleDropdown();" title="Edit Profile">
-                <div class="user-avatar-circle">
-                    <span id="user-avatar-initial"></span>
-                </div>
-                <span id="user-display-name" class="user-display-name"></span>
-            </div>
-
             <div class="dropdown" id="settings-dropdown">
-                <button class="btn btn-secondary dropdown-toggle" onclick="toggleDropdown()">
-                    <i class="fa-solid fa-gear"></i> Setting <i class="fa-solid fa-caret-down"></i>
+                <button type="button" id="settings-menu-button" class="user-info dropdown-toggle account-menu-toggle" onclick="toggleDropdown()" aria-expanded="false" aria-haspopup="menu" aria-controls="settings-menu" aria-label="Account menu">
+                    <span class="user-avatar-circle"><span id="user-avatar-initial"></span></span>
+                    <span id="user-display-name" class="user-display-name"></span>
+                    <i class="fa-solid fa-caret-down" aria-hidden="true"></i>
                 </button>
-                <div class="dropdown-content">
-                    <button onclick="navigateTo('datasets'); toggleDropdown();">
-                        <i class="fa-solid fa-database"></i> Library
-                    </button>
-                    <button onclick="openEditProfileModal(); toggleDropdown();">
+                <div class="dropdown-content" id="settings-menu" role="menu" aria-labelledby="settings-menu-button">
+                    <button type="button" role="menuitem" onclick="openEditProfileModal(); setSettingsDropdown(false);">
                         <i class="fa-solid fa-user-edit"></i> Edit Profile
                     </button>
-                    <a href="/logout">
+                    <a href="/logout" role="menuitem">
                         <i class="fa-solid fa-sign-out-alt"></i> Logout
                     </a>
                 </div>
@@ -254,22 +246,22 @@
     </main>
 
     <nav class="mobile-bottom-nav" aria-label="Mobile primary navigation">
-        <button class="mobile-nav-item active" data-mobile-view="profile" onclick="navigateTo('profile')">
+        <a href="/profile" class="mobile-nav-item active" data-route-view="profile" data-mobile-view="profile" aria-current="page">
             <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
             <span>Journey</span>
-        </button>
-        <button class="mobile-nav-item" data-mobile-view="flights" onclick="navigateTo('flights')">
+        </a>
+        <a href="/flights" class="mobile-nav-item" data-route-view="flights" data-mobile-view="flights">
             <i class="fa-solid fa-plane-departure" aria-hidden="true"></i>
             <span>Flights</span>
-        </button>
+        </a>
         <button class="mobile-nav-item mobile-nav-primary" onclick="openAddFlightModal()">
             <i class="fa-solid fa-plus" aria-hidden="true"></i>
             <span>Add</span>
         </button>
-        <button class="mobile-nav-item" data-mobile-view="datasets" onclick="navigateTo('datasets')">
+        <a href="/library" class="mobile-nav-item" data-route-view="datasets" data-mobile-view="datasets">
             <i class="fa-solid fa-database" aria-hidden="true"></i>
             <span>Library</span>
-        </button>
+        </a>
     </nav>
 
     <div id="entity-panel-overlay" class="entity-panel-overlay" onclick="closeEntityPanel()" hidden></div>
@@ -300,7 +292,7 @@
     </div>
 
     <script src="/static/js/journey-stats.js?v=ui-stage2-3"></script>
-    <script src="/static/js/app.js?v=ui-stage2-11"></script>
+    <script src="/static/js/app.js?v=ui-stage3-1"></script>
 </body>
 
 </html>

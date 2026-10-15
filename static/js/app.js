@@ -288,20 +288,31 @@ function bindProfileMapResizeObserver() {
     State.profileMapResizeObserverBound = true;
 }
 
-function toggleDropdown() {
+function setSettingsDropdown(open, { restoreFocus = false } = {}) {
     const dropdown = document.getElementById('settings-dropdown');
-    if (dropdown) dropdown.classList.toggle('show');
+    const button = document.getElementById('settings-menu-button');
+    if (!dropdown || !button) return;
+    dropdown.classList.toggle('show', open);
+    button.setAttribute('aria-expanded', String(open));
+    if (restoreFocus) button.focus();
 }
 
-// Close dropdown if clicked outside
-window.onclick = function (event) {
-    if (!event.target.matches('.dropdown-toggle') && !event.target.closest('.dropdown-toggle')) {
-        const dropdown = document.getElementById('settings-dropdown');
-        if (dropdown && dropdown.classList.contains('show')) {
-            dropdown.classList.remove('show');
-        }
-    }
+function toggleDropdown() {
+    const dropdown = document.getElementById('settings-dropdown');
+    setSettingsDropdown(!dropdown?.classList.contains('show'));
 }
+
+document.addEventListener('click', event => {
+    const dropdown = document.getElementById('settings-dropdown');
+    if (dropdown?.classList.contains('show') && !dropdown.contains(event.target)) setSettingsDropdown(false);
+});
+
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && document.getElementById('settings-dropdown')?.classList.contains('show')) {
+        event.preventDefault();
+        setSettingsDropdown(false, { restoreFocus: true });
+    }
+});
 
 async function openEditProfileModal() {
     // Pre-fetch API key status before opening modal
@@ -1331,13 +1342,19 @@ function navigateTo(viewName, updateHistory = true) {
     }
 
     // Update Navbar
-    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-    if (viewName === 'profile' || viewName === 'flights' || viewName === 'datasets') {
-        document.querySelector(`.nav-item[data-view-nav="${viewName}"]`)?.classList.add('active');
-    }
-    document.querySelectorAll('.mobile-nav-item[data-mobile-view]').forEach(el => {
-        el.classList.toggle('active', el.dataset.mobileView === viewName);
+    document.querySelectorAll('.nav-item[data-view-nav]').forEach(el => {
+        const active = el.dataset.viewNav === viewName;
+        el.classList.toggle('active', active);
+        if (active) el.setAttribute('aria-current', 'page');
+        else el.removeAttribute('aria-current');
     });
+    document.querySelectorAll('.mobile-nav-item[data-mobile-view]').forEach(el => {
+        const active = el.dataset.mobileView === viewName;
+        el.classList.toggle('active', active);
+        if (active) el.setAttribute('aria-current', 'page');
+        else el.removeAttribute('aria-current');
+    });
+    setSettingsDropdown(false);
 
     // Update View Visibility
     document.querySelectorAll('.view').forEach(el => el.style.display = 'none');
@@ -4509,6 +4526,14 @@ window.addEventListener('DOMContentLoaded', () => {
         initMap();
         console.log("FlightLog: Map Initialized");
         
+        document.querySelectorAll('[data-route-view]').forEach(link => {
+            link.addEventListener('click', event => {
+                if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                event.preventDefault();
+                navigateTo(link.dataset.routeView);
+            });
+        });
+
         // Initialize view based on current URL
         const initialView = getViewFromPath();
         navigateTo(initialView, false);
