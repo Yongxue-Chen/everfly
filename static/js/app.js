@@ -1563,6 +1563,20 @@ function sortDataset(key) {
     renderDatasetTable(config, State.cache[State.currentDataset]);
 }
 
+function compareDatasetValues(valA, valB, direction = 'asc') {
+    const emptyA = valA === null || valA === undefined || valA === '';
+    const emptyB = valB === null || valB === undefined || valB === '';
+    if (emptyA && emptyB) return 0;
+    if (emptyA) return 1;
+    if (emptyB) return -1;
+
+    const comparison = String(valA).localeCompare(String(valB), undefined, {
+        numeric: true,
+        sensitivity: 'base'
+    });
+    return direction === 'asc' ? comparison : -comparison;
+}
+
 function getProcessedDatasetData(config, data) {
     let processedData = [...data];
 
@@ -1599,9 +1613,7 @@ function getProcessedDatasetData(config, data) {
                 valB = lookupB ? lookupB[colDef.display] : valB;
             }
 
-            if (valA < valB) return State.sort.dir === 'asc' ? -1 : 1;
-            if (valA > valB) return State.sort.dir === 'asc' ? 1 : -1;
-            return 0;
+            return compareDatasetValues(valA, valB, State.sort.dir);
         });
     }
 
@@ -4273,9 +4285,7 @@ function getProcessedDatasetData(config, data) {
                 valB = lookupB ? lookupB[colDef.display] : valB;
             }
 
-            if (valA < valB) return State.sort.dir === 'asc' ? -1 : 1;
-            if (valA > valB) return State.sort.dir === 'asc' ? 1 : -1;
-            return 0;
+            return compareDatasetValues(valA, valB, State.sort.dir);
         });
     }
 

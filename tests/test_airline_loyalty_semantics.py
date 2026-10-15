@@ -45,6 +45,16 @@ class AirlineLoyaltySemanticsTest(unittest.TestCase):
         self.assertIn("airline-member-number", self.js_source)
         self.assertIn("filter-airline-program", self.js_source)
 
+    def test_dataset_sort_handles_empty_alliance_values(self):
+        self.assertIn("function compareDatasetValues(valA, valB, direction = 'asc')", self.js_source)
+        self.assertIn("if (emptyA) return 1;", self.js_source)
+        self.assertIn("if (emptyB) return -1;", self.js_source)
+        self.assertIn("sensitivity: 'base'", self.js_source)
+        self.assertEqual(
+            self.js_source.count("return compareDatasetValues(valA, valB, State.sort.dir);"),
+            2,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
