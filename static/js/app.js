@@ -3116,8 +3116,7 @@ function monthKeyFromDate(date) {
 
 function buildRecentTwelveMonths(monthRows) {
     const counts = Object.fromEntries((monthRows || []).map(row => [row.month, Number(row.count || 0)]));
-    const selectedYear = State.journeyYear || 'all';
-    const end = selectedYear === 'all' ? new Date() : new Date(Number(selectedYear), 11, 1);
+    const end = new Date();
     end.setDate(1);
     const months = [];
     for (let i = 11; i >= 0; i--) {
@@ -3164,8 +3163,9 @@ function distanceBucketForFlight(flight) {
     return '7,000+ km';
 }
 
-function filterFlightsForInsight(kind, value) {
-    return (State.journeyFlights || State.cache.flights || []).filter(flight => {
+function filterFlightsForInsight(kind, value, scope = 'selected') {
+    const flights = scope === 'all' ? (State.cache.flights || []) : (State.journeyFlights || State.cache.flights || []);
+    return flights.filter(flight => {
         if (kind === 'all') return true;
         if (kind === 'year') return normalizeYear(flight.date) === String(value);
         if (kind === 'month') return normalizeMonth(flight.date) === String(value);
@@ -3415,19 +3415,19 @@ function renderMonthOfYearStats(monthRows) {
     });
     const max = Math.max(...totals.map(row => row.count), 1);
     return `<div class="month-of-year-grid">${totals.map(row => `
-        <button class="month-of-year-item" onclick="openFlightListModal('Month pattern', filterFlightsForInsight('monthOfYear', ${row.month}))" title="${row.count} flights in month ${row.month}">
+        <button class="month-of-year-item" onclick="openFlightListModal('Month pattern', filterFlightsForInsight('monthOfYear', ${row.month}, 'all'))" title="${row.count} flights in month ${row.month}">
             <span class="month-of-year-plot"><i style="--month-level:${Math.max(8, Math.round((row.count / max) * 100))}%"><strong>${row.count}</strong></i></span>
             <span class="month-of-year-label">${String(row.month).padStart(2, '0')}</span>
         </button>
     `).join('')}</div>`;
 }
 
-function renderJourneyTrends(stats) {
+function renderJourneyTrends(stats, scopedStats) {
     const container = document.getElementById('journey-trends');
     if (!container) return;
     const months = stats.flights_by_month || [];
     const recentMonths = buildRecentTwelveMonths(months);
-    const buckets = stats.distributions?.route_distance_buckets || [];
+    const buckets = scopedStats.distributions?.route_distance_buckets || [];
     const years = buildContinuousYears(stats);
     const byYear = (rows, key) => Object.fromEntries((rows || []).map(row => [row.year, Number(row[key] || 0)]));
     const flightMap = byYear(stats.flights_by_year, 'count');
@@ -3435,30 +3435,6 @@ function renderJourneyTrends(stats) {
     const durationMap = byYear(stats.duration_by_year, 'duration');
 
     container.innerHTML = `
-        <article class="journey-chart-card journey-chart-wide">
-            <div class="stats-header">Yearly rhythm</div>
-            <label class="journey-chart-note">Metric <select id="journey-year-metric"><option value="flights">Flights</option><option value="distance">Distance (km)</option><option value="hours">Hours</option></select></label>
-            <div class="journey-chart-box"><canvas id="yearComboChart"></canvas></div>
-        </article>
-
-        <article class="journey-chart-card journey-chart-wide">
-            <div class="stats-header">Footprint collection timeline</div>
-            <p class="journey-chart-note">Cumulative airports, cities and countries within the selected scope, not lifetime totals when a year is selected.</p>
-            <div class="journey-chart-box"><canvas id="footprintGrowthChart"></canvas></div>
-        </article>
-        
-        <div class="journey-heatmap-row">
-            <article class="journey-chart-card">
-                <div class="stats-header">Monthly flight heatmap (Contribution Graph)</div>
-                <p class="journey-chart-note">Grid color intensity represents flight frequency per month across years.</p>
-                ${renderFlightHeatmap(months)}
-            </article>
-            <div class="journey-heatmap-side">
-                <article class="journey-chart-card"><div class="stats-header">${State.journeyYear && State.journeyYear !== 'all' ? 'Months in selected year' : 'Last twelve months'}</div><div class="journey-chart-box"><canvas id="monthlyChart"></canvas></div></article>
-                <article class="journey-chart-card"><div class="stats-header">Month pattern</div><p class="journey-chart-note">Flights grouped by calendar month, January through December.</p>${renderMonthOfYearStats(months)}</article>
-            </div>
-        </div>
-        
         <article class="journey-chart-card journey-chart-wide">
             <div class="stats-header">Flight Profile Insights (Preferences & Distributions)</div>
             <div class="preference-donut-box">
@@ -3480,6 +3456,32 @@ function renderJourneyTrends(stats) {
                 </div>
             </div>
         </article>
+        <article class="journey-chart-card journey-chart-wide">
+            <div class="stats-header">Yearly rhythm</div>
+            <p class="journey-chart-note">All trend charts below use all years and all flights, regardless of the filters above.</p>
+            <label class="journey-chart-note">Metric <select id="journey-year-metric"><option value="flights">Flights</option><option value="distance">Distance (km)</option><option value="hours">Hours</option></select></label>
+            <div class="journey-chart-box"><canvas id="yearComboChart"></canvas></div>
+        </article>
+
+        <article class="journey-chart-card journey-chart-wide">
+            <div class="stats-header">Footprint collection timeline</div>
+            <p class="journey-chart-note">Cumulative airports, cities and countries across all years and all flights, including upcoming flights.</p>
+            <div class="journey-chart-box"><canvas id="footprintGrowthChart"></canvas></div>
+        </article>
+        
+        <div class="journey-heatmap-row">
+            <article class="journey-chart-card">
+                <div class="stats-header">Monthly flight heatmap (Contribution Graph)</div>
+                <p class="journey-chart-note">Grid color intensity represents flight frequency per month across years.</p>
+                ${renderFlightHeatmap(months)}
+            </article>
+            <div class="journey-heatmap-side">
+                <article class="journey-chart-card"><div class="stats-header">Last twelve months</div><div class="journey-chart-box"><canvas id="monthlyChart"></canvas></div></article>
+                <article class="journey-chart-card"><div class="stats-header">Month pattern</div><p class="journey-chart-note">Flights grouped by calendar month, January through December.</p>${renderMonthOfYearStats(months)}</article>
+            </div>
+        </div>
+        
+
     `;
 
     const yearMetric = State.journeyMetric || 'flights';
@@ -3514,7 +3516,7 @@ function renderJourneyTrends(stats) {
             onClick: (event, elements) => {
                 if (!elements.length) return;
                 const year = years[elements[0].index];
-                openFlightListModal('Yearly rhythm', filterFlightsForInsight('year', year));
+                openFlightListModal('Yearly rhythm', filterFlightsForInsight('year', year, 'all'));
             },
             plugins: { legend: { position: 'bottom' } },
             scales: {
@@ -3533,7 +3535,7 @@ function renderJourneyTrends(stats) {
             onClick: (event, elements) => {
                 if (!elements.length) return;
                 const month = recentMonths[elements[0].index].month;
-                openFlightListModal('Recent months', filterFlightsForInsight('month', month));
+                openFlightListModal('Recent months', filterFlightsForInsight('month', month, 'all'));
             },
             plugins: { legend: { display: false } },
             scales: { y: { beginAtZero: true, title: { display: true, text: 'Flights' }, grid: { color: '#eef3f8' } }, x: { grid: { display: false } } }
@@ -3603,7 +3605,7 @@ function renderJourneyTrends(stats) {
         }
     });
 
-    const dayNightCounts = stats.distributions?.day_night || [];
+    const dayNightCounts = scopedStats.distributions?.day_night || [];
     const dayNightMap = Object.fromEntries(dayNightCounts.map(d => [d.name, d.count]));
     renderJourneyChart('dayNightDonutChart', {
         type: 'doughnut',
@@ -3957,7 +3959,7 @@ function updateJourneyScope() {
     State.cache.stats = aggregateJourneyStats(State.journeyFlights, State.journeyCities || [], f => isProfileFlightCompleted(f, now));
     renderHeaderStats(State.journeyFlights);
     const label = { completed: 'Completed', pending: 'Upcoming / ongoing', all: 'All flights' }[State.journeyStatus];
-    document.getElementById('journey-scope-note').textContent = `${State.journeyYear === 'all' ? 'All years' : State.journeyYear} · ${label} · ${State.journeyFlights.length} flights. Map, statistics and details share this scope.`;
+    document.getElementById('journey-scope-note').textContent = `${State.journeyYear === 'all' ? 'All years' : State.journeyYear} · ${label} · ${State.journeyFlights.length} flights. Map, records and profile insights follow these filters; trend charts always use all flights.`;
     renderJourneyRecent(State.journeyFlights);
     showJourneyTab();
 }
@@ -3968,7 +3970,7 @@ function showJourneyTab() {
     // Render only visible charts: Chart.js cannot measure hidden containers reliably.
     if (State.journeyTab === 'statistics') {
         renderJourneyHighlights(State.cache.stats);
-        renderJourneyTrends(State.cache.stats);
+        renderJourneyTrends(aggregateJourneyStats(State.cache.flights || [], State.journeyCities || [], isProfileFlightCompleted), State.cache.stats);
         renderStatsDashboard(State.cache.stats, document.getElementById('profile-stats-dashboard'));
     } else {
         renderProfileMap(State.journeyFlights, 'all');
@@ -4194,7 +4196,7 @@ function renderFlightHeatmap(months) {
             html += `
                 <button class="heatmap-cell ${levelClass}" 
                         title="${yr}-${monthName}: ${count} flights" 
-                        onclick="openFlightListModal('${yr}-${monthName}', filterFlightsForInsight('month', '${monthStr}'))">
+                        onclick="openFlightListModal('${yr}-${monthName}', filterFlightsForInsight('month', '${monthStr}', 'all'))">
                 </button>
             `;
         });

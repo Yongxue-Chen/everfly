@@ -35,7 +35,7 @@ class CompleteCloudPremiumUiTest(unittest.TestCase):
 
     def test_static_assets_use_ui_stage_version(self):
         self.assertIn('/static/css/style.css?v=ui-stage2-5', self.template)
-        self.assertIn('/static/js/app.js?v=ui-stage2-5', self.template)
+        self.assertIn('/static/js/app.js?v=ui-stage2-6', self.template)
         self.assertIn('/static/js/journey-stats.js?v=ui-stage2-3', self.template)
 
 if __name__ == "__main__":

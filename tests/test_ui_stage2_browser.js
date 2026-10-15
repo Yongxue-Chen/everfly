@@ -34,6 +34,30 @@ const fixture = [
         assert.equal(await page.locator('.journey-trends-panel').isVisible(),false);
         assert.equal(await page.locator('.journey-recent-flight').count(),2);
         await page.locator('[data-journey-tab="statistics"]').click();
+        const trendSnapshot = () => page.evaluate(() => JSON.stringify({
+            charts: ['yearComboChart','footprintGrowthChart','monthlyChart'].map(id => Chart.getChart(id).data),
+            months: document.querySelector('.month-of-year-grid').innerHTML,
+            heatmap: document.querySelector('.journey-heatmap-row > article').innerHTML
+        }));
+        const allTrends = await trendSnapshot();
+        for (const year of ['all','2024','2099']) {
+            await page.selectOption('#year-filter',year);
+            for (const status of ['all','completed','pending']) {
+                await page.selectOption('#journey-status-filter',status);
+                assert.equal(await trendSnapshot(),allTrends,'All five trends must ignore year/status filters');
+                assert.equal(await page.evaluate(()=>filterFlightsForInsight('year',2024,'all').length),1);
+                assert.equal(await page.evaluate(()=>filterFlightsForInsight('month','2099-01','all').length),1);
+                assert.equal(await page.evaluate(()=>filterFlightsForInsight('monthOfYear',1,'all').length),2);
+            }
+        }
+        await page.selectOption('#year-filter','all');
+        await page.selectOption('#journey-status-filter','all');
+        assert.deepEqual(await page.locator('#journey-trends .stats-header').allTextContents(),[
+            'Flight Profile Insights (Preferences & Distributions)', 'Yearly rhythm', 'Footprint collection timeline',
+            'Monthly flight heatmap (Contribution Graph)', 'Last twelve months', 'Month pattern'
+        ]);
+        assert.ok(await page.evaluate(()=>Boolean(document.querySelector('.journey-highlight-panel').compareDocumentPosition(document.querySelector('.journey-insights')) & Node.DOCUMENT_POSITION_FOLLOWING)));
+        assert.ok(await page.evaluate(()=>Boolean(document.querySelector('.journey-insights').compareDocumentPosition(document.querySelector('.journey-trends-panel')) & Node.DOCUMENT_POSITION_FOLLOWING)));
         for (const width of [1440,1024,768,576,390,320]) {
             await page.setViewportSize({width,height:844});
             await page.waitForTimeout(200);
