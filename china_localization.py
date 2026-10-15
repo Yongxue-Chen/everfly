@@ -1,17 +1,19 @@
-"""Canonical Chinese names used when China-region entities are auto-created.
+"""English-first bilingual names for China-region entities.
 
 Airport and airline code mappings are derived from the MIT-licensed
 Timeon1/TMC_Dataset. Unknown China-region airports still receive a stable
-Chinese fallback label instead of silently reverting to an English name.
+explicit missing-translation marker rather than an invented Chinese name.
 """
+
+from functools import lru_cache
 
 CHINESE_REGION_CODES = frozenset({'CN', 'HK', 'MO', 'TW'})
 
 CHINESE_COUNTRY_NAMES = {
-    'CN': '中国',
-    'HK': '中国香港',
-    'MO': '中国澳门',
-    'TW': '中国台湾',
+    'CN': 'China (中国)',
+    'HK': 'Hong Kong (中国香港)',
+    'MO': 'Macao (中国澳门)',
+    'TW': 'Taiwan (中国台湾)',
 }
 
 # IATA -> (city, airport). Names follow the application's compact convention
@@ -123,26 +125,110 @@ def chinese_country_name(country_code):
     return CHINESE_COUNTRY_NAMES.get(str(country_code or '').upper())
 
 
+ENGLISH_AIRLINE_NAMES = {
+    'A6': 'Hunan Airlines', 'AQ': '9 Air', 'BK': 'Okay Airways',
+    'CA': 'Air China', 'CN': 'Grand China Air', 'CZ': 'China Southern Airlines',
+    'DR': 'Ruili Airlines', 'DZ': 'Donghai Airlines', 'EU': 'Chengdu Airlines',
+    'FM': 'Shanghai Airlines', 'FU': 'Fuzhou Airlines', 'G5': 'China Express Airlines',
+    'GJ': 'Loong Air', 'GS': 'Tianjin Airlines', 'GT': 'Air Guilin',
+    'GX': 'GX Airlines', 'GY': 'Colorful Guizhou Airlines', 'HO': 'Juneyao Airlines',
+    'HU': 'Hainan Airlines', 'JD': 'Beijing Capital Airlines', 'JR': 'Joy Air',
+    'KN': 'China United Airlines', 'KY': 'Kunming Airlines', 'MF': 'Xiamen Airlines',
+    'MU': 'China Eastern Airlines', 'NS': 'Hebei Airlines', 'OQ': 'Chongqing Airlines',
+    'PN': 'West Air', 'QW': 'Qingdao Airlines', 'RY': 'Jiangxi Air',
+    'SC': 'Shandong Airlines', 'TV': 'Tibet Airlines', 'UQ': 'Urumqi Air',
+    'VD': 'Henan Airlines', 'Y8': 'Suparna Airlines', 'ZH': 'Shenzhen Airlines',
+    'ZO': 'Colorful General Aviation', '3U': 'Sichuan Airlines', '8C': 'East Star Airlines',
+    '8L': 'Lucky Air', '9C': 'Spring Airlines', '9D': 'Genghis Khan Airlines', '9H': 'Air Changan',
+}
+
+# Corrections to historical names in the bundled airportsdata snapshot.
+ENGLISH_AIRPORT_OVERRIDES = {
+    'KMG': 'Kunming Changshui International Airport',
+    'SJW': 'Shijiazhuang Zhengding International Airport',
+    'HKG': 'Hong Kong International Airport',
+    'HET': 'Hohhot Baita International Airport',
+    'HRB': 'Harbin Taiping International Airport',
+    'SHE': 'Shenyang Taoxian International Airport',
+}
+
+
+def bilingual_name(english, chinese):
+    return f"{english} ({chinese})"
+
+
+@lru_cache(maxsize=1)
+def china_city_names():
+    import airportsdata
+    airports = airportsdata.load('IATA')
+    names = {}
+    for code, (chinese, _) in CHINA_AIRPORTS_BY_IATA.items():
+        english = airports.get(code, {}).get('city')
+        if english:
+            names.setdefault(chinese, english)
+    return names
+
+
+def localized_china_city(name, country_code=None):
+    """Normalize known Chinese/English/bilingual aliases without changing IDs."""
+    value = str(name or '').strip()
+    if country_code and str(country_code).upper() not in CHINESE_REGION_CODES:
+        return value
+    for chinese, english in china_city_names().items():
+        canonical = bilingual_name(english, chinese)
+        if value.casefold() in {chinese.casefold(), english.casefold(), canonical.casefold(), f'{english}（{chinese}）'.casefold()}:
+            return canonical
+    return value
+
+
 def localized_china_airport(info, iata=None, icao=None):
-    """Return Chinese city/airport/country names, or ``None`` outside China."""
+    """Return bilingual city/airport/country names, or None outside China."""
     country_code = str((info or {}).get('country') or '').upper()
     if country_code not in CHINESE_REGION_CODES:
         return None
     iata_code = str(iata or (info or {}).get('iata') or '').upper()
     code = iata_code or str(icao or (info or {}).get('icao') or '').upper()
     mapped = CHINA_AIRPORTS_BY_IATA.get(iata_code)
+    import airportsdata
+    standard = airportsdata.load('IATA').get(iata_code, {})
+    english_airport = ENGLISH_AIRPORT_OVERRIDES.get(iata_code) or standard.get('name') or (info or {}).get('name') or f'Airport {code}'
     if mapped:
         city_name, airport_name = mapped
+        english_city = china_city_names().get(city_name) or standard.get('city') or (info or {}).get('city') or code
     else:
-        city_name = f"中国城市（{code}）"
-        airport_name = f"中国机场（{code}）"
+        city_name = airport_name = '中文名待补充'
+        english_city = (info or {}).get('city') or f'City {code}'
     return {
-        'city': city_name,
-        'airport': airport_name,
+        'city': bilingual_name(english_city, city_name),
+        'airport': bilingual_name(english_airport, airport_name),
         'country': chinese_country_name(country_code),
         'country_code': country_code,
     }
 
 
 def chinese_airline_name(iata):
-    return CHINA_AIRLINES_BY_IATA.get(str(iata or '').upper())
+    code = str(iata or '').upper()
+    chinese = CHINA_AIRLINES_BY_IATA.get(code)
+    return bilingual_name(ENGLISH_AIRLINE_NAMES[code], chinese) if chinese else None
+
+
+def localized_china_airline_alias(name):
+    value = str(name or '').strip()
+    for code, chinese in CHINA_AIRLINES_BY_IATA.items():
+        english = ENGLISH_AIRLINE_NAMES[code]
+        if value.casefold() in {chinese.casefold(), english.casefold(), bilingual_name(english, chinese).casefold()}:
+            return bilingual_name(english, chinese)
+    return value
+
+
+ALLIANCE_NAMES = {'Star Alliance': '星空联盟', 'SkyTeam': '天合联盟', 'Oneworld': '寰宇一家'}
+
+
+def bilingual_alliance(value):
+    if not value:
+        return value
+    value = str(value).strip()
+    for english, chinese in ALLIANCE_NAMES.items():
+        if value.casefold() in {english.casefold(), chinese, bilingual_name(english, chinese).casefold(), f'{english}（{chinese}）'.casefold()}:
+            return bilingual_name(english, chinese)
+    return value

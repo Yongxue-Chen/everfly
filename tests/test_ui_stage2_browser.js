@@ -29,6 +29,8 @@ const fixture = [
         await page.waitForFunction(()=>State.journeyFlights?.length===2);
         assert.equal(await page.inputValue('#year-filter'),'all');
         assert.equal(await page.inputValue('#journey-status-filter'),'all');
+        assert.equal(await page.locator('#journey-hero #year-filter').count(),1);
+        assert.equal(await page.locator('#journey-hero #journey-status-filter').count(),1);
         assert.equal(await page.locator('.journey-trends-panel').isVisible(),false);
         assert.equal(await page.locator('.journey-recent-flight').count(),2);
         await page.locator('[data-journey-tab="statistics"]').click();
@@ -37,6 +39,9 @@ const fixture = [
             await page.waitForTimeout(200);
             assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`Overflow at ${width}`);
             assert.ok(await page.evaluate(()=>Chart.getChart('classDonutChart').width>0));
+            if (width >= 1024) {
+                assert.ok(await page.evaluate(()=>document.querySelector('.journey-filters').getBoundingClientRect().x > document.querySelector('.journey-hero-copy').getBoundingClientRect().x));
+            }
         }
         await page.selectOption('#journey-status-filter','pending');
         assert.equal(await page.evaluate(()=>filterFlightsForInsight('missing','health').length),0);

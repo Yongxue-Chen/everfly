@@ -48,3 +48,4 @@ deploy.env
 AGENTS.md
 CLAUDE.md
 flightaware_api_analysis.md
+.local-backups/

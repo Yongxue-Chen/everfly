@@ -42,6 +42,7 @@ deploy.sh
 docker-compose*.yml
 .deploy-last-ref
 *.log
+.local-backups/
 
 # Agent / tooling scratch
 .superpowers/

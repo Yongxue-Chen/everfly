@@ -26,6 +26,9 @@ from china_localization import (
     chinese_airline_name,
     chinese_country_name,
     localized_china_airport,
+    localized_china_city,
+    bilingual_alliance,
+    localized_china_airline_alias,
 )
 import weather
 
@@ -610,16 +613,45 @@ def normalize_airline_payload(data):
 
     alliance = normalized.get('alliance')
     if alliance:
-        normalized['alliance'] = AIRLINE_ALLIANCE_ALIASES.get(alliance.casefold(), alliance)
+        normalized['alliance'] = bilingual_alliance(AIRLINE_ALLIANCE_ALIASES.get(alliance.casefold(), alliance))
 
     for code_field in ('iata_code', 'icao_code', 'callsign'):
         if normalized.get(code_field):
             normalized[code_field] = normalized[code_field].upper()
 
+    code = normalized.get('iata_code') or AIRLINES_ICAO_TO_IATA.get(normalized.get('icao_code'))
+    localized_name = chinese_airline_name(code)
+    if localized_name:
+        normalized['name'] = localized_name
+        normalized['country'] = chinese_country_name('CN')
+    elif normalized.get('name'):
+        normalized['name'] = localized_china_airline_alias(normalized['name'])
+
     member_number = normalized.get('frequent_flyer_id')
     if member_number:
         normalized['frequent_flyer_id'] = re.sub(r'[\s-]+', '', member_number).upper()
     return normalized
+
+
+def normalize_entity_names(table_name, data):
+    data = dict(data)
+    if table_name == 'airlines':
+        return normalize_airline_payload(data)
+    if table_name == 'cities' and data.get('name'):
+        data['name'] = localized_china_city(data['name'], data.get('country_code'))
+        country = chinese_country_name(data.get('country_code'))
+        if country:
+            data['country'] = country
+    if table_name == 'airports':
+        iata = str(data.get('iata_code') or '').upper()
+        icao = str(data.get('icao_code') or '').upper()
+        info = airportsdata.load('IATA').get(iata) if iata else None
+        if not info and icao:
+            info = airportsdata.load('ICAO').get(icao)
+        localized = localized_china_airport(info, iata=iata, icao=icao) if info else None
+        if localized:
+            data['name'] = localized['airport']
+    return data
 
 # --- CRUD Routes Generation Helper ---
 def create_crud_routes(endpoint, table_name, columns):
@@ -639,6 +671,8 @@ def create_crud_routes(endpoint, table_name, columns):
 
         if table_name == 'airlines':
             valid_data = normalize_airline_payload(valid_data)
+        elif table_name in ('cities', 'airports'):
+            valid_data = normalize_entity_names(table_name, valid_data)
         
         # Normalize empty strings to None only for numeric/decimal fields in airports
         if table_name == 'airports':
@@ -699,6 +733,8 @@ def create_crud_routes(endpoint, table_name, columns):
 
         if table_name == 'airlines':
             valid_data = normalize_airline_payload(valid_data)
+        elif table_name in ('cities', 'airports'):
+            valid_data = normalize_entity_names(table_name, valid_data)
         
         # Normalize empty strings to None only for numeric/decimal fields in airports
         if table_name == 'airports':
@@ -1003,6 +1039,10 @@ def import_csv(table_name):
         
         # Helper for lookups
         def lookup_id(table, col, val):
+            if col == 'name' and table == 'cities':
+                val = localized_china_city(val)
+            if col == 'name' and table == 'airlines':
+                val = localized_china_airline_alias(val)
             cur = conn.execute(f"SELECT id FROM {table} WHERE {col} = ? AND user_id = ?", (val, g.user['id']))
             res = cur.fetchone()
             return res[0] if res else None
@@ -1117,7 +1157,7 @@ def import_csv(table_name):
                                 country_code = info.get('country')
                                 if city_name:
                                     # Reuse logic from _update_airport_logic if possible, or just look up
-                                    cur_c = conn.execute("SELECT id FROM cities WHERE name = ? AND country_code = ? AND user_id = ?", (city_name, country_code, g.user['id']))
+                                    cur_c = conn.execute("SELECT id FROM cities WHERE name = ? AND (country_code = ? OR (? IN ('CN','HK','MO','TW') AND country_code IN ('CN','HK','MO','TW'))) AND user_id = ?", (city_name, country_code, country_code, g.user['id']))
                                     res_c = cur_c.fetchone()
                                     if res_c: normalized_row['city_id'] = res_c[0]
                                     else:
@@ -1265,7 +1305,7 @@ def import_csv(table_name):
                         normalized_row['duration_actual'] = _calc_duration_minutes(conn, origin_id, dest_id, atd, ata)
 
             # 3. Prepare Final Data
-            valid_data = {k: v for k, v in normalized_row.items() if k in target_cols}
+            valid_data = normalize_entity_names(table_name, {k: v for k, v in normalized_row.items() if k in target_cols})
             
             if not valid_data:
                 continue
@@ -1439,30 +1479,30 @@ def _update_airport_logic(id, conn):
         if info_icao and info_iata:
             # Check for mismatch
             if info_icao.get('iata', '').upper() != db_iata.upper() or info_iata.get('icao', '').upper() != db_icao.upper():
-                return False, f"IATA与ICAO不匹配: 数据库中为 IATA={db_iata}/ICAO={db_icao}，而标准库中 ICAO={db_icao} 对应 IATA={info_icao.get('iata')}，IATA={db_iata} 对应 ICAO={info_iata.get('icao')}"
+                return False, f"IATA / ICAO mismatch: database has IATA={db_iata}/ICAO={db_icao}, but the reference library maps ICAO={db_icao} to IATA={info_icao.get('iata')}，IATA={db_iata} to ICAO={info_iata.get('icao')}"
             info = info_icao
         elif info_icao:
             if info_icao.get('iata', '').upper() != db_iata.upper():
-                return False, f"IATA与ICAO不匹配: 数据库中为 IATA={db_iata}/ICAO={db_icao}，而标准库中 ICAO={db_icao} 对应 IATA={info_icao.get('iata')}"
+                return False, f"IATA / ICAO mismatch: database has IATA={db_iata}/ICAO={db_icao}, but the reference library maps ICAO={db_icao} to IATA={info_icao.get('iata')}"
             info = info_icao
         elif info_iata:
             if info_iata.get('icao', '').upper() != db_icao.upper():
-                return False, f"IATA与ICAO不匹配: 数据库中为 IATA={db_iata}/ICAO={db_icao}，而标准库中 IATA={db_iata} 对应 ICAO={info_iata.get('icao')}"
+                return False, f"IATA / ICAO mismatch: database has IATA={db_iata}/ICAO={db_icao}, but the reference library maps IATA={db_iata} to ICAO={info_iata.get('icao')}"
             info = info_iata
         else:
-            return False, "标准库中未找到对应的IATA或ICAO机场数据"
+            return False, "No matching IATA or ICAO airport found in the reference library"
     elif db_icao:
         ad_icao = airportsdata.load('ICAO')
         info = ad_icao.get(db_icao.upper())
         if not info:
-            return False, f"标准库中找不到 ICAO={db_icao} 的机场数据"
+            return False, f"Reference library has no airport for ICAO={db_icao}"
     elif db_iata:
         ad_iata = airportsdata.load('IATA')
         info = ad_iata.get(db_iata.upper())
         if not info:
-            return False, f"标准库中找不到 IATA={db_iata} 的机场数据"
+            return False, f"Reference library has no airport for IATA={db_iata}"
     else:
-        return False, "IATA与ICAO代码皆为空，无法查询"
+        return False, "IATA and ICAO codes are both empty; cannot look up airport"
 
     # 2. Process City mapping and cascading updates
     localized = localized_china_airport(info, iata=info.get('iata') or db_iata, icao=info.get('icao') or db_icao)
@@ -2150,8 +2190,8 @@ def get_or_create_airport(icao, iata, conn):
         city_name = localized['city'] if localized else info['city']
         country_code = info.get('country')
         cur = conn.execute(
-            "SELECT id, timezone, continent FROM cities WHERE name = ? AND country_code = ? AND user_id = ?",
-            (city_name, country_code, uid),
+            "SELECT id, timezone, continent FROM cities WHERE name = ? AND (country_code = ? OR (? IN ('CN','HK','MO','TW') AND country_code IN ('CN','HK','MO','TW'))) AND user_id = ?",
+            (city_name, country_code, country_code, uid),
         )
         city_row = cur.fetchone()
         
@@ -2232,9 +2272,9 @@ def get_or_create_airline(icao, iata, conn):
         if localized_name and row[3] != localized_name:
             updates.append("name = ?")
             values.append(localized_name)
-        if localized_name and row[4] != '中国':
+        if localized_name and row[4] != chinese_country_name('CN'):
             updates.append("country = ?")
-            values.append('中国')
+            values.append(chinese_country_name('CN'))
         if updates:
             values.extend([row[0], uid])
             conn.execute(
@@ -2244,7 +2284,7 @@ def get_or_create_airline(icao, iata, conn):
         return row[0]
 
     name = chinese_airline_name(iata) or iata or icao
-    country = '中国' if chinese_airline_name(iata) else None
+    country = chinese_country_name('CN') if chinese_airline_name(iata) else None
     cur = conn.execute(
         "INSERT INTO airlines (user_id, name, iata_code, icao_code, country) VALUES (?, ?, ?, ?, ?)",
         (uid, name, iata, icao, country),

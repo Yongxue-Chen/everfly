@@ -36,27 +36,43 @@ class _TimezoneConn:
 
 
 class ChinaLocalizationTest(unittest.TestCase):
-    def test_known_china_airport_uses_chinese_names(self):
+    def test_known_china_airport_uses_bilingual_names(self):
         info = {"country": "CN", "iata": "PKX", "icao": "ZBAD", "city": "Beijing"}
         self.assertEqual(
             {
-                "city": "北京",
-                "airport": "北京大兴",
-                "country": "中国",
+                "city": "Beijing (北京)",
+                "airport": "Beijing Daxing International Airport (北京大兴)",
+                "country": "China (中国)",
                 "country_code": "CN",
             },
             localized_china_airport(info),
         )
 
-    def test_unknown_china_airport_never_falls_back_to_english(self):
+    def test_unknown_china_airport_marks_missing_translation(self):
         info = {"country": "CN", "iata": "ZZZ", "icao": "ZXXX", "city": "English City"}
         localized = localized_china_airport(info)
-        self.assertEqual("中国城市（ZZZ）", localized["city"])
-        self.assertEqual("中国机场（ZZZ）", localized["airport"])
+        self.assertEqual("English City (中文名待补充)", localized["city"])
+        self.assertEqual("Airport ZZZ (中文名待补充)", localized["airport"])
 
     def test_china_airline_code_uses_chinese_name(self):
-        self.assertEqual("中国国航", chinese_airline_name("CA"))
-        self.assertEqual("吉祥航空", chinese_airline_name("HO"))
+        self.assertEqual("Air China (中国国航)", chinese_airline_name("CA"))
+        self.assertEqual("Juneyao Airlines (吉祥航空)", chinese_airline_name("HO"))
+
+    def test_bilingual_names_are_idempotent_and_aliases_remain_usable(self):
+        from china_localization import localized_china_city, bilingual_alliance, localized_china_airline_alias
+        from app import normalize_airline_payload, normalize_entity_names
+        for name in ['北京', 'Beijing', 'Beijing (北京)', 'Beijing（北京）']:
+            self.assertEqual(localized_china_city(name, 'CN'), 'Beijing (北京)')
+        for name in ['Star Alliance', '星空联盟', 'Star Alliance (星空联盟)']:
+            self.assertEqual(bilingual_alliance(name), 'Star Alliance (星空联盟)')
+        self.assertEqual(localized_china_airline_alias('中国国航'), 'Air China (中国国航)')
+        payload = normalize_airline_payload({'iata_code': 'ca', 'name': '中国国航', 'alliance': 'Star Alliance'})
+        self.assertEqual(payload, normalize_airline_payload(payload))
+        self.assertEqual(payload['name'], 'Air China (中国国航)')
+        self.assertEqual(payload['alliance'], 'Star Alliance (星空联盟)')
+        airport = normalize_entity_names('airports', {'iata_code': 'KMG', 'name': '昆明长水'})
+        self.assertEqual(airport['name'], 'Kunming Changshui International Airport (昆明长水)')
+        self.assertIsNone(localized_china_airport({'country': 'GB', 'iata': 'LHR'}))
 
     def test_schedule_selection_uses_origin_local_date(self):
         schedules = [

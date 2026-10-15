@@ -78,7 +78,7 @@ const DATASETS = {
             { key: 'icao_code', label: 'ICAO Code', type: 'text', required: false },
             { key: 'callsign', label: 'Callsign', type: 'text', required: false },
             { key: 'country', label: 'Country', type: 'text', required: false },
-            { key: 'alliance', label: 'Alliance', type: 'select', options: Object.entries(ALLIANCE_LABELS).map(([value, label]) => ({ value, label })), required: false },
+            { key: 'alliance', label: 'Alliance', type: 'select', options: Object.entries(ALLIANCE_LABELS).map(([, label]) => ({ value: label, label })), required: false },
             { key: 'frequent_flyer_program', label: 'Loyalty Program', type: 'text', required: false, placeholder: 'e.g. Flying Blue' },
             { key: 'frequent_flyer_id', label: 'Member Number', type: 'text', required: false, placeholder: 'No spaces or airline prefix', help: 'Store the account number as issued. Do not add airline codes such as EK or TK; spaces and hyphens are removed on save.' },
             { key: 'website_url', label: 'Website URL', type: 'text', required: false, placeholder: 'https://example.com' }
@@ -531,7 +531,7 @@ function formatFlightDate(str) {
     const s = String(str).trim();
     const parts = s.split('-');
     if (parts.length === 3) {
-        return `${parts[0]}年${Number(parts[1])}月${Number(parts[2])}日`;
+        return `${parts[0]}-${parts[1]}-${parts[2]}`;
     }
     return s;
 }
@@ -562,12 +562,12 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
     if (durationMins) {
         const hrs = Math.floor(durationMins / 60);
         const mins = durationMins % 60;
-        durationText = hrs > 0 ? `${hrs}小时${mins > 0 ? ` ${mins}分钟` : ''}` : `${mins}分钟`;
+        durationText = hrs > 0 ? `${hrs}h${mins > 0 ? ` ${mins}m` : ''}` : `${mins}m`;
     }
     const distanceText = entity.distance ? `${Number(entity.distance).toLocaleString()} km` : '';
 
     // Seat & Cabin
-    const seatNo = entity.seat_number ? `座位 ${entity.seat_number}` : '';
+    const seatNo = entity.seat_number ? `Seat ${entity.seat_number}` : '';
     const seatClass = entity.flight_class || entity.seat_type || '';
     const seatInfo = [seatNo, seatClass].filter(Boolean).join(' · ');
 
@@ -579,40 +579,40 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
     // Weather container HTML
     let weatherHtml = '';
     if (entity.origin_icao || entity.dest_icao) {
-        weatherHtml = `<section><h3>Weather · 机场实况</h3><div id="weather-panel-container">
-            ${entity.origin_icao ? `<div class="weather-card" id="weather-dep"><div class="weather-card-header"><span class="weather-label">出发地 Departure</span><span class="weather-airport">${escapeHtml(entity.origin_code || '')} (${escapeHtml(entity.origin_icao)})</span></div><div class="weather-card-body weather-loading"><i class="fa-solid fa-spinner fa-spin"></i> 加载天气数据…</div></div>` : ''}
-            ${entity.dest_icao ? `<div class="weather-card" id="weather-arr"><div class="weather-card-header"><span class="weather-label">目的地 Arrival</span><span class="weather-airport">${escapeHtml(entity.dest_code || '')} (${escapeHtml(entity.dest_icao)})</span></div><div class="weather-card-body weather-loading"><i class="fa-solid fa-spinner fa-spin"></i> 加载天气数据…</div></div>` : ''}
+        weatherHtml = `<section><h3>Airport weather</h3><div id="weather-panel-container">
+            ${entity.origin_icao ? `<div class="weather-card" id="weather-dep"><div class="weather-card-header"><span class="weather-label">Departure</span><span class="weather-airport">${escapeHtml(entity.origin_code || '')} (${escapeHtml(entity.origin_icao)})</span></div><div class="weather-card-body weather-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading weather…</div></div>` : ''}
+            ${entity.dest_icao ? `<div class="weather-card" id="weather-arr"><div class="weather-card-header"><span class="weather-label">Arrival</span><span class="weather-airport">${escapeHtml(entity.dest_code || '')} (${escapeHtml(entity.dest_icao)})</span></div><div class="weather-card-body weather-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading weather…</div></div>` : ''}
         </div></section>`;
     }
 
     // Notes
     let notesHtml = '';
     if (entity.note && entity.note.trim()) {
-        notesHtml = `<section><div class="flight-notes-card"><div class="flight-notes-title"><i class="fa-solid fa-sticky-note"></i> 个人备注</div><div>${escapeHtml(entity.note)}</div></div></section>`;
+        notesHtml = `<section><div class="flight-notes-card"><div class="flight-notes-title"><i class="fa-solid fa-sticky-note"></i> Personal notes</div><div>${escapeHtml(entity.note)}</div></div></section>`;
     }
 
     // Related Connections
     const relationshipLinks = entityRelationshipLinks('flights', entity);
-    const connectionsHtml = relationshipLinks ? `<section><h3>Connections · 关联查看</h3>${relationshipLinks}</section>` : '';
+    const connectionsHtml = relationshipLinks ? `<section><h3>Connections</h3>${relationshipLinks}</section>` : '';
 
     // Track section HTML
     const trackHtml = `
         <section class="flight-track-section">
             <div class="flight-track-header">
-                <h3>Track · 飞行航迹</h3>
-                <button class="btn btn-sm btn-secondary" onclick="focusFlightTrackOnMainMap(${entity.id})" title="在主地图独占聚焦查看航迹">
-                    <i class="fa-solid fa-expand"></i> 独占聚焦查看
+                <h3>Flight track</h3>
+                <button class="btn btn-sm btn-secondary" onclick="focusFlightTrackOnMainMap(${entity.id})" title="Focus this flight on the main map">
+                    <i class="fa-solid fa-expand"></i> Focus on map
                 </button>
             </div>
             <div class="flight-mini-map-container">
                 <div id="flight-mini-map-${entity.id}" class="flight-mini-map">
-                    <div class="flight-mini-map-empty"><i class="fa-solid fa-spinner fa-spin"></i> 加载航迹地图…</div>
+                    <div class="flight-mini-map-empty"><i class="fa-solid fa-spinner fa-spin"></i> Loading track map…</div>
                 </div>
             </div>
             <div class="flight-track-controls" id="track-controls-${entity.id}" style="display:none;">
                 <div class="track-controls-row">
-                    <button class="track-btn track-btn-labeled" id="btn-play-${entity.id}" onclick="toggleTrackAnimation(${entity.id})" title="播放/暂停"><i class="fa-solid fa-play"></i> <span>播放</span></button>
-                    <button class="track-btn track-btn-labeled" onclick="restartTrackAnimation(${entity.id})" title="重头播放"><i class="fa-solid fa-rotate-left"></i> <span>重放</span></button>
+                    <button class="track-btn track-btn-labeled" id="btn-play-${entity.id}" onclick="toggleTrackAnimation(${entity.id})" title="Play / pause"><i class="fa-solid fa-play"></i> <span>Play</span></button>
+                    <button class="track-btn track-btn-labeled" onclick="restartTrackAnimation(${entity.id})" title="Restart playback"><i class="fa-solid fa-rotate-left"></i> <span>Restart</span></button>
                     <input type="range" class="track-progress-slider" id="slider-${entity.id}" min="0" max="100" value="0" oninput="seekTrackAnimation(${entity.id}, this.value)">
                     <select class="track-speed-select" onchange="setTrackSpeed(${entity.id}, this.value)">
                         <option value="1">1x</option>
@@ -622,9 +622,9 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
                     </select>
                 </div>
                 <div class="flight-track-hud">
-                    <span class="hud-item"><i class="fa-solid fa-mountain"></i> 高度: <strong id="hud-alt-${entity.id}">0 m</strong></span>
-                    <span class="hud-item"><i class="fa-solid fa-gauge"></i> 速度: <strong id="hud-spd-${entity.id}">0 km/h</strong></span>
-                    <span class="hud-item"><i class="fa-solid fa-clock"></i> 进度: <strong id="hud-pct-${entity.id}">0%</strong></span>
+                    <span class="hud-item"><i class="fa-solid fa-mountain"></i> Altitude: <strong id="hud-alt-${entity.id}">0 m</strong></span>
+                    <span class="hud-item"><i class="fa-solid fa-gauge"></i> Speed: <strong id="hud-spd-${entity.id}">0 km/h</strong></span>
+                    <span class="hud-item"><i class="fa-solid fa-clock"></i> Progress: <strong id="hud-pct-${entity.id}">0%</strong></span>
                 </div>
             </div>
         </section>`;
@@ -639,7 +639,7 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
                 </div>
             </div>
             <div class="flight-hero-actions">
-                <button class="btn btn-sm btn-primary" onclick="editCurrentEntityPanel()"><i class="fa-solid fa-pen"></i> 编辑</button>
+                <button class="btn btn-sm btn-primary" onclick="editCurrentEntityPanel()"><i class="fa-solid fa-pen"></i> Edit</button>
                 <button class="btn btn-sm action-danger" onclick="deleteCurrentEntityPanel()"><i class="fa-solid fa-trash"></i></button>
             </div>
         </div>
@@ -661,25 +661,25 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
 
             <div class="flight-times-grid">
                 <div class="flight-time-col">
-                    <div class="flight-time-heading"><i class="fa-solid fa-plane-departure"></i> 出发 Departure</div>
+                    <div class="flight-time-heading"><i class="fa-solid fa-plane-departure"></i> Departure</div>
                     ${depInfo.formattedDate ? `<div class="flight-time-date"><i class="fa-regular fa-calendar-days"></i> ${escapeHtml(depInfo.formattedDate)}</div>` : ''}
-                    ${stdTime !== '—' ? `<div class="flight-time-row"><span class="flight-time-label">计划 (STD)</span><span class="flight-time-val">${escapeHtml(stdTime)}</span></div>` : ''}
-                    ${atdTime !== '—' ? `<div class="flight-time-row"><span class="flight-time-label">实际 (ATD)</span><span class="flight-time-val highlight-atd">${escapeHtml(atdTime)}</span></div>` : ''}
-                    ${entity.origin_terminal ? `<div class="flight-gate-badge">航站楼 ${escapeHtml(formatTerminal(entity.origin_terminal))}</div>` : ''}
+                    ${stdTime !== '—' ? `<div class="flight-time-row"><span class="flight-time-label">Scheduled (STD)</span><span class="flight-time-val">${escapeHtml(stdTime)}</span></div>` : ''}
+                    ${atdTime !== '—' ? `<div class="flight-time-row"><span class="flight-time-label">Actual (ATD)</span><span class="flight-time-val highlight-atd">${escapeHtml(atdTime)}</span></div>` : ''}
+                    ${entity.origin_terminal ? `<div class="flight-gate-badge">Terminal ${escapeHtml(formatTerminal(entity.origin_terminal))}</div>` : ''}
                 </div>
                 <div class="flight-time-col">
-                    <div class="flight-time-heading"><i class="fa-solid fa-plane-arrival"></i> 到达 Arrival</div>
+                    <div class="flight-time-heading"><i class="fa-solid fa-plane-arrival"></i> Arrival</div>
                     ${arrInfo.formattedDate ? `<div class="flight-time-date"><i class="fa-regular fa-calendar-days"></i> ${escapeHtml(arrInfo.formattedDate)}</div>` : ''}
-                    ${staTime !== '—' ? `<div class="flight-time-row"><span class="flight-time-label">计划 (STA)</span><span class="flight-time-val">${escapeHtml(staTime)}</span></div>` : ''}
-                    ${ataTime !== '—' ? `<div class="flight-time-row"><span class="flight-time-label">实际 (ATA)</span><span class="flight-time-val highlight-ata">${escapeHtml(ataTime)}</span></div>` : ''}
-                    ${entity.dest_terminal ? `<div class="flight-gate-badge">航站楼 ${escapeHtml(formatTerminal(entity.dest_terminal))}</div>` : ''}
+                    ${staTime !== '—' ? `<div class="flight-time-row"><span class="flight-time-label">Scheduled (STA)</span><span class="flight-time-val">${escapeHtml(staTime)}</span></div>` : ''}
+                    ${ataTime !== '—' ? `<div class="flight-time-row"><span class="flight-time-label">Actual (ATA)</span><span class="flight-time-val highlight-ata">${escapeHtml(ataTime)}</span></div>` : ''}
+                    ${entity.dest_terminal ? `<div class="flight-gate-badge">Terminal ${escapeHtml(formatTerminal(entity.dest_terminal))}</div>` : ''}
                 </div>
             </div>
 
             ${(durationText || distanceText) ? `
             <div class="flight-meta-bar">
-                ${durationText ? `<div class="flight-meta-item"><i class="fa-solid fa-clock"></i> 飞行时长: ${escapeHtml(durationText)}</div>` : ''}
-                ${distanceText ? `<div class="flight-meta-item"><i class="fa-solid fa-route"></i> 航程距离: ${escapeHtml(distanceText)}</div>` : ''}
+                ${durationText ? `<div class="flight-meta-item"><i class="fa-solid fa-clock"></i> Duration: ${escapeHtml(durationText)}</div>` : ''}
+                ${distanceText ? `<div class="flight-meta-item"><i class="fa-solid fa-route"></i> Distance: ${escapeHtml(distanceText)}</div>` : ''}
             </div>` : ''}
         </div>
 
@@ -689,7 +689,7 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
             <div class="flight-detail-card">
                 <div class="flight-detail-icon"><i class="fa-solid fa-chair"></i></div>
                 <div class="flight-detail-info">
-                    <div class="flight-detail-label">座位与舱位</div>
+                    <div class="flight-detail-label">Seat and cabin</div>
                     <div class="flight-detail-value" title="${escapeHtml(seatInfo)}">${escapeHtml(seatInfo)}</div>
                 </div>
             </div>` : ''}
@@ -698,7 +698,7 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
             <div class="flight-detail-card">
                 <div class="flight-detail-icon"><i class="fa-solid fa-plane-up"></i></div>
                 <div class="flight-detail-info">
-                    <div class="flight-detail-label">执飞机型 / 编号</div>
+                    <div class="flight-detail-label">Aircraft / registration</div>
                     <div class="flight-detail-value" title="${escapeHtml(aircraftInfo)}">${escapeHtml(aircraftInfo)}</div>
                 </div>
             </div>` : ''}
@@ -707,7 +707,7 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
             <div class="flight-detail-card">
                 <div class="flight-detail-icon"><i class="fa-solid fa-compass"></i></div>
                 <div class="flight-detail-info">
-                    <div class="flight-detail-label">出行目的</div>
+                    <div class="flight-detail-label">Travel purpose</div>
                     <div class="flight-detail-value" title="${escapeHtml(entity.reason)}">${escapeHtml(entity.reason)}</div>
                 </div>
             </div>` : ''}
@@ -743,7 +743,7 @@ async function loadAndRenderFlightTrack(flightId) {
         State.cacheTrackPoints[flightId] = points;
 
         if (!points || points.length === 0) {
-            container.innerHTML = '<div class="flight-mini-map-empty"><i class="fa-solid fa-route"></i> 暂无详细航迹坐标</div>';
+            container.innerHTML = '<div class="flight-mini-map-empty"><i class="fa-solid fa-route"></i> No detailed track coordinates</div>';
             return;
         }
 
@@ -779,7 +779,7 @@ async function loadAndRenderFlightTrack(flightId) {
         L.circleMarker(latLngs[latLngs.length - 1], { radius: 6, color: '#0369a1', fillColor: '#10b981', fillOpacity: 1 }).addTo(miniMap);
 
         const initialHeading = latLngs.length > 1 ? calculateBearing(latLngs[0][0], latLngs[0][1], latLngs[1][0], latLngs[1][1]) : 45;
-        polyline.bindTooltip(`✈ <strong>航班航轨</strong>`, { sticky: true });
+        polyline.bindTooltip(`✈ <strong>Flight track</strong>`, { sticky: true });
 
         // Create animated plane marker
         const planeIcon = L.divIcon({
@@ -811,7 +811,7 @@ async function loadAndRenderFlightTrack(flightId) {
 
     } catch (e) {
         if (container) {
-            container.innerHTML = '<div class="flight-mini-map-empty"><i class="fa-solid fa-route"></i> 暂无航迹地图数据</div>';
+            container.innerHTML = '<div class="flight-mini-map-empty"><i class="fa-solid fa-route"></i> No track map data</div>';
         }
     }
 }
@@ -876,8 +876,8 @@ function updatePlayButtonsState(flightId, isPlaying) {
         const btn = document.getElementById(id);
         if (btn) {
             btn.innerHTML = isPlaying
-                ? '<i class="fa-solid fa-pause"></i> <span>暂停</span>'
-                : '<i class="fa-solid fa-play"></i> <span>播放</span>';
+                ? '<i class="fa-solid fa-pause"></i> <span>Pause</span>'
+                : '<i class="fa-solid fa-play"></i> <span>Play</span>';
         }
     });
 }
@@ -1013,8 +1013,8 @@ function buildFocusedMapOverlay(flightId) {
         L.DomEvent.disableScrollPropagation(banner);
     }
 
-    const flightNum = State.entityPanelCurrent?.entity?.flight_number || '航班';
-    banner.innerHTML = `<span><i class="fa-solid fa-crosshairs"></i> 正在独占高亮航班 <strong>${escapeHtml(flightNum)}</strong> 的航线轨迹</span> <button class="btn-reset-map-focus" id="btn-reset-map-focus-el"><i class="fa-solid fa-xmark"></i> 返回全量地图</button>`;
+    const flightNum = State.entityPanelCurrent?.entity?.flight_number || 'Flight';
+    banner.innerHTML = `<span><i class="fa-solid fa-crosshairs"></i> Focused flight <strong>${escapeHtml(flightNum)}</strong> track</span> <button class="btn-reset-map-focus" id="btn-reset-map-focus-el"><i class="fa-solid fa-xmark"></i> Show all flights</button>`;
     banner.style.display = 'flex';
 
     const resetBtn = document.getElementById('btn-reset-map-focus-el');
@@ -1040,8 +1040,8 @@ function buildFocusedMapOverlay(flightId) {
         panel.dataset.flightId = String(flightId);
         panel.innerHTML = `
             <div class="track-controls-row">
-                <button class="track-btn track-btn-labeled" id="main-btn-play-${flightId}" title="播放/暂停"><i class="fa-solid fa-play"></i> <span>播放</span></button>
-                <button class="track-btn track-btn-labeled" id="main-btn-restart-${flightId}" title="重头播放"><i class="fa-solid fa-rotate-left"></i> <span>重放</span></button>
+                <button class="track-btn track-btn-labeled" id="main-btn-play-${flightId}" title="Play / pause"><i class="fa-solid fa-play"></i> <span>Play</span></button>
+                <button class="track-btn track-btn-labeled" id="main-btn-restart-${flightId}" title="Restart playback"><i class="fa-solid fa-rotate-left"></i> <span>Restart</span></button>
                 <input type="range" class="track-progress-slider" id="main-slider-${flightId}" min="0" max="100" value="0">
                 <select class="track-speed-select" id="main-speed-${flightId}">
                     <option value="1">1x</option>
@@ -1051,9 +1051,9 @@ function buildFocusedMapOverlay(flightId) {
                 </select>
             </div>
             <div class="flight-track-hud">
-                <span class="hud-item"><i class="fa-solid fa-mountain"></i> 高度: <strong id="main-hud-alt-${flightId}">0 m</strong></span>
-                <span class="hud-item"><i class="fa-solid fa-gauge"></i> 速度: <strong id="main-hud-spd-${flightId}">0 km/h</strong></span>
-                <span class="hud-item"><i class="fa-solid fa-clock"></i> 进度: <strong id="main-hud-pct-${flightId}">0%</strong></span>
+                <span class="hud-item"><i class="fa-solid fa-mountain"></i> Altitude: <strong id="main-hud-alt-${flightId}">0 m</strong></span>
+                <span class="hud-item"><i class="fa-solid fa-gauge"></i> Speed: <strong id="main-hud-spd-${flightId}">0 km/h</strong></span>
+                <span class="hud-item"><i class="fa-solid fa-clock"></i> Progress: <strong id="main-hud-pct-${flightId}">0%</strong></span>
             </div>`;
 
         const playBtn = document.getElementById(`main-btn-play-${flightId}`);
@@ -1103,7 +1103,7 @@ async function renderFocusedFlightTrackOnMap(flightId, options = {}) {
         State.profileLayers = [];
 
         const latLngs = points.map(p => [p.lat, p.lon]);
-        const flightNum = State.entityPanelCurrent?.entity?.flight_number || '航班';
+        const flightNum = State.entityPanelCurrent?.entity?.flight_number || 'Flight';
 
         // Draw focused polyline track with click popup and hover tooltip
         const focusedLine = L.polyline(latLngs, {
@@ -1112,7 +1112,7 @@ async function renderFocusedFlightTrackOnMap(flightId, options = {}) {
             opacity: 0.95
         }).addTo(State.map);
 
-        focusedLine.bindTooltip(`✈ <strong>航班 ${escapeHtml(flightNum)}</strong> · 高度 ~10,660m · 870 km/h`, {
+        focusedLine.bindTooltip(`✈ <strong>Flight ${escapeHtml(flightNum)}</strong> · Altitude ~10,660m · 870 km/h`, {
             sticky: true,
             direction: 'top',
             offset: [0, -10]
@@ -1120,19 +1120,19 @@ async function renderFocusedFlightTrackOnMap(flightId, options = {}) {
 
         focusedLine.bindPopup(`
             <div style="font-family:sans-serif;padding:6px;min-width:180px;">
-                <h4 style="margin:0 0 6px 0;color:#0284c7;font-size:0.95rem;"><i class="fa-solid fa-plane"></i> 航班 ${escapeHtml(flightNum)} 轨迹</h4>
+                <h4 style="margin:0 0 6px 0;color:#0284c7;font-size:0.95rem;"><i class="fa-solid fa-plane"></i> Flight ${escapeHtml(flightNum)} track</h4>
                 <div style="font-size:0.82rem;color:#334155;line-height:1.6;">
-                    <div>📍 <strong>航迹总点数:</strong> ${latLngs.length} 个航路点</div>
-                    <div>✈ <strong>巡航高度:</strong> ~10,660 米 (35,000 ft)</div>
-                    <div>⚡ <strong>平均速度:</strong> ~870 km/h</div>
+                    <div>📍 <strong>Track points:</strong> ${latLngs.length} waypoints</div>
+                    <div>✈ <strong>Cruise altitude:</strong> ~10,660 m (35,000 ft)</div>
+                    <div>⚡ <strong>Average speed:</strong> ~870 km/h</div>
                 </div>
             </div>
         `);
         State.profileLayers.push(focusedLine);
 
         // Draw Start & End markers
-        const startMarker = L.circleMarker(latLngs[0], { radius: 7, color: '#0369a1', fillColor: '#0284c7', fillOpacity: 1 }).addTo(State.map).bindPopup(`<b>${escapeHtml(flightNum)} - 出发 Departure</b>`);
-        const endMarker = L.circleMarker(latLngs[latLngs.length - 1], { radius: 7, color: '#0369a1', fillColor: '#10b981', fillOpacity: 1 }).addTo(State.map).bindPopup(`<b>${escapeHtml(flightNum)} - 到达 Arrival</b>`);
+        const startMarker = L.circleMarker(latLngs[0], { radius: 7, color: '#0369a1', fillColor: '#0284c7', fillOpacity: 1 }).addTo(State.map).bindPopup(`<b>${escapeHtml(flightNum)} - Departure</b>`);
+        const endMarker = L.circleMarker(latLngs[latLngs.length - 1], { radius: 7, color: '#0369a1', fillColor: '#10b981', fillOpacity: 1 }).addTo(State.map).bindPopup(`<b>${escapeHtml(flightNum)} - Arrival</b>`);
         State.profileLayers.push(startMarker);
         State.profileLayers.push(endMarker);
 
@@ -1272,17 +1272,17 @@ function _fetchWeather(icao, containerId) {
 }
 
 const FLIGHT_RULES_LABELS = {
-    'vfr': 'VFR · 目视飞行 (天气晴朗/能见度好)',
-    'mvfr': 'MVFR · 临界目视 (能见度一般)',
-    'ifr': 'IFR · 仪表飞行 (云低/复杂气象)',
-    'lifr': 'LIFR · 低级仪表 (恶劣天气)'
+    'vfr': 'VFR · Visual flight rules',
+    'mvfr': 'MVFR · Marginal visual flight rules',
+    'ifr': 'IFR · Instrument flight rules',
+    'lifr': 'LIFR · Low instrument flight rules'
 };
 
 function _renderWeatherBody(w) {
     const temp = w.temperature != null ? `${Math.round(w.temperature)}°C` : '—';
     const windDir = w.wind_direction != null ? `${Math.round(w.wind_direction)}°` : 'VRB';
     const windSpd = w.wind_speed != null ? `${Math.round(w.wind_speed)}kt` : '—';
-    const gust = w.wind_gust ? ` 阵风${Math.round(w.wind_gust)}kt` : '';
+    const gust = w.wind_gust ? ` gusting ${Math.round(w.wind_gust)}kt` : '';
     const vis = w.visibility_m != null ? (w.visibility_m >= 9999 ? '10+ km' : `${(w.visibility_m / 1000).toFixed(1)} km`) : '—';
     const frRaw = (w.flight_rules || '').toLowerCase();
     const frLabel = FLIGHT_RULES_LABELS[frRaw] || w.flight_rules || '—';
@@ -1291,15 +1291,15 @@ function _renderWeatherBody(w) {
         <div class="weather-main">
             <span class="weather-emoji">${escapeHtml(w.condition_emoji || '🌤️')}</span>
             <span class="weather-temp">${escapeHtml(temp)}</span>
-            <span class="weather-condition">${escapeHtml(w.condition || '未知')}</span>
+            <span class="weather-condition">${escapeHtml(w.condition || 'Unknown')}</span>
         </div>
         <div class="weather-details">
-            <div class="weather-detail" title="风向与风速"><i class="fa-solid fa-wind"></i> 风速: ${escapeHtml(windDir)} @ ${escapeHtml(windSpd)}${escapeHtml(gust)}</div>
-            <div class="weather-detail" title="能见度 (Visibility)"><i class="fa-solid fa-eye"></i> 能见度: ${escapeHtml(vis)}</div>
-            <div class="weather-detail" title="海平面气压"><i class="fa-solid fa-gauge-high"></i> 气压: ${w.pressure != null ? escapeHtml(Math.round(w.pressure * 33.8639) + ' hPa') : '—'}</div>
-            <div class="weather-detail weather-fr weather-fr-${escapeHtml(frRaw)}" title="飞行规则 (Flight Rules)"><i class="fa-solid fa-shield-halved"></i> ${escapeHtml(w.flight_rules_emoji || '')} ${escapeHtml(frLabel)}</div>
+            <div class="weather-detail" title="Wind direction and speed"><i class="fa-solid fa-wind"></i> Wind: ${escapeHtml(windDir)} @ ${escapeHtml(windSpd)}${escapeHtml(gust)}</div>
+            <div class="weather-detail" title="Visibility"><i class="fa-solid fa-eye"></i> Visibility: ${escapeHtml(vis)}</div>
+            <div class="weather-detail" title="Sea-level pressure"><i class="fa-solid fa-gauge-high"></i> Pressure: ${w.pressure != null ? escapeHtml(Math.round(w.pressure * 33.8639) + ' hPa') : '—'}</div>
+            <div class="weather-detail weather-fr weather-fr-${escapeHtml(frRaw)}" title="Flight rules"><i class="fa-solid fa-shield-halved"></i> ${escapeHtml(w.flight_rules_emoji || '')} ${escapeHtml(frLabel)}</div>
         </div>
-        <details class="weather-raw"><summary>查看原始 METAR 报文</summary><code>${escapeHtml(w.raw || '—')}</code></details>`;
+        <details class="weather-raw"><summary>View raw METAR</summary><code>${escapeHtml(w.raw || '—')}</code></details>`;
 }
 
 // --- View Management ---
@@ -2251,56 +2251,56 @@ function openImportModal() {
         if (State.currentDataset === 'airports') {
             helpText = `
                 <div style="font-size:0.85rem; background:#f8f9fa; padding:10px; border-radius:4px; border:1px solid #ddd; margin-bottom:10px;">
-                    <strong>表头说明 (Headers):</strong><br>
-                    • <code>iata_code</code>: <b>(必填)</b> IATA 三字码 (如 PEK, JFK)<br>
-                    • <code>name</code>: 机场名称 (若为空将自动从云端获取)<br>
-                    • <code>icao_code</code>: ICAO 四字码 (如 ZBAA, KJFK)<br>
-                    • <code>city</code>: 城市名称 (自动关联，不存在将自动创建)<br>
-                    • <code>lat/lon</code>: 经纬度 (若为空将自动获取)<br>
-                    • <code>terminals</code>: 航站楼 (逗号分隔，如 T1,T2,T3)
+                    <strong>CSV headers:</strong><br>
+                    • <code>iata_code</code>: <b>(required)</b> Three-letter IATA code (e.g. PEK, JFK)<br>
+                    • <code>name</code>: Airport name (fetched automatically if empty)<br>
+                    • <code>icao_code</code>: Four-letter ICAO code (e.g. ZBAA, KJFK)<br>
+                    • <code>city</code>: City name (linked or created automatically)<br>
+                    • <code>lat/lon</code>: Latitude / longitude (fetched automatically if empty)<br>
+                    • <code>terminals</code>: Terminals (comma-separated, e.g. T1,T2,T3)
                 </div>
             `;
         } else if (State.currentDataset === 'cities') {
             helpText = `
                 <div style="font-size:0.85rem; background:#f8f9fa; padding:10px; border-radius:4px; border:1px solid #ddd; margin-bottom:10px;">
-                    <strong>表头说明 (Headers):</strong><br>
-                    • <code>name</code>: 城市名称 (必填)<br>
-                    • <code>country</code>: 国家名称<br>
-                    • <code>country_code</code>: ISO 国家代码 (如 CN, US)<br>
-                    • <code>timezone</code>: 时区 (如 Asia/Shanghai)
+                    <strong>CSV headers:</strong><br>
+                    • <code>name</code>: City name (required)<br>
+                    • <code>country</code>: Country name<br>
+                    • <code>country_code</code>: ISO country code (e.g. CN, US)<br>
+                    • <code>timezone</code>: Time zone (e.g. Asia/Shanghai)
                 </div>
             `;
         } else if (State.currentDataset === 'airlines') {
             helpText = `
                 <div style="font-size:0.85rem; background:#f8f9fa; padding:10px; border-radius:4px; border:1px solid #ddd; margin-bottom:10px;">
-                    <strong>表头说明 (Headers):</strong><br>
-                    • <code>name</code>: 航空公司名称 (必填)<br>
-                    • <code>iata_code</code>: IATA 二字码 (如 CA, MU)<br>
-                    • <code>icao_code</code>: ICAO 三字码 (如 CCA, CES)
+                    <strong>CSV headers:</strong><br>
+                    • <code>name</code>: Airline name (required)<br>
+                    • <code>iata_code</code>: Two-character IATA code (e.g. CA, MU)<br>
+                    • <code>icao_code</code>: Three-letter ICAO code (e.g. CCA, CES)
                 </div>
             `;
         } else if (State.currentDataset === 'flights') {
             helpText = `
                 <div style="font-size:0.85rem; background:#f8f9fa; padding:10px; border-radius:4px; border:1px solid #ddd; margin-bottom:10px;">
-                    <strong>表头说明 (Headers):</strong><br>
-                    • <code>date</code>: 航班日期 (YYYY-MM-DD)<br>
-                    • <code>flight_number</code>: 航班号<br>
-                    • <code>origin_code</code>: 出发机场 IATA/ICAO 码<br>
-                    • <code>dest_code</code>: 目的机场 IATA/ICAO 码<br>
-                    • <code>airline_iata</code>: 航空公司 IATA 二字码<br>
-                    • <code>aircraft_model</code>: 机型名称 (如 B738, A320)<br>
-                    • <code>registration</code>: 飞机注册号<br>
-                    • <code>std/sta/atd/ata</code>: 计划/实际起降时间 (YYYY-MM-DD HH:MM:SS 或 YYYY-MM-DDTHH:MM)<br>
-                    • <code>seat_number</code>: 座位号<br>
-                    • <code>seat_type</code>: 座位类型 (如 Window, Aisle)<br>
-                    • <code>flight_class</code>: 舱位 (如 Economy, Business)<br>
-                    • <code>note</code>: 备注
+                    <strong>CSV headers:</strong><br>
+                    • <code>date</code>: Flight date (YYYY-MM-DD)<br>
+                    • <code>flight_number</code>: Flight number<br>
+                    • <code>origin_code</code>: Departure airport IATA / ICAO code<br>
+                    • <code>dest_code</code>: Arrival airport IATA / ICAO code<br>
+                    • <code>airline_iata</code>: Airline IATA code<br>
+                    • <code>aircraft_model</code>: Aircraft model (e.g. B738, A320)<br>
+                    • <code>registration</code>: Aircraft registration<br>
+                    • <code>std/sta/atd/ata</code>: Scheduled / actual departure and arrival (YYYY-MM-DD HH:MM:SS or YYYY-MM-DDTHH:MM)<br>
+                    • <code>seat_number</code>: Seat number<br>
+                    • <code>seat_type</code>: Seat type (e.g. Window, Aisle)<br>
+                    • <code>flight_class</code>: Cabin class (e.g. Economy, Business)<br>
+                    • <code>note</code>: Notes
                 </div>
             `;
         }
 
         div.innerHTML = `
-            <p>正在导入: <strong>${config.label}</strong></p>
+            <p>Importing: <strong>${config.label}</strong></p>
             ${helpText}
             <input type="file" id="csv-file-input" accept=".csv" style="margin-top:10px; display:block; width:100%;">
         `;
@@ -2744,22 +2744,22 @@ function openImportFlightsModal() {
         const div = document.createElement('div');
         div.innerHTML = `
             <div style="font-size:0.85rem; background:#f8f9fa; padding:10px; border-radius:4px; border:1px solid #ddd; margin-bottom:10px;">
-                <strong>表头说明 (Headers):</strong><br>
-                • <code>flight_number</code>: 航班号 (如 CA123)<br>
-                • <code>origin_code/dest_code</code>: IATA 机场代码 (如 PEK)<br>
-                • <code>origin_terminal/dest_terminal</code>: 航站楼 (如 T1, T2)<br>
-                • <code>std/sta/atd/ata</code>: <strong>日期时间格式: <code>YYYY-MM-DD HH:mm [TZ]</code></strong><br>
-                  (支持时区, 如 <code>2024-01-01 12:30+08:00</code> 或 <code>2024-01-01 12:30 GMT</code>)<br>
-                • <code>registration</code>: 飞机注册号 (如 B-1234)<br>
-                • <code>airline</code>: 航空公司名称, IATA, 或 ICAO 代码<br>
-                • <code>aircraft</code>: 飞机型号名称<br>
-                • <code>distance</code>: 飞行距离 (数字)<br>
-                • <code>seat_number</code>: 座位号 (如 12A)<br>
-                • <code>seat_type</code>: 座位位置 (Window/Aisle)<br>
-                • <code>class</code>: 舱位/等级 (Economy/Business)<br>
-                • <code>note</code>: 备注
+                <strong>CSV headers:</strong><br>
+                • <code>flight_number</code>: Flight number (e.g. CA123)<br>
+                • <code>origin_code/dest_code</code>: Airport IATA code (e.g. PEK)<br>
+                • <code>origin_terminal/dest_terminal</code>: Terminal (e.g. T1, T2)<br>
+                • <code>std/sta/atd/ata</code>: <strong>Date / time format: <code>YYYY-MM-DD HH:mm [TZ]</code></strong><br>
+                  (Time zones supported, e.g. <code>2024-01-01 12:30+08:00</code> or <code>2024-01-01 12:30 GMT</code>)<br>
+                • <code>registration</code>: Aircraft registration (e.g. B-1234)<br>
+                • <code>airline</code>: Airline name, IATA or ICAO code<br>
+                • <code>aircraft</code>: Aircraft model<br>
+                • <code>distance</code>: Distance (numeric)<br>
+                • <code>seat_number</code>: Seat number (e.g. 12A)<br>
+                • <code>seat_type</code>: Seat position (Window/Aisle)<br>
+                • <code>class</code>: Cabin class (Economy/Business)<br>
+                • <code>note</code>: Notes
             </div>
-            <p>请选择 CSV 文件进行导入:</p>
+            <p>Choose a CSV file to import:</p>
             <input type="file" id="csv-file-input" accept=".csv" style="width:100%;">
         `;
         const input = div.querySelector('input');
@@ -4091,7 +4091,7 @@ function refreshProfileMapLayers({ fitBounds = false } = {}) {
         // Align opposite-direction dashes so return flights do not fill the gaps.
         const reverseDash = !completed && (lon1 > lon2 || (lon1 === lon2 && lat1 > lat2));
         const curvePoints = reverseDash ? getGeodesicPath(lat2, lon2, lat1, lon1) : getGeodesicPath(lat1, lon1, lat2, lon2);
-        const statusLabel = completed ? '已结束' : '未结束';
+        const statusLabel = completed ? 'Completed' : 'Upcoming / ongoing';
         longitudeOffsets.forEach(offset => {
             const points = shiftPathLongitude(curvePoints, offset);
             if (satellite) {

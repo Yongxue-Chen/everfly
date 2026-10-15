@@ -20,7 +20,7 @@
         const CURRENT_USER = {{ user| tojson | safe }};
         const CSRF_TOKEN = "{{ csrf_token() }}";
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=ui-stage2-2">
+    <link rel="stylesheet" href="/static/css/style.css?v=ui-stage2-3">
 </head>
 
 <body>
@@ -78,10 +78,6 @@
                         <button type="button" data-journey-tab="overview" aria-pressed="true">Overview</button>
                         <button type="button" data-journey-tab="statistics" aria-pressed="false">Statistics</button>
                     </div>
-                    <div class="journey-filters">
-                        <label>Year <select id="year-filter"><option value="all">All years</option></select></label>
-                        <label>Flight status <select id="journey-status-filter"><option value="all">All flights</option><option value="completed">Completed</option><option value="pending">Upcoming / ongoing</option></select></label>
-                    </div>
                     <p id="journey-scope-note" role="status"></p>
                 </div>
                 <section id="journey-hero" class="journey-hero" aria-label="Flight journey overview">
@@ -89,6 +85,10 @@
                         <span class="journey-eyebrow">Flight archive</span>
                         <h1 id="journey-flight-count">Flight journey</h1>
                         <p id="journey-summary">Loading your aviation archive...</p>
+                    </div>
+                    <div class="journey-filters">
+                        <label>Year <select id="year-filter"><option value="all">All years</option></select></label>
+                        <label>Flight status <select id="journey-status-filter"><option value="all">All flights</option><option value="completed">Completed</option><option value="pending">Upcoming / ongoing</option></select></label>
                     </div>
                     <div id="journey-metrics" class="journey-metrics"></div>
                 </section>
@@ -98,11 +98,11 @@
                 </section>
                 <section class="journey-map-panel" data-journey-view="overview">
                     <div class="journey-section-heading"><div><span class="journey-eyebrow">Explore</span><h2>Your flight map</h2></div></div>
-                    <div class="route-status-legend" aria-label="航线状态图例">
-                        <span><i class="route-status-completed" aria-hidden="true"></i>已结束</span>
-                        <span><i class="route-status-pending" aria-hidden="true"></i>未结束</span>
-                        <span><i class="route-status-airport" aria-hidden="true"></i>机场</span>
-                        <small>按实际／计划到达时间判断；缺少时间时按日期估算</small>
+                    <div class="route-status-legend" aria-label="Route status legend">
+                        <span><i class="route-status-completed" aria-hidden="true"></i>Completed</span>
+                        <span><i class="route-status-pending" aria-hidden="true"></i>Upcoming / ongoing</span>
+                        <span><i class="route-status-airport" aria-hidden="true"></i>Airport</span>
+                        <small>Based on actual / scheduled arrival; estimated by date when times are missing</small>
                     </div>
                     <div class="map-container">
                         <div id="flight-map"></div>
@@ -112,7 +112,7 @@
                         </div>
                     </div>
                 </section>
-                <section id="journey-recent" class="journey-recent" data-journey-view="overview" aria-label="近期行程"></section>
+                <section id="journey-recent" class="journey-recent" data-journey-view="overview" aria-label="Recent flights"></section>
                 <section class="journey-trends-panel" data-journey-view="statistics" hidden aria-label="Flight trends">
                     <div class="journey-section-heading"><div><span class="journey-eyebrow">Trends</span><h2>How your flying changes</h2></div></div>
                     <div id="journey-trends" class="journey-trends"></div>
@@ -288,8 +288,8 @@
         </div>
     </div>
 
-    <script src="/static/js/journey-stats.js?v=ui-stage2-2"></script>
-    <script src="/static/js/app.js?v=ui-stage2-2"></script>
+    <script src="/static/js/journey-stats.js?v=ui-stage2-3"></script>
+    <script src="/static/js/app.js?v=ui-stage2-3"></script>
 </body>
 
 </html>
