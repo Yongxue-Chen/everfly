@@ -1377,7 +1377,7 @@ function initMap() {
 function getProfileMapPalette(type = State.profileMapType) {
     return type === 'satellite'
         ? { completed: '#cbd5e1', pending: '#ff997c', airport: '#ffffff', border: '#17212b', completedOpacity: 0.95, pendingOpacity: 0.95 }
-        : { completed: '#697386', pending: '#e07a5f', airport: '#345d80', border: '#ffffff', completedOpacity: 0.8, pendingOpacity: 0.9 };
+        : { completed: '#8792a2', pending: '#e07a5f', airport: '#345d80', border: '#ffffff', completedOpacity: 0.55, pendingOpacity: 0.9 };
 }
 
 function setMapLayer(type) {

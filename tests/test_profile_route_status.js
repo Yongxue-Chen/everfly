@@ -53,7 +53,7 @@ assert.ok(source.includes('fillColor: palette.airport'));
 const css = fs.readFileSync(path.join(__dirname, '../static/css/style.css'), 'utf8');
 assert.ok(!css.includes('profile-neutral-basemap'));
 console.log('Basemap switching and palette: 9 checks passed');
-assert.equal(layerContext.getProfileMapPalette().completed, '#697386');
+assert.equal(layerContext.getProfileMapPalette().completed, '#8792a2');
 layerContext.setMapLayer('satellite');
 assert.equal(layerContext.State.profileMapType, 'satellite');
 assert.equal(layerContext.getProfileMapPalette().completed, '#cbd5e1');
@@ -68,7 +68,7 @@ console.log('Adaptive satellite colors: 8 checks passed');
 // Exercise the actual redraw path, including removal of satellite outlines.
 const drawn = [];
 function fakeLayer(kind, options) {
-    const layer = { kind, options, removed: false, bindPopup() { return this; },
+    const layer = { kind, options, removed: false, bindPopup(html) { this.popup = html; return this; },
         addTo() { drawn.push(this); return this; }, remove() { this.removed = true; } };
     return layer;
 }
@@ -100,7 +100,22 @@ drawn.length = 0;
 layerContext.setMapLayer('map');
 assert.ok(previous.every(l => l.removed));
 assert.equal(drawn.filter(l => l.kind === 'line').length, 2);
-assert.equal(drawn[0].options.color, '#697386');
+assert.equal(drawn[0].options.color, '#8792a2');
 assert.equal(drawn[1].options.color, '#e07a5f');
 assert.equal(drawn[2].options.fillColor, '#345d80');
 console.log('Route redraw and outline cleanup: 11 checks passed');
+const repeat = layerContext.State.profileMapFlights[0];
+layerContext.State.profileMapFlights.push({ ...repeat, flight_number: 'REPEAT' });
+layerContext.State.profileMapFlights.push({ ...repeat, flight_number: 'RETURN', origin: repeat.dest, dest: repeat.origin });
+drawn.length = 0;
+layerContext.setMapLayer('map');
+assert.equal(drawn.filter(l => l.kind === 'line').length, 4);
+assert.ok(drawn[1].popup.includes('REPEAT'));
+assert.ok(drawn[2].popup.includes('RETURN'));
+assert.ok(drawn[2].popup.includes('BBB -> AAA'));
+assert.equal(drawn[0].options.opacity, 0.55);
+drawn.length = 0;
+layerContext.setMapLayer('satellite');
+assert.equal(drawn.filter(l => l.kind === 'line').length, 8);
+assert.equal(drawn[1].options.color, '#cbd5e1');
+console.log('Repeated and return routes: 7 checks passed');
