@@ -39,6 +39,14 @@ const fixture = [
             await page.waitForTimeout(200);
             assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),`Overflow at ${width}`);
             assert.ok(await page.evaluate(()=>Chart.getChart('classDonutChart').width>0));
+            const filterStyles = await page.evaluate(() => ['year-filter', 'journey-status-filter'].map(id => {
+                const element = document.getElementById(id);
+                const style = getComputedStyle(element);
+                const option = getComputedStyle(element.options[0]);
+                return {font: style.font, color: style.color, padding: style.padding, height: element.getBoundingClientRect().height, optionFont: option.font};
+            }));
+            assert.deepEqual(filterStyles[0], filterStyles[1], `Filter typography must match at ${width}px`);
+            if (width <= 768) assert.ok(filterStyles[0].font.includes('16px'), 'Mobile selects need 16px text');
             if (width >= 1024) {
                 assert.ok(await page.evaluate(()=>document.querySelector('.journey-filters').getBoundingClientRect().x > document.querySelector('.journey-hero-copy').getBoundingClientRect().x));
             }

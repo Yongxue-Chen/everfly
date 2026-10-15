@@ -2010,25 +2010,6 @@ tr:hover { background: #f5f9ff; }
     }
 }
 
-/* Year Filter Custom styling */
-#year-filter {
-    padding: 6px 12px;
-    margin-right: 5px;
-    border: 1px solid #d7e2ed;
-    border-radius: 8px;
-    color: #1e3a5f;
-    background-color: #fff;
-    font-size: 0.85rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-#year-filter:focus {
-    outline: none;
-    border-color: #1c70bf;
-    box-shadow: 0 0 0 3px rgba(28, 112, 191, 0.15);
-}
-
 /* Sortable table headers */
 th[onclick] {
     cursor: pointer;
@@ -3238,6 +3219,9 @@ th[onclick] {
 .journey-filters { display: flex; flex-wrap: wrap; gap: 16px; }
 .journey-filters label { display: flex; align-items: center; gap: 8px; color: #52647b; font-size: 14px; }
 .journey-filters select, #journey-year-metric { padding: 9px; border: 1px solid #d8e1ec; border-radius: 8px; background: white; font: inherit; }
+.journey-filters select { color: #1e3a5f; cursor: pointer; }
+.journey-filters select option { font: inherit; }
+.journey-filters select:focus-visible { outline: 2px solid #1c70bf; outline-offset: 2px; }
 #journey-scope-note { flex-basis: 100%; margin: 0; color: #61738a; font-size: 13px; line-height: 1.6; }
 #journey-hero { grid-template-columns: minmax(0, 1fr) auto; gap: 20px; padding: 24px; background: #fff; color: #142943; border: 1px solid #dfe7f0; border-radius: 16px; box-shadow: none; }
 #journey-hero .journey-filters { align-self: start; justify-content: flex-end; }
