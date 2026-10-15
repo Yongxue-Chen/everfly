@@ -26,6 +26,17 @@ const root = path.resolve(__dirname, '..');
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: {} } }
             }));
         }, source.slice(source.indexOf('function destroyJourneyChart('), source.indexOf('function renderMonthOfYearStats(')));
+        await page.evaluate(() => {
+            for (const id of ['yearComboChart', 'footprintGrowthChart']) {
+                const card = document.createElement('article');
+                card.className = 'journey-chart-card';
+                card.innerHTML = `<div class="journey-chart-box"><canvas id="${id}"></canvas></div>`;
+                document.querySelector('.journey-shell').append(card);
+                const config = { type: 'line', data: { labels: ['2024', '2025'], datasets: ['Flights', 'Distance (km)', 'Hours'].map(label => ({ label, data: [2, 4], borderColor: '#1c70bf' })) }, options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: {} } };
+                renderJourneyChart(id, config);
+                renderJourneyChart(id, config);
+            }
+        });
         for (const width of [1440, 1024, 768, 576, 390, 320]) {
             await page.setViewportSize({ width, height: 900 });
             await page.waitForTimeout(250);
@@ -39,6 +50,20 @@ const root = path.resolve(__dirname, '..');
             assert.equal(new Set(dimensions.radii).size, 1, `Unequal donut radii at ${width}`);
             assert.equal(dimensions.legends, 4);
             assert.equal(dimensions.images, 0, 'Labels must be text, never HTML');
+            assert.equal(await page.locator('.journey-dataset-legend').count(), 2, 'Rerenders must not duplicate legends');
+            if (width <= 576) {
+                for (const legend of await page.locator('.journey-dataset-legend').all()) {
+                    const boxes = await legend.locator('button').evaluateAll(buttons => buttons.map(button => {
+                        const r = button.getBoundingClientRect();
+                        return { x: r.x, y: r.y, bottom: r.bottom, height: r.height };
+                    }));
+                    assert.equal(new Set(boxes.map(b => b.x)).size, 1);
+                    boxes.forEach((b, i) => {
+                        assert.ok(b.height >= 44);
+                        if (i) assert.ok(b.y >= boxes[i - 1].bottom);
+                    });
+                }
+            }
         }
         assert.equal(await page.locator('.donut-sample-count').last().textContent(), 'No data available');
         const toggle = page.locator('.donut-legend-row').first();
@@ -47,6 +72,12 @@ const root = path.resolve(__dirname, '..');
         assert.equal(await page.evaluate(() => Chart.getChart('test-0').getDataVisibility(0)), false);
         await toggle.click();
         assert.equal(await toggle.getAttribute('aria-pressed'), 'true');
+        const seriesToggle = page.locator('.journey-dataset-legend button').first();
+        await seriesToggle.click();
+        assert.equal(await seriesToggle.getAttribute('aria-pressed'), 'false');
+        assert.equal(await page.evaluate(() => Chart.getChart('yearComboChart').isDatasetVisible(0)), false);
+        await seriesToggle.press('Space');
+        assert.equal(await seriesToggle.getAttribute('aria-pressed'), 'true');
         assert.deepEqual(errors, []);
         console.log('Stage 1 browser checks passed: six widths, equal rings, empty data, long labels, escaping, legend toggles.');
     } finally {

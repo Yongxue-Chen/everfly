@@ -3291,6 +3291,8 @@ function renderJourneyChart(key, config) {
     const canvas = document.getElementById(key);
     if (!canvas || typeof Chart === 'undefined') return;
     destroyJourneyChart(key);
+    const hasDatasetLegend = key === 'yearComboChart' || key === 'footprintGrowthChart';
+    if (hasDatasetLegend) config.options.plugins.legend = { display: false };
     if (config.type === 'doughnut') {
         config.options.plugins.legend = { display: false };
         config.options.layout = { padding: 2 };
@@ -3320,6 +3322,35 @@ function renderJourneyChart(key, config) {
     }
     State.journeyCharts[key] = new Chart(canvas.getContext('2d'), config);
     if (config.type === 'doughnut') renderJourneyDonutLegend(canvas, State.journeyCharts[key]);
+    if (hasDatasetLegend) renderJourneyDatasetLegend(canvas, State.journeyCharts[key]);
+}
+
+function renderJourneyDatasetLegend(canvas, chart) {
+    const box = canvas.closest('.journey-chart-box');
+    if (!box) return;
+    box.parentElement.querySelector('.journey-dataset-legend')?.remove();
+    const legend = document.createElement('div');
+    legend.className = 'journey-dataset-legend';
+    chart.data.datasets.forEach((dataset, index) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.setAttribute('aria-pressed', String(chart.isDatasetVisible(index)));
+        button.setAttribute('aria-label', `${dataset.label}. Toggle visibility`);
+        const swatch = document.createElement('span');
+        swatch.className = 'journey-dataset-swatch';
+        swatch.style.backgroundColor = dataset.borderColor;
+        swatch.setAttribute('aria-hidden', 'true');
+        const label = document.createElement('span');
+        label.textContent = dataset.label;
+        button.append(swatch, label);
+        button.onclick = () => {
+            chart.setDatasetVisibility(index, !chart.isDatasetVisible(index));
+            chart.update();
+            button.setAttribute('aria-pressed', String(chart.isDatasetVisible(index)));
+        };
+        legend.append(button);
+    });
+    box.after(legend);
 }
 
 function renderJourneyDonutLegend(canvas, chart) {
