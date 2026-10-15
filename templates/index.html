@@ -20,7 +20,7 @@
         const CURRENT_USER = {{ user| tojson | safe }};
         const CSRF_TOKEN = "{{ csrf_token() }}";
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=ui-stage2-10">
+    <link rel="stylesheet" href="/static/css/style.css?v=ui-stage2-11">
 </head>
 
 <body>
@@ -82,7 +82,7 @@
                 </div>
                 <section id="journey-hero" class="journey-hero" aria-label="Flight journey overview">
                     <div class="journey-hero-copy">
-                        <span class="journey-eyebrow">Flight archive</span>
+                        <span class="journey-eyebrow">Flight overview</span>
                         <h1 id="journey-flight-count">Flight journey</h1>
                         <p id="journey-summary">Loading your aviation archive...</p>
                     </div>
@@ -91,14 +91,14 @@
                         <label>Flight status <select id="journey-status-filter"><option value="all">All flights</option><option value="completed">Completed</option><option value="pending">Upcoming / ongoing</option></select></label>
                     </div>
                     <div id="journey-metrics" class="journey-metrics"></div>
+                    <div class="journey-overview-records">
+                        <div class="stats-header">Records and patterns</div>
+                        <div id="journey-highlights" class="journey-highlights"></div>
+                    </div>
                 </section>
                 <section class="journey-highlight-panel journey-insights journey-summary-panel" data-journey-view="statistics" hidden aria-label="Journey highlights and profile insights">
                     <div class="journey-section-heading"><div><span class="journey-eyebrow">Profile</span><h2>Your flight profile</h2></div></div>
                     <div class="journey-summary-grid">
-                    <article class="journey-chart-card journey-chart-wide journey-summary-card">
-                        <div class="stats-header">Records and patterns</div>
-                        <div id="journey-highlights" class="journey-highlights"></div>
-                    </article>
                     <article class="journey-chart-card journey-chart-wide journey-summary-card">
                         <div class="stats-header">Your aviation world</div>
                         <div id="profile-stats-dashboard" class="stats-container"></div>
@@ -138,6 +138,9 @@
                 <div class="view-header flights-header">
                     <div><span class="journey-eyebrow">Personal archive</span><h2>Flight History</h2><p class="view-subtitle">Every route, aircraft and memory in one place.</p></div>
                     <div class="view-actions flights-actions">
+                        <button type="button" id="flight-health-filter" class="btn btn-sm btn-secondary flight-health-filter" aria-pressed="false" onclick="toggleFlightHealthFilter()">
+                            <i class="fa-solid fa-circle-check"></i><span>Checking data…</span>
+                        </button>
                         <button class="btn btn-sm btn-secondary" disabled
                             title="CSV import is currently disabled"
                             style="opacity: 0.5; cursor: not-allowed;">
@@ -297,7 +300,7 @@
     </div>
 
     <script src="/static/js/journey-stats.js?v=ui-stage2-3"></script>
-    <script src="/static/js/app.js?v=ui-stage2-10"></script>
+    <script src="/static/js/app.js?v=ui-stage2-11"></script>
 </body>
 
 </html>

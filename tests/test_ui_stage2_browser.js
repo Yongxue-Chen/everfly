@@ -31,8 +31,11 @@ const fixture = [
         assert.equal(await page.inputValue('#journey-status-filter'),'all');
         assert.equal(await page.locator('#journey-hero #year-filter').count(),1);
         assert.equal(await page.locator('#journey-hero #journey-status-filter').count(),1);
+        assert.equal(await page.locator('#journey-hero .journey-eyebrow').first().textContent(),'Flight overview');
         assert.deepEqual(await page.locator('#journey-metrics .journey-metric > span').allTextContents(),['Distance','Flight time']);
         assert.equal(await page.locator('#journey-metrics .journey-metric').count(),2);
+        assert.equal(await page.locator('#journey-hero .journey-overview-records #journey-highlights').count(),1);
+        assert.equal(await page.locator('#journey-highlights .journey-highlight-card').count(),4);
         assert.equal(await page.locator('.journey-trends-panel').isVisible(),false);
         assert.equal(await page.locator('.journey-recent-flight').count(),2);
         await page.locator('[data-journey-tab="statistics"]').click();
@@ -60,10 +63,10 @@ const fixture = [
         ]);
         assert.deepEqual(await page.locator('.journey-summary-panel > .journey-section-heading h2').allTextContents(),['Your flight profile']);
         assert.deepEqual(await page.locator('.journey-summary-panel .journey-summary-card > .stats-header').allTextContents(),[
-            'Records and patterns', 'Your aviation world', 'Flight Profile Insights'
+            'Your aviation world', 'Flight Profile Insights'
         ]);
-        assert.equal(await page.locator('.journey-summary-panel .journey-summary-card').count(),3);
-        assert.equal(await page.locator('.journey-summary-panel #journey-highlights').count(),1);
+        assert.equal(await page.locator('.journey-summary-panel .journey-summary-card').count(),2);
+        assert.equal(await page.locator('.journey-summary-panel #journey-highlights').count(),0);
         assert.equal(await page.locator('.journey-summary-panel #profile-stats-dashboard').count(),1);
         assert.equal(await page.locator('.journey-summary-panel #journey-profile-insights').count(),1);
         assert.equal(await page.locator('#journey-trends [data-journey-profile-card]').count(),0);
@@ -109,7 +112,7 @@ const fixture = [
         }
         await page.selectOption('#journey-status-filter','pending');
         assert.equal(await page.evaluate(()=>filterFlightsForInsight('missing','health').length),0);
-        assert.equal(await page.locator('.journey-highlight-card').last().locator('strong').textContent(),'All tidy');
+        assert.equal(await page.locator('#journey-highlights .journey-highlight-card').count(),4);
         await page.selectOption('#journey-status-filter','all');
         assert.equal(await page.evaluate(()=>State.cache.stats.totals.flights),2);
         await page.selectOption('#year-filter','2099');
@@ -134,6 +137,19 @@ const fixture = [
         await page.locator('[data-journey-tab="statistics"]').click();
         assert.equal(await page.inputValue('#year-filter'),'2099');
         assert.equal(await page.inputValue('#journey-year-metric'),'distance');
+        await page.evaluate(()=>navigateTo('flights'));
+        await page.waitForFunction(()=>document.querySelectorAll('#flights-table tbody tr').length===2);
+        assert.equal(await page.locator('#flight-health-filter span').textContent(),'Needs attention · 1');
+        assert.equal(await page.locator('#flights-table tbody .flight-row-needs-attention').count(),1);
+        assert.equal(await page.locator('#flights-table tbody .flight-health-warning').count(),1);
+        await page.locator('#flight-health-filter').click();
+        assert.equal(await page.locator('#flight-health-filter').getAttribute('aria-pressed'),'true');
+        assert.equal(await page.locator('#flights-table tbody tr').count(),1);
+        assert.ok((await page.locator('#flights-table tbody tr').textContent()).includes('TEST1'));
+        await page.locator('#flight-health-filter').click();
+        assert.equal(await page.locator('#flights-table tbody tr').count(),2);
+        await page.evaluate(()=>{ navigateTo('profile', false); history.replaceState({}, '', '/'); });
+        await page.waitForFunction(()=>State.cache.stats?.totals.flights===0);
         empty = true;
         await page.reload({waitUntil:'networkidle'});
         await page.waitForFunction(()=>State.cache.stats?.totals.flights===0);

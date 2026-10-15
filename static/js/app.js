@@ -125,6 +125,7 @@ const State = {
     },
     flightSort: { key: 'date', dir: 'desc' },
     flightFilters: {},
+    flightHealthOnly: false,
     profileLayers: [],
     profileMapFlights: null,
     profileMapSelectedYear: 'all',
@@ -2360,6 +2361,35 @@ async function fetchFlights() {
         f._std_ts = f.std ? Date.parse(f.std) : (f.date ? Date.parse(f.date) : 0);
     });
     State.cache.flights = flights;
+    updateFlightHealthControl();
+    renderFlights();
+}
+
+function flightHealthGaps(flight) {
+    const date = String(flight.date || flight.std || '').split(/[ T]/)[0];
+    const normalized = { ...flight, date };
+    return journeyMissingFields(normalized, candidate => isProfileFlightCompleted(candidate, new Date()));
+}
+
+function updateFlightHealthControl() {
+    const button = document.getElementById('flight-health-filter');
+    if (!button) return;
+    const count = (State.cache.flights || []).filter(flight => flightHealthGaps(flight).length).length;
+    if (!count) State.flightHealthOnly = false;
+    button.disabled = count === 0;
+    button.classList.toggle('is-healthy', count === 0);
+    button.classList.toggle('active', State.flightHealthOnly);
+    button.setAttribute('aria-pressed', String(State.flightHealthOnly));
+    button.title = count ? 'Show only flights with missing required data' : 'No flights need attention';
+    button.innerHTML = count
+        ? `<i class="fa-solid fa-triangle-exclamation"></i><span>Needs attention · ${count}</span>`
+        : '<i class="fa-solid fa-circle-check"></i><span>All flights healthy</span>';
+}
+
+function toggleFlightHealthFilter() {
+    if (!(State.cache.flights || []).some(flight => flightHealthGaps(flight).length)) return;
+    State.flightHealthOnly = !State.flightHealthOnly;
+    updateFlightHealthControl();
     renderFlights();
 }
 
@@ -2403,6 +2433,8 @@ function filterFlights() {
 
 function renderFlights() {
     let data = [...State.cache.flights];
+
+    if (State.flightHealthOnly) data = data.filter(flight => flightHealthGaps(flight).length);
 
     const filters = State.flightFilters;
     if (Object.keys(filters).length > 0) {
@@ -2455,12 +2487,17 @@ function renderFlights() {
         const airlineLogoLink = f.airline_id
             ? `<button class="airline-logo-link" title="Open Airline details" aria-label="Open Airline details: ${escapeHtml(f.airline_name || '-')}" onclick="event.stopPropagation(); openEntityPanel('airlines', ${Number(f.airline_id)})">${airlineLogo}</button>`
             : airlineLogo;
+        const healthGaps = flightHealthGaps(f);
+        const healthLabel = healthGaps.map(field => ({ date: 'date', flight_number: 'flight number', aircraft: 'aircraft', registration: 'registration', actual_times: 'actual times', distance: 'distance' })[field] || field).join(', ');
+        const healthWarning = healthGaps.length
+            ? `<span class="flight-health-warning" title="Missing: ${escapeHtml(healthLabel)}" aria-label="Needs attention: ${escapeHtml(healthLabel)}"><i class="fa-solid fa-triangle-exclamation"></i></span>`
+            : '';
 
-        tr.className = 'flight-row';
-        tr.title = 'Open flight details';
+        tr.className = `flight-row${healthGaps.length ? ' flight-row-needs-attention' : ''}`;
+        tr.title = healthGaps.length ? `Open flight details · Missing: ${healthLabel}` : 'Open flight details';
         tr.innerHTML = `
             <td class="flight-cell flight-summary" data-label="Date / Flight">
-                <div class="flight-summary-date">${displayDate}</div>
+                <div class="flight-summary-date">${displayDate}${healthWarning}</div>
                 <div class="flight-route-strip"><div class="flight-route-point"><span class="flight-route-name">${safe(f.origin_name || f.origin_code)}</span><small class="flight-route-terminal">${safe(f.origin_code)} · ${originTerminal}</small></div><i class="fa-solid fa-plane"></i><div class="flight-route-point"><span class="flight-route-name">${safe(f.dest_name || f.dest_code)}</span><small class="flight-route-terminal">${safe(f.dest_code)} · ${destTerminal}</small></div></div>
                 <div class="flight-summary-main flight-summary-actions"><div class="flight-summary-number">${safe(f.flight_number)}</div><div class="flight-summary-button-group"><button class="btn btn-sm flight-update-summary action-api" data-action-label="Update" aria-label="Update flight from AeroAPI" title="Update from AeroAPI"><i class="fa-solid fa-cloud-arrow-down"></i><span>API</span></button></div></div>
                 <div class="flight-row-hint"><span>View flight details</span><i class="fa-solid fa-chevron-right"></i></div>
@@ -3228,12 +3265,6 @@ function renderJourneyHighlights(stats) {
     if (!container) return;
     const records = stats.records || {};
     const quality = stats.quality || {};
-    const qualityTotal = (Number(quality.missing_date || 0) + Number(quality.missing_flight_number || 0) + Number(quality.missing_aircraft || 0) +
-                          Number(quality.missing_registration || 0) +
-                          Number(quality.missing_actual_times || 0) +
-                          Number(quality.missing_distance || 0) +
-                          Number(quality.missing_airport_coordinates || 0) +
-                          Number(quality.missing_airline_logos || 0));
     const otp = quality.on_time_performance || { avg_departure_delay: 0, avg_arrival_delay: 0, on_time_rate: 100, total_tracked: 0 };
     const cards = [
         {
@@ -3264,13 +3295,6 @@ function renderJourneyHighlights(stats) {
             meta: `${otp.total_tracked} tracked · Dep ${otp.avg_departure_delay}m / Arr ${otp.avg_arrival_delay}m delay`,
             flights: () => filterFlightsForInsight('delayed')
         },
-        {
-            icon: 'fa-screwdriver-wrench',
-            label: 'Data health',
-            value: qualityTotal ? `${formatCompactNumber(qualityTotal)} gaps` : 'All tidy',
-            meta: qualityTotal ? 'Missing fields in selected flights' : 'No obvious missing metadata',
-            flights: () => filterFlightsForInsight('missing', 'health')
-        }
     ];
     container.innerHTML = '';
     cards.forEach(card => {
@@ -3953,6 +3977,7 @@ function updateJourneyScope() {
     State.journeyFlights = selectJourneyFlights(State.cache.flights || [], State.journeyYear, State.journeyStatus, f => isProfileFlightCompleted(f, now));
     State.cache.stats = aggregateJourneyStats(State.journeyFlights, State.journeyCities || [], f => isProfileFlightCompleted(f, now));
     renderHeaderStats(State.journeyFlights);
+    renderJourneyHighlights(State.cache.stats);
     const label = { completed: 'Completed', pending: 'Upcoming / ongoing', all: 'All flights' }[State.journeyStatus];
     document.getElementById('journey-scope-note').textContent = `${State.journeyYear === 'all' ? 'All years' : State.journeyYear} · ${label} · ${State.journeyFlights.length} flights. Map, records and profile insights follow these filters; trend charts always use all flights.`;
     renderJourneyRecent(State.journeyFlights);
@@ -3964,7 +3989,6 @@ function showJourneyTab() {
     document.querySelectorAll('[data-journey-tab]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.journeyTab === State.journeyTab)));
     // Render only visible charts: Chart.js cannot measure hidden containers reliably.
     if (State.journeyTab === 'statistics') {
-        renderJourneyHighlights(State.cache.stats);
         renderJourneyTrends(aggregateJourneyStats(State.cache.flights || [], State.journeyCities || [], isProfileFlightCompleted), State.cache.stats);
         renderStatsDashboard(State.cache.stats, document.getElementById('profile-stats-dashboard'));
     } else {
