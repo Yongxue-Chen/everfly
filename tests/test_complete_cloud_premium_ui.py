@@ -35,7 +35,7 @@ class CompleteCloudPremiumUiTest(unittest.TestCase):
         self.assertIn('border-radius: 18px', self.css)
 
     def test_static_assets_use_ui_stage_version(self):
-        self.assertIn('/static/css/style.css?v=ui-globe-1', self.template)
+        self.assertIn('/static/css/style.css?v=ui-scope-1', self.template)
         self.assertIn('/static/js/app.js?v=ui-globe-1', self.template)
         self.assertIn('/static/js/journey-stats.js?v=ui-stage2-3', self.template)
 

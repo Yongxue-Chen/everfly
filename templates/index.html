@@ -22,7 +22,7 @@
         const CURRENT_USER = {{ user| tojson | safe }};
         const CSRF_TOKEN = "{{ csrf_token() }}";
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=ui-globe-1">
+    <link rel="stylesheet" href="/static/css/style.css?v=ui-scope-1">
 </head>
 
 <body>
@@ -73,16 +73,16 @@
                         <button type="button" data-journey-tab="statistics" aria-pressed="false">Statistics</button>
                     </div>
                     <p id="journey-scope-note" role="status"></p>
+                    <div class="journey-filters" aria-label="Journey filters">
+                        <label>Year <select id="year-filter"><option value="all">All years</option></select></label>
+                        <label>Flight status <select id="journey-status-filter"><option value="all">All flights</option><option value="completed">Completed</option><option value="pending">Upcoming / ongoing</option></select></label>
+                    </div>
                 </div>
                 <section id="journey-hero" class="journey-hero" aria-label="Flight journey overview">
                     <div class="journey-hero-copy">
                         <span class="journey-eyebrow">Flight overview</span>
                         <h1 id="journey-flight-count">Flight journey</h1>
                         <p id="journey-summary">Loading your aviation archive...</p>
-                    </div>
-                    <div class="journey-filters">
-                        <label>Year <select id="year-filter"><option value="all">All years</option></select></label>
-                        <label>Flight status <select id="journey-status-filter"><option value="all">All flights</option><option value="completed">Completed</option><option value="pending">Upcoming / ongoing</option></select></label>
                     </div>
                     <div class="journey-overview-records">
                         <div class="stats-header">Key figures</div>

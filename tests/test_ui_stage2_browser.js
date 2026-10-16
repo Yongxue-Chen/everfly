@@ -35,8 +35,10 @@ const fixture = [
         await page.waitForFunction(()=>State.journeyFlights?.length===2);
         assert.equal(await page.inputValue('#year-filter'),'all');
         assert.equal(await page.inputValue('#journey-status-filter'),'all');
-        assert.equal(await page.locator('#journey-hero #year-filter').count(),1);
-        assert.equal(await page.locator('#journey-hero #journey-status-filter').count(),1);
+        assert.equal(await page.locator('.journey-toolbar #year-filter').count(),1);
+        assert.equal(await page.locator('.journey-toolbar #journey-status-filter').count(),1);
+        assert.equal(await page.locator('#journey-hero .journey-filters').count(),0);
+        assert.equal(await page.locator('.journey-toolbar').evaluate(element => getComputedStyle(element).position),'sticky');
         assert.equal(await page.locator('.nav-item[data-view-nav="profile"]').getAttribute('href'),'/profile');
         assert.equal(await page.locator('.nav-item[data-view-nav="flights"]').getAttribute('href'),'/flights');
         assert.equal(await page.locator('.nav-item[data-view-nav="datasets"]').getAttribute('href'),'/library');
@@ -171,9 +173,7 @@ const fixture = [
             });
             assert.ok(monthLayout[0].count.top < monthLayout[1].count.top, 'Count follows bar height');
             if (width <= 768) assert.ok(monthLayout[6].item.top - monthLayout[0].item.bottom >= 28, 'Mobile rows have breathing room');
-            if (width >= 1024) {
-                assert.ok(await page.evaluate(()=>document.querySelector('.journey-filters').getBoundingClientRect().x > document.querySelector('.journey-hero-copy').getBoundingClientRect().x));
-            }
+            if (width >= 1024) assert.ok(await page.evaluate(()=>document.querySelector('.journey-filters').getBoundingClientRect().x > document.querySelector('.journey-view-switch').getBoundingClientRect().x));
         }
         await page.selectOption('#journey-status-filter','pending');
         assert.equal(await page.evaluate(()=>filterFlightsForInsight('missing','health').length),0);

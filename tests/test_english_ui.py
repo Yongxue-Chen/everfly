@@ -18,8 +18,8 @@ class EnglishUiTest(unittest.TestCase):
                 allowed = any(token in line for token in ['SkyTeam', 'Star Alliance', 'Oneworld', '/^航站楼', 'lowcost|廉航/', "'靠窗': 'Window'"])
                 self.assertTrue(allowed, f'{source.name}:{number}: untranslated interface copy')
 
-    def test_filters_are_inside_archive_card(self):
+    def test_filters_are_inside_shared_journey_toolbar(self):
         template = (ROOT / 'templates/index.html').read_text()
-        hero = template.split('id="journey-hero"', 1)[1].split('</section>', 1)[0]
-        self.assertIn('id="year-filter"', hero)
-        self.assertIn('id="journey-status-filter"', hero)
+        toolbar = template.split('class="journey-toolbar"', 1)[1].split('id="journey-hero"', 1)[0]
+        self.assertIn('id="year-filter"', toolbar)
+        self.assertIn('id="journey-status-filter"', toolbar)
