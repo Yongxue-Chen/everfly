@@ -94,6 +94,7 @@ All configuration is via environment variables. Copy `.env.example` to `.env` an
 | `FLASK_SECRET_KEY` | yes | Flask session signing key |
 | `INVITATION_CODE` | yes | Code required to register a new account |
 | `FLASK_DEBUG` | no | `false` in production |
+| `SESSION_COOKIE_SECURE` | no | `true` (HTTPS-only cookies). Set `false` only for plain-HTTP local development |
 | `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DB` | yes | Database connection |
 | `IMAGEKIT_PRIVATE_KEY` / `IMAGEKIT_URL_ENDPOINT` | no | Airline logo storage and CDN delivery |
 | `INTERNAL_SERVICE_TOKEN` | no | Bearer token for the internal service API |
@@ -162,8 +163,14 @@ see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for why and how.
 ## Security notes
 
 - Keep `FLASK_DEBUG=false` in production.
-- Serve over HTTPS via a reverse proxy. If access is always HTTPS, set
-  `app.config['SESSION_COOKIE_SECURE'] = True` in `app.py`.
+- Serve over HTTPS via a reverse proxy. Session cookies are HTTPS-only by
+  default (`SESSION_COOKIE_SECURE=true`); set it to `false` only for plain-HTTP
+  local development, where browsers would otherwise refuse to store the cookie.
+- Login sessions are permanent cookies that stay valid for 30 days from the
+  last visit, so users remain logged in across browser restarts. Changing a
+  password bumps the account's `auth_epoch` and immediately logs every other
+  session out. Keep `FLASK_SECRET_KEY` stable across deploys — rotating it
+  invalidates all sessions.
 - Never commit `MASTER_SECRET_KEY`, `FLASK_SECRET_KEY`, database passwords or
   the invitation code.
 - Back up the MySQL database before any upgrade or migration.

@@ -66,7 +66,7 @@ def get_users_db():
 
 
 def migrate_users_db():
-    """Ensure api_key_encrypted column exists in the users table (MySQL version)."""
+    """Ensure the auth columns exist in the users table (MySQL version)."""
     try:
         conn = get_users_db()
         cur = conn.execute("""
@@ -80,6 +80,17 @@ def migrate_users_db():
             conn.execute("ALTER TABLE users ADD COLUMN api_key_encrypted TEXT")
             conn.commit()
             print("Migrated users table: added api_key_encrypted column")
+        cur = conn.execute("""
+            SELECT COLUMN_NAME
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME   = 'users'
+              AND COLUMN_NAME  = 'auth_epoch'
+        """)
+        if not cur.fetchone():
+            conn.execute("ALTER TABLE users ADD COLUMN auth_epoch INT NOT NULL DEFAULT 0")
+            conn.commit()
+            print("Migrated users table: added auth_epoch column")
         conn.close()
     except Exception as e:
         print(f"migrate_users_db error: {e}")

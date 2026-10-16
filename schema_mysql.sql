@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS users (
     username            VARCHAR(255) NOT NULL UNIQUE,
     password_hash       VARCHAR(255) NOT NULL,
     db_filename         VARCHAR(500),           -- kept for reference only, not used at runtime after Phase 2
-    api_key_encrypted   TEXT
+    api_key_encrypted   TEXT,
+    auth_epoch          INT NOT NULL DEFAULT 0  -- bumped on password change; invalidates old session cookies
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- ---- Per-user data tables (all carry user_id) ---------------

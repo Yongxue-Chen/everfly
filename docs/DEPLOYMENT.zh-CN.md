@@ -230,8 +230,4 @@ curl -fsS -X POST \
 
 ## 反向代理
 
-在应用前面终止 TLS，代理到 `http://127.0.0.1:5000`。当所有请求都走 HTTPS 之后，在 `app.py` 中启用安全 Cookie：
-
-```python
-app.config['SESSION_COOKIE_SECURE'] = True
-```
+在应用前面终止 TLS，代理到 `http://127.0.0.1:5000`，并透传 `X-Forwarded-Proto`（应用通过 `ProxyFix` 信任该头）。安全会话 cookie 默认开启——`.env` 中 `SESSION_COOKIE_SECURE=true`。仅在本地纯 HTTP 开发时设为 `false`，否则浏览器会拒绝保存仅限 HTTPS 的 cookie，登录状态存不下来。

@@ -93,6 +93,7 @@ gunicorn -w 4 -b 127.0.0.1:5000 app:app
 | `FLASK_SECRET_KEY` | 是 | Flask session 签名密钥 |
 | `INVITATION_CODE` | 是 | 注册新账号所需的邀请码 |
 | `FLASK_DEBUG` | 否 | 生产环境设为 `false` |
+| `SESSION_COOKIE_SECURE` | 否 | `true`（cookie 仅走 HTTPS）。仅在本地纯 HTTP 开发时设为 `false` |
 | `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DB` | 是 | 数据库连接 |
 | `IMAGEKIT_PRIVATE_KEY` / `IMAGEKIT_URL_ENDPOINT` | 否 | 航司 Logo 存储与 CDN 分发 |
 | `INTERNAL_SERVICE_TOKEN` | 否 | 内部服务 API 的 Bearer Token |
@@ -151,7 +152,8 @@ git push origin main
 ## 安全说明
 
 - 生产环境保持 `FLASK_DEBUG=false`。
-- 通过反向代理走 HTTPS。如果访问始终是 HTTPS，在 `app.py` 中设置 `app.config['SESSION_COOKIE_SECURE'] = True`。
+- 通过反向代理走 HTTPS。会话 cookie 默认仅允许 HTTPS（`SESSION_COOKIE_SECURE=true`）；仅在本地纯 HTTP 开发时设为 `false`，否则浏览器不会保存 cookie。
+- 登录会话是有效期 30 天（自最后一次访问起算）的持久 cookie，重启浏览器不会掉登录。修改密码会递增账号的 `auth_epoch`，其他所有设备的会话立即失效。部署时保持 `FLASK_SECRET_KEY` 不变——轮换它会让所有人掉登录。
 - 绝不提交 `MASTER_SECRET_KEY`、`FLASK_SECRET_KEY`、数据库密码和邀请码。
 - 任何升级或迁移前，先备份 MySQL 数据库。
 

@@ -256,9 +256,8 @@ Every 10 minutes is a reasonable starting cadence.
 
 ## Reverse proxy
 
-Terminate TLS in front of the app and proxy to `http://127.0.0.1:5000`. Once
-every request arrives over HTTPS, enable secure cookies in `app.py`:
-
-```python
-app.config['SESSION_COOKIE_SECURE'] = True
-```
+Terminate TLS in front of the app and proxy to `http://127.0.0.1:5000`, forwarding
+`X-Forwarded-Proto` (the app trusts it via `ProxyFix`). Secure session cookies
+are enabled by default — `SESSION_COOKIE_SECURE=true` in `.env`. Only set it to
+`false` for plain-HTTP local development, where browsers refuse to store an
+HTTPS-only cookie and logins would not stick.

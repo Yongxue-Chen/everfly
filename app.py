@@ -143,8 +143,18 @@ app.secret_key = _secret_key
 # Secure session cookie settings
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-# Enable the line below when serving over HTTPS in production:
-# app.config['SESSION_COOKIE_SECURE'] = True
+# Cookies are only sent over HTTPS. Set SESSION_COOKIE_SECURE=false in .env
+# for plain-HTTP local development only.
+app.config['SESSION_COOKIE_SECURE'] = (
+    os.environ.get('SESSION_COOKIE_SECURE', 'true').strip().lower() != 'false'
+)
+
+# Sessions stay valid for 30 days, so returning to the site (e.g. on a phone)
+# does not require logging in again. SESSION_REFRESH_EACH_REQUEST (Flask's
+# default) slides the expiry forward on every request, so the 30 days are
+# counted from the last visit, not from the login.
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
+app.config['SESSION_REFRESH_EACH_REQUEST'] = True
 
 # --- Encryption Setup ---
 _MASTER_KEY = os.environ.get('MASTER_SECRET_KEY')
@@ -266,6 +276,21 @@ def load_logged_in_user():
         conn = database.get_users_db()
         g.user = conn.execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
         conn.close()
+        # Long-lived sessions can be revoked centrally: the session carries the
+        # auth_epoch it was issued with, and password changes bump the user's
+        # epoch in the DB. A mismatch means the cookie outlived a credential
+        # change (or a forced logout) and must not be honored anymore.
+        if g.user is not None:
+            session_epoch = session.get('auth_epoch', 0) or 0
+            user_epoch = g.user.get('auth_epoch') or 0
+            if session_epoch != user_epoch:
+                session.clear()
+                g.user = None
+            elif not session.permanent:
+                # Upgrade sessions issued before long-lived cookies existed, so
+                # already-logged-in users gain the 30-day cookie without having
+                # to log in again after a deploy.
+                session.permanent = True
 
 @app.teardown_appcontext
 def close_connection(exception):
@@ -340,7 +365,9 @@ def login():
 
         if error is None:
             session.clear()
+            session.permanent = True  # keep-alive cookie: valid for PERMANENT_SESSION_LIFETIME (30 days)
             session['user_id'] = user['id']
+            session['auth_epoch'] = user.get('auth_epoch') or 0
             # flash('Login successful!') # Optional, maybe too noisy? User asked for it. 
             # Actually, standard UX: redirect to index. But user specifically asked for "login success" feedback.
             # Usually index page is enough, but let's add it if they want.
@@ -378,9 +405,20 @@ def update_profile():
             
         if new_password:
             password_hash = werkzeug.security.generate_password_hash(new_password)
-            conn.execute('UPDATE users SET password_hash = ? WHERE id = ?', (password_hash, g.user['id']))
-            
+            # Bumping auth_epoch invalidates every previously issued session
+            # cookie (they were issued with the old epoch). The current device
+            # receives the new epoch below, so it stays logged in.
+            new_epoch = (g.user.get('auth_epoch') or 0) + 1
+            conn.execute(
+                'UPDATE users SET password_hash = ?, auth_epoch = ? WHERE id = ?',
+                (password_hash, new_epoch, g.user['id'])
+            )
+        else:
+            new_epoch = None
+
         conn.commit()
+        if new_epoch is not None:
+            session['auth_epoch'] = new_epoch
         return jsonify({'message': 'Profile updated successfully'})
     except Exception as e:
         return safe_jsonify_error(e)
