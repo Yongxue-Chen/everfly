@@ -355,6 +355,14 @@ table {
     white-space: nowrap;
 }
 
+.flight-codeshare-inline {
+    margin-top: 4px;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 650;
+    letter-spacing: 0.01em;
+}
+
 .flight-times-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3076,6 +3084,26 @@ th[onclick] {
     line-height: 1.4;
     word-break: break-word;
     overflow-wrap: anywhere;
+}
+
+.flight-alias-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.flight-alias-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 26px;
+    padding: 4px 9px;
+    border: 1px solid rgba(219, 112, 92, 0.28);
+    border-radius: 999px;
+    background: rgba(219, 112, 92, 0.08);
+    color: var(--text-primary);
+    font-size: 0.75rem;
+    font-weight: 700;
 }
 
 /* Notes Section */

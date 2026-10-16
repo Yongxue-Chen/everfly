@@ -693,6 +693,9 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
     const aircraftModel = entity.aircraft_model || '';
     const reg = entity.registration ? (entity.registration.toUpperCase().startsWith('B-') ? entity.registration : `B-${entity.registration}`) : '';
     const aircraftInfo = [aircraftModel, reg].filter(Boolean).join(' · ');
+    const codeshareAliases = Array.isArray(entity.flight_aliases)
+        ? entity.flight_aliases.filter(alias => alias.alias_type === 'codeshare')
+        : [];
 
     // Weather container HTML
     let weatherHtml = '';
@@ -801,7 +804,7 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
             </div>` : ''}
         </div>
 
-        ${(seatInfo || aircraftInfo || entity.reason) ? `
+        ${(seatInfo || aircraftInfo || entity.reason || codeshareAliases.length) ? `
         <div class="flight-details-grid">
             ${seatInfo ? `
             <div class="flight-detail-card">
@@ -827,6 +830,17 @@ function renderFlightDetailPanel(entity, stats = {}, related = {}) {
                 <div class="flight-detail-info">
                     <div class="flight-detail-label">Travel purpose</div>
                     <div class="flight-detail-value" title="${escapeHtml(entity.reason)}">${escapeHtml(entity.reason)}</div>
+                </div>
+            </div>` : ''}
+
+            ${codeshareAliases.length ? `
+            <div class="flight-detail-card flight-codeshare-card">
+                <div class="flight-detail-icon"><i class="fa-solid fa-code-branch"></i></div>
+                <div class="flight-detail-info">
+                    <div class="flight-detail-label">Codeshare numbers</div>
+                    <div class="flight-alias-list">${codeshareAliases.map(alias => `
+                        <span class="flight-alias-badge">${escapeHtml(alias.flight_number)}${alias.airline_name ? ` · ${escapeHtml(alias.airline_name)}` : ''}${alias.is_booked_number ? ' · Booked' : ''}</span>
+                    `).join('')}</div>
                 </div>
             </div>` : ''}
         </div>` : ''}
@@ -2769,6 +2783,9 @@ function renderFlights({ error = '' } = {}) {
         const healthWarning = healthGaps.length
             ? `<span class="flight-health-warning" title="Missing: ${escapeHtml(healthLabel)}" aria-label="Needs attention: ${escapeHtml(healthLabel)}"><i class="fa-solid fa-triangle-exclamation"></i></span>`
             : '';
+        const codeshareNumbers = Array.isArray(f.flight_aliases)
+            ? f.flight_aliases.filter(alias => alias.alias_type === 'codeshare').map(alias => alias.flight_number)
+            : [];
 
         tr.className = `flight-row${healthGaps.length ? ' flight-row-needs-attention' : ''}`;
         tr.title = healthGaps.length ? `Open flight details · Missing: ${healthLabel}` : 'Open flight details';
@@ -2776,7 +2793,7 @@ function renderFlights({ error = '' } = {}) {
             <td class="flight-cell flight-summary" data-label="Date / Flight">
                 <div class="flight-summary-date">${displayDate}${healthWarning}</div>
                 <div class="flight-route-strip"><div class="flight-route-point"><span class="flight-route-name">${safe(f.origin_name || f.origin_code)}</span><small class="flight-route-terminal">${safe(f.origin_code)} · ${originTerminal}</small></div><i class="fa-solid fa-plane"></i><div class="flight-route-point"><span class="flight-route-name">${safe(f.dest_name || f.dest_code)}</span><small class="flight-route-terminal">${safe(f.dest_code)} · ${destTerminal}</small></div></div>
-                <div class="flight-summary-main flight-summary-actions"><div class="flight-summary-number">${safe(f.flight_number)}</div><div class="flight-summary-button-group"><button class="btn btn-sm flight-update-summary action-api" data-action-label="Update" aria-label="Update flight from AeroAPI" title="Update from AeroAPI"><i class="fa-solid fa-cloud-arrow-down"></i><span>API</span></button></div></div>
+                <div class="flight-summary-main flight-summary-actions"><div><div class="flight-summary-number">${safe(f.flight_number)}</div>${codeshareNumbers.length ? `<div class="flight-codeshare-inline">Codeshare · ${codeshareNumbers.map(escapeHtml).join(' · ')}</div>` : ''}</div><div class="flight-summary-button-group"><button class="btn btn-sm flight-update-summary action-api" data-action-label="Update" aria-label="Update flight from AeroAPI" title="Update from AeroAPI"><i class="fa-solid fa-cloud-arrow-down"></i><span>API</span></button></div></div>
                 <div class="flight-row-hint"><span>View flight details</span><i class="fa-solid fa-chevron-right"></i></div>
             </td>
             <td class="flight-cell flight-times" data-label="Times">
@@ -3140,6 +3157,7 @@ async function openEditFlightModal(item) {
 
     const flightFields = [
         { key: 'flight_number', label: 'Flight Number', type: 'text' },
+        { key: 'codeshare_flight_numbers', label: 'Codeshare Flight Numbers', type: 'text', placeholder: 'e.g. VS4116, 3U1340' },
         { key: 'registration', label: 'Aircraft Reg', type: 'text' },
         { key: 'origin_airport_id', label: 'Origin', type: 'select', lookup: 'airports', display: 'name' },
         { key: 'dest_airport_id', label: 'Destination', type: 'select', lookup: 'airports', display: 'name' },

@@ -117,6 +117,7 @@ class InternalFlightsApiTest(unittest.TestCase):
                 "user_id": 7,
                 "date": "2099-07-05",
                 "flight_number": "CX251",
+                "codeshares": [],
             },
         }, response.get_json())
         self.assertEqual(
@@ -131,6 +132,24 @@ class InternalFlightsApiTest(unittest.TestCase):
         self.assertTrue(self.fake_conn.committed)
         self.assertEqual([(42, False)], self.auto_update_calls)
         self.assertTrue(self.fake_users_conn.closed)
+
+    def test_creates_structured_codeshare_aliases(self):
+        response = self.client.post(
+            "/api/internal/flights",
+            json={
+                "flightNumber": "DL2272",
+                "date": "2099-07-05",
+                "codeshareFlightNumbers": ["VS4116"],
+            },
+            headers={"Authorization": "Bearer shared-secret"},
+        )
+
+        self.assertEqual(201, response.status_code)
+        self.assertEqual("VS4116", response.get_json()["flight"]["codeshares"][0]["flight_number"])
+        self.assertTrue(any(
+            "INSERT INTO flight_aliases" in query and args[2] == "VS4116"
+            for query, args in self.fake_conn.queries
+        ))
 
     def test_normalizes_icao_airline_prefix_to_iata_for_internal_import(self):
         response = self.client.post(

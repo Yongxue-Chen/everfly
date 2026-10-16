@@ -129,6 +129,24 @@ CREATE TABLE IF NOT EXISTS flights (
     CONSTRAINT fk_flights_dest_tenant FOREIGN KEY (dest_airport_id, user_id) REFERENCES airports (id, user_id) ON DELETE RESTRICT
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS flight_aliases (
+    id                  INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    user_id             INT NOT NULL,
+    flight_id           INT NOT NULL,
+    flight_number       VARCHAR(30) NOT NULL,
+    alias_type          VARCHAR(30) NOT NULL DEFAULT 'codeshare',
+    airline_id          INT,
+    is_booked_number    BOOLEAN NOT NULL DEFAULT FALSE,
+    source              VARCHAR(30) NOT NULL DEFAULT 'manual',
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_flight_alias_number (flight_id, user_id, flight_number),
+    INDEX idx_flight_alias_user (user_id),
+    INDEX idx_flight_alias_airline_user (airline_id, user_id),
+    CONSTRAINT fk_flight_alias_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE RESTRICT,
+    CONSTRAINT fk_flight_alias_flight_tenant FOREIGN KEY (flight_id, user_id) REFERENCES flights (id, user_id) ON DELETE CASCADE,
+    CONSTRAINT fk_flight_alias_airline_tenant FOREIGN KEY (airline_id, user_id) REFERENCES airlines (id, user_id) ON DELETE RESTRICT
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS flight_aeroapi_jobs (
     id                  INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     user_id             INT NOT NULL,

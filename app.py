@@ -453,8 +453,95 @@ def _normalize_internal_flight_number(value):
     return flight_number
 
 
+def _normalize_flight_aliases(value, primary_flight_number=None, default_source='manual'):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = re.split(r'[,;\n]+', value)
+    if not isinstance(value, list):
+        value = [value]
+
+    primary = _normalize_internal_flight_number(primary_flight_number)
+    aliases = []
+    seen = set()
+    for entry in value:
+        if isinstance(entry, dict):
+            raw_number = entry.get('flightNumber') or entry.get('flight_number') or entry.get('number')
+            alias_type = str(entry.get('type') or entry.get('aliasType') or 'codeshare').strip().lower()
+            is_booked = bool(entry.get('isBookedNumber') or entry.get('is_booked_number'))
+            source = str(entry.get('source') or default_source).strip().lower() or default_source
+        else:
+            raw_number = entry
+            alias_type = 'codeshare'
+            is_booked = False
+            source = default_source
+        number = _normalize_internal_flight_number(raw_number)
+        if not number or number == primary or number in seen:
+            continue
+        if alias_type not in {'codeshare', 'tracking', 'other'}:
+            alias_type = 'other'
+        seen.add(number)
+        aliases.append({
+            'flight_number': number,
+            'alias_type': alias_type,
+            'is_booked_number': is_booked,
+            'source': source[:30],
+        })
+    return aliases
+
+
+def _resolve_alias_airline_id(conn, user_id, flight_number):
+    match = re.fullmatch(r'([A-Z0-9]{2})([0-9][A-Z0-9]*)', flight_number or '')
+    if not match:
+        return None
+    row = conn.execute(
+        "SELECT id FROM airlines WHERE user_id = ? AND UPPER(iata_code) = ? LIMIT 1",
+        (user_id, match.group(1)),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def replace_flight_codeshares(conn, user_id, flight_id, aliases):
+    """Replace the codeshare aliases for one flight, preserving other alias types."""
+    conn.execute(
+        "DELETE FROM flight_aliases WHERE flight_id = ? AND user_id = ? AND alias_type = 'codeshare'",
+        (flight_id, user_id),
+    )
+    for alias in aliases:
+        airline_id = _resolve_alias_airline_id(conn, user_id, alias['flight_number'])
+        conn.execute(
+            """INSERT INTO flight_aliases
+               (user_id, flight_id, flight_number, alias_type, airline_id, is_booked_number, source)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON DUPLICATE KEY UPDATE alias_type = VALUES(alias_type), airline_id = VALUES(airline_id),
+                   is_booked_number = VALUES(is_booked_number), source = VALUES(source)""",
+            (
+                user_id, flight_id, alias['flight_number'], alias['alias_type'], airline_id,
+                1 if alias['is_booked_number'] else 0, alias['source'],
+            ),
+        )
+
+
+def _flight_aliases_for_user(conn, user_id, flight_id=None):
+    query = """SELECT fa.flight_id, fa.flight_number, fa.alias_type, fa.airline_id,
+                      fa.is_booked_number, fa.source, al.name AS airline_name
+               FROM flight_aliases fa
+               LEFT JOIN airlines al ON al.id = fa.airline_id AND al.user_id = fa.user_id
+               WHERE fa.user_id = ?"""
+    params = [user_id]
+    if flight_id is not None:
+        query += " AND fa.flight_id = ?"
+        params.append(flight_id)
+    query += " ORDER BY fa.id"
+    cursor = conn.execute(query, params)
+    columns = [description[0] for description in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
 def _normalize_internal_flight_payload(data):
-    flight_number = _normalize_internal_flight_number(data.get('flightNumber') or data.get('flight_number'))
+    supplied_flight_number = data.get('flightNumber') or data.get('flight_number')
+    operating_flight_number = data.get('operatingFlightNumber') or data.get('operating_flight_number')
+    flight_number = _normalize_internal_flight_number(operating_flight_number or supplied_flight_number)
     date_value = str(data.get('date') or '').strip()
     if not flight_number:
         return None, 'flightNumber is required'
@@ -466,7 +553,21 @@ def _normalize_internal_flight_payload(data):
         datetime.strptime(date_value, '%Y-%m-%d')
     except ValueError:
         return None, 'date must be a valid YYYY-MM-DD date'
-    return {'flight_number': flight_number, 'date': date_value}, None
+    alias_input = data.get('codeshares')
+    if alias_input is None:
+        alias_input = data.get('codeshareFlightNumbers') or data.get('codeshare_flight_numbers')
+    if operating_flight_number and supplied_flight_number:
+        supplied_normalized = _normalize_internal_flight_number(supplied_flight_number)
+        if supplied_normalized and supplied_normalized != flight_number:
+            existing_aliases = _normalize_flight_aliases(alias_input, flight_number, default_source='everinbox')
+            alias_input = existing_aliases + [{
+                'flightNumber': supplied_normalized,
+                'type': 'codeshare',
+                'isBookedNumber': True,
+                'source': 'everinbox',
+            }]
+    aliases = _normalize_flight_aliases(alias_input, flight_number, default_source='everinbox')
+    return {'flight_number': flight_number, 'date': date_value, 'aliases': aliases}, None
 
 def _configured_internal_username():
     return os.environ.get('EVERFLY_INTERNAL_USERNAME', '').strip()
@@ -482,6 +583,7 @@ def create_internal_flight_record(conn, payload, username):
         (user_id, payload['date'], payload['flight_number']),
     )
     flight_id = cur.lastrowid
+    replace_flight_codeshares(conn, user_id, flight_id, payload.get('aliases', []))
     try:
         schedule_flight_aeroapi_jobs(conn, user_id, flight_id)
     except Exception as e:
@@ -509,6 +611,7 @@ def create_internal_flight_record(conn, payload, username):
         'user_id': user_id,
         'date': payload['date'],
         'flight_number': payload['flight_number'],
+        'codeshares': payload.get('aliases', []),
     }
 
 @app.route('/api/internal/flights', methods=['POST'])
@@ -662,6 +765,11 @@ def create_crud_routes(endpoint, table_name, columns):
     @login_required
     def create_item():
         data = request.json
+        codeshare_input_present = table_name == 'flights' and 'codeshare_flight_numbers' in data
+        codeshare_aliases = (
+            _normalize_flight_aliases(data.get('codeshare_flight_numbers'), data.get('flight_number'))
+            if codeshare_input_present else None
+        )
         valid_data = {k: v for k, v in data.items() if k in columns}
 
         if table_name == 'airlines':
@@ -711,6 +819,10 @@ def create_crud_routes(endpoint, table_name, columns):
             validate_tenant_relationships(database.get_db(), table_name, valid_data, g.user['id'])
             new_id = execute_db(f"INSERT INTO {table_name} ({cols}) VALUES ({placeholders})", values)
             if table_name == 'flights':
+                if codeshare_aliases is not None:
+                    conn = database.get_db()
+                    replace_flight_codeshares(conn, g.user['id'], new_id, codeshare_aliases)
+                    conn.commit()
                 safely_schedule_flight_aeroapi_jobs(database.get_db(), g.user['id'], new_id)
                 _safely_auto_update_new_flight(new_id)
             new_item = query_db(f"SELECT * FROM {table_name} WHERE id = ? AND user_id = ?", (new_id, g.user['id']), one=True)
@@ -725,6 +837,11 @@ def create_crud_routes(endpoint, table_name, columns):
     @login_required
     def update_item(id):
         data = request.json
+        codeshare_input_present = table_name == 'flights' and 'codeshare_flight_numbers' in data
+        codeshare_aliases = (
+            _normalize_flight_aliases(data.get('codeshare_flight_numbers'), data.get('flight_number'))
+            if codeshare_input_present else None
+        )
         valid_data = {k: v for k, v in data.items() if k in columns}
 
         if table_name == 'airlines':
@@ -769,17 +886,21 @@ def create_crud_routes(endpoint, table_name, columns):
             if derived_continent:
                 valid_data['continent'] = derived_continent
 
-        if not valid_data:
+        if not valid_data and codeshare_aliases is None:
             return jsonify({'error': 'No valid data provided'}), 400
 
-        set_clause = ', '.join([f"{k} = ?" for k in valid_data.keys()])
-        values = list(valid_data.values())
-        values.extend([id, g.user['id']])
-        
         try:
-            validate_tenant_relationships(database.get_db(), table_name, valid_data, g.user['id'])
-            execute_db(f"UPDATE {table_name} SET {set_clause} WHERE id = ? AND user_id = ?", values)
+            if valid_data:
+                set_clause = ', '.join([f"{k} = ?" for k in valid_data.keys()])
+                values = list(valid_data.values())
+                values.extend([id, g.user['id']])
+                validate_tenant_relationships(database.get_db(), table_name, valid_data, g.user['id'])
+                execute_db(f"UPDATE {table_name} SET {set_clause} WHERE id = ? AND user_id = ?", values)
             if table_name == 'flights':
+                if codeshare_aliases is not None:
+                    conn = database.get_db()
+                    replace_flight_codeshares(conn, g.user['id'], id, codeshare_aliases)
+                    conn.commit()
                 safely_schedule_flight_aeroapi_jobs(database.get_db(), g.user['id'], id)
             updated_item = query_db(f"SELECT * FROM {table_name} WHERE id = ? AND user_id = ?", (id, g.user['id']), one=True)
             return jsonify(updated_item)
@@ -2949,6 +3070,12 @@ def get_flight_entity(id):
         LEFT JOIN aircraft_models am ON f.aircraft_model_id = am.id AND am.user_id = ?
         WHERE f.id = ? AND f.user_id = ?
     ''', (uid, uid, uid, uid, id, uid), one=True)
+    if entity:
+        entity['flight_aliases'] = _flight_aliases_for_user(database.get_db(), uid, id)
+        entity['codeshare_flight_numbers'] = ', '.join(
+            alias['flight_number'] for alias in entity['flight_aliases']
+            if alias['alias_type'] == 'codeshare'
+        )
     return _entity_response('flights', entity)
 
 
@@ -3172,11 +3299,20 @@ def get_detailed_flights():
         ORDER BY f.date DESC
     ''', (uid, uid, uid, uid, uid))
 
+    aliases_by_flight = {}
+    for alias in _flight_aliases_for_user(conn, uid):
+        aliases_by_flight.setdefault(alias['flight_id'], []).append(alias)
+
     flights = []
     col_names = [d[0] for d in cursor.description]
 
     for row in cursor.fetchall():
         item = dict(zip(col_names, row))
+        item['flight_aliases'] = aliases_by_flight.get(item['id'], [])
+        item['codeshare_flight_numbers'] = ', '.join(
+            alias['flight_number'] for alias in item['flight_aliases']
+            if alias['alias_type'] == 'codeshare'
+        )
         item['origin'] = {
             'lat': item['origin_lat'],
             'lon': item['origin_lon'],
