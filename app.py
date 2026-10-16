@@ -22,6 +22,7 @@ from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFProtect, CSRFError
 from werkzeug.middleware.proxy_fix import ProxyFix
 from airlines_data import AIRLINES_ICAO_TO_IATA
+from continent_mapping import continent_from_country_code
 from china_localization import (
     chinese_airline_name,
     chinese_country_name,
@@ -558,12 +559,6 @@ def execute_db(query, args=()):
         # conn.close() # Managed by teardown
         raise e
 
-def get_continent_from_tz(tz_name):
-    """Extract continent from timezone string (e.g., 'Asia/Shanghai' -> 'Asia')."""
-    if not tz_name or '/' not in tz_name:
-        return None
-    return tz_name.split('/')[0]
-
 TENANT_RELATIONSHIPS = {
     'airports': {
         'city_id': 'cities',
@@ -700,8 +695,9 @@ def create_crud_routes(endpoint, table_name, columns):
             #    conn.close() # Managed by teardown
 
         if table_name == 'cities':
-            if valid_data.get('timezone') and not valid_data.get('continent'):
-                valid_data['continent'] = get_continent_from_tz(valid_data['timezone'])
+            derived_continent = continent_from_country_code(valid_data.get('country_code'))
+            if derived_continent:
+                valid_data['continent'] = derived_continent
 
         if not valid_data:
              return jsonify({'error': 'No valid data provided'}), 400
@@ -768,9 +764,10 @@ def create_crud_routes(endpoint, table_name, columns):
             # finally:
             #    conn.close() # Managed by teardown
 
-        if table_name == 'cities':
-             if 'timezone' in valid_data and (not valid_data.get('continent') or valid_data['continent'] == ''):
-                  valid_data['continent'] = get_continent_from_tz(valid_data['timezone'])
+        if table_name == 'cities' and 'country_code' in valid_data:
+            derived_continent = continent_from_country_code(valid_data.get('country_code'))
+            if derived_continent:
+                valid_data['continent'] = derived_continent
 
         if not valid_data:
             return jsonify({'error': 'No valid data provided'}), 400
@@ -1162,8 +1159,15 @@ def import_csv(table_name):
                                     if res_c: normalized_row['city_id'] = res_c[0]
                                     else:
                                         # Create basic city
-                                        cur_ins = conn.execute("INSERT INTO cities (user_id, name, country, country_code, timezone) VALUES (?, ?, ?, ?, ?)",
-                                                   (g.user['id'], city_name, localized['country'] if localized else country_code, country_code, info.get('tz')))
+                                        cur_ins = conn.execute(
+                                            "INSERT INTO cities (user_id, name, country, country_code, timezone, continent) VALUES (?, ?, ?, ?, ?, ?)",
+                                            (
+                                                g.user['id'], city_name,
+                                                localized['country'] if localized else country_code,
+                                                country_code, info.get('tz'),
+                                                continent_from_country_code(country_code),
+                                            ),
+                                        )
                                         normalized_row['city_id'] = cur_ins.lastrowid
 
                 # Manual Autolink City (Fallback if not fetched above)
@@ -1188,8 +1192,9 @@ def import_csv(table_name):
                         normalized_row['name'] = f"{model}-{series}"
 
             if table_name == 'cities':
-                if normalized_row.get('timezone') and not normalized_row.get('continent'):
-                    normalized_row['continent'] = get_continent_from_tz(normalized_row['timezone'])
+                derived_continent = continent_from_country_code(normalized_row.get('country_code'))
+                if derived_continent:
+                    normalized_row['continent'] = derived_continent
 
             if table_name == 'flights':
                 # Origin
@@ -1424,9 +1429,11 @@ def _update_city_fields_logic(city_id, conn, uid, info_country_code=None, info_t
             except Exception:
                 pass
                 
-    # 3. Resolve continent if missing
-    if not new_continent and new_timezone:
-        new_continent = get_continent_from_tz(new_timezone)
+    # 3. Resolve continent from ISO country code. IANA timezone prefixes are
+    # timezone regions, not a reliable continent taxonomy.
+    derived_continent = continent_from_country_code(new_country_code)
+    if derived_continent:
+        new_continent = derived_continent
         
     # Write back any empty fields
     updates = []
@@ -1441,7 +1448,7 @@ def _update_city_fields_logic(city_id, conn, uid, info_country_code=None, info_t
     if (not timezone or timezone.strip() == "") and new_timezone:
         updates.append("timezone = ?")
         params.append(new_timezone)
-    if (not continent or continent.strip() == "") and new_continent:
+    if new_continent and continent != new_continent:
         updates.append("continent = ?")
         params.append(new_continent)
         
@@ -1531,7 +1538,7 @@ def _update_airport_logic(id, conn):
                 
             cur_insert = conn.execute(
                 "INSERT INTO cities (user_id, name, country, country_code, timezone, continent) VALUES (?, ?, ?, ?, ?, ?)",
-                (uid, city_name, country_name, country_code, tz, get_continent_from_tz(tz))
+                (uid, city_name, country_name, country_code, tz, continent_from_country_code(country_code))
             )
             city_id = cur_insert.lastrowid
             
@@ -2200,14 +2207,14 @@ def get_or_create_airport(icao, iata, conn):
             db_tz = city_row[1]
             db_cont = city_row[2]
             new_tz = info.get('tz')
-            new_cont_calc = get_continent_from_tz(new_tz)
+            new_cont_calc = continent_from_country_code(country_code)
             
             updates = []
             vals = []
             if not db_tz and new_tz:
                 updates.append("timezone = ?")
                 vals.append(new_tz)
-            if not db_cont and new_cont_calc:
+            if new_cont_calc and db_cont != new_cont_calc:
                 updates.append("continent = ?")
                 vals.append(new_cont_calc)
             
@@ -2216,7 +2223,7 @@ def get_or_create_airport(icao, iata, conn):
                 conn.execute(f"UPDATE cities SET {', '.join(updates)} WHERE id = ? AND user_id = ?", vals)
         else:
             tz = info.get('tz')
-            cont = get_continent_from_tz(tz)
+            cont = continent_from_country_code(country_code)
             country_name = localized['country'] if localized else country_code
             try:
                 import pycountry
