@@ -83,10 +83,16 @@ const fixture = [
         await page.waitForFunction(()=>State.currentView==='profile');
         assert.equal(await page.locator('.mobile-nav-item[data-mobile-view="profile"]').getAttribute('aria-current'),'page');
         assert.equal(await page.locator('#journey-hero .journey-eyebrow').first().textContent(),'Flight overview');
-        assert.deepEqual(await page.locator('#journey-metrics .journey-metric > span').allTextContents(),['Distance','Flight time']);
-        assert.equal(await page.locator('#journey-metrics .journey-metric').count(),2);
+        assert.equal(await page.locator('#journey-metrics').count(),0);
         assert.equal(await page.locator('#journey-hero .journey-overview-records #journey-highlights').count(),1);
-        assert.equal(await page.locator('#journey-highlights .journey-highlight-card').count(),4);
+        assert.deepEqual(await page.locator('#journey-highlights .journey-highlight-card > div > span').allTextContents(),['Total distance','Total flight time','On-time performance']);
+        assert.equal(await page.locator('#journey-highlights .journey-highlight-card').count(),3);
+        assert.equal(await page.locator('#journey-highlights .journey-highlight-record').count(),3);
+        await page.setViewportSize({width:1440,height:844});
+        assert.equal(new Set(await page.locator('#journey-highlights .journey-highlight-card').evaluateAll(cards=>cards.map(card=>Math.round(card.getBoundingClientRect().y)))).size,1,'Overview cards must share one row');
+        if (process.env.UI_SCREENSHOT_DIR) await page.screenshot({path:path.join(process.env.UI_SCREENSHOT_DIR,'overview-merged-1440.png'),fullPage:false});
+        await page.setViewportSize({width:390,height:844});
+        if (process.env.UI_SCREENSHOT_DIR) await page.screenshot({path:path.join(process.env.UI_SCREENSHOT_DIR,'overview-merged-390.png'),fullPage:true});
         assert.equal(await page.locator('.journey-trends-panel').isVisible(),false);
         assert.equal(await page.locator('.journey-recent-flight').count(),2);
         await page.locator('[data-journey-tab="statistics"]').click();
@@ -171,7 +177,7 @@ const fixture = [
         }
         await page.selectOption('#journey-status-filter','pending');
         assert.equal(await page.evaluate(()=>filterFlightsForInsight('missing','health').length),0);
-        assert.equal(await page.locator('#journey-highlights .journey-highlight-card').count(),4);
+        assert.equal(await page.locator('#journey-highlights .journey-highlight-card').count(),3);
         await page.selectOption('#journey-status-filter','all');
         assert.equal(await page.evaluate(()=>State.cache.stats.totals.flights),2);
         await page.selectOption('#year-filter','2099');

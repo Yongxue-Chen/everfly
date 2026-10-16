@@ -3473,3 +3473,13 @@ body.entity-panel-open { overflow: hidden; }
 .map-controls [data-map-layer].active,
 .map-controls [data-map-layer][aria-pressed="true"] { border-color: #8bb8df; background: #fff; color: #075cae; box-shadow: 0 3px 10px rgba(27, 71, 112, .18); font-weight: 800; }
 .map-controls [data-map-layer]:focus-visible { outline: 2px solid #075cae; outline-offset: 2px; }
+
+/* Flight overview: totals and records share one row */
+.journey-overview-records .journey-highlights { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.journey-highlight-record { display: grid !important; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 7px; }
+.journey-highlight-record b { color: #405a76; font-size: .68rem; font-weight: 800; white-space: nowrap; }
+.journey-highlight-record b::after { content: ':'; }
+
+@media (max-width: 768px) {
+    .journey-overview-records .journey-highlights { grid-template-columns: minmax(0, 1fr); }
+}

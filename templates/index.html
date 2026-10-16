@@ -20,7 +20,7 @@
         const CURRENT_USER = {{ user| tojson | safe }};
         const CSRF_TOKEN = "{{ csrf_token() }}";
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=ui-stage7-1">
+    <link rel="stylesheet" href="/static/css/style.css?v=ui-overview-1">
 </head>
 
 <body>
@@ -82,9 +82,8 @@
                         <label>Year <select id="year-filter"><option value="all">All years</option></select></label>
                         <label>Flight status <select id="journey-status-filter"><option value="all">All flights</option><option value="completed">Completed</option><option value="pending">Upcoming / ongoing</option></select></label>
                     </div>
-                    <div id="journey-metrics" class="journey-metrics"></div>
                     <div class="journey-overview-records">
-                        <div class="stats-header">Records and patterns</div>
+                        <div class="stats-header">Key figures</div>
                         <div id="journey-highlights" class="journey-highlights"></div>
                     </div>
                 </section>
@@ -257,7 +256,7 @@
     </aside>
 
     <script src="/static/js/journey-stats.js?v=ui-stage2-3"></script>
-    <script src="/static/js/app.js?v=ui-stage7-1"></script>
+    <script src="/static/js/app.js?v=ui-overview-1"></script>
 </body>
 
 </html>

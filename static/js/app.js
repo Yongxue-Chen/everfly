@@ -3546,35 +3546,40 @@ window.filterFlightsForInsight = filterFlightsForInsight;
 function renderJourneyHighlights(stats) {
     const container = document.getElementById('journey-highlights');
     if (!container) return;
+    const totals = stats.totals || {};
     const records = stats.records || {};
     const quality = stats.quality || {};
     const otp = quality.on_time_performance || { avg_departure_delay: 0, avg_arrival_delay: 0, on_time_rate: 100, total_tracked: 0 };
     const cards = [
         {
             icon: 'fa-route',
-            label: 'Longest distance',
-            value: records.longest_distance?.distance ? formatKm(records.longest_distance.distance) : 'No distance yet',
-            meta: routeLabel(records.longest_distance),
-            flights: () => filterFlightsForInsight('route', `${records.longest_distance?.origin}-${records.longest_distance?.dest}`)
+            label: 'Total distance',
+            value: formatKm(totals.distance),
+            recordLabel: 'Longest flight',
+            meta: records.longest_distance?.distance
+                ? `${formatKm(records.longest_distance.distance)} · ${routeLabel(records.longest_distance)}`
+                : 'No distance record yet',
+            flights: () => records.longest_distance
+                ? filterFlightsForInsight('route', `${records.longest_distance.origin}-${records.longest_distance.dest}`)
+                : filterFlightsForInsight('all')
         },
         {
             icon: 'fa-clock',
-            label: 'Longest time',
-            value: records.longest_duration?.duration ? formatHours(records.longest_duration.duration) : 'No duration yet',
-            meta: routeLabel(records.longest_duration),
-            flights: () => filterFlightsForInsight('route', `${records.longest_duration?.origin}-${records.longest_duration?.dest}`)
-        },
-        {
-            icon: 'fa-repeat',
-            label: 'Most repeated route',
-            value: records.most_frequent_route?.route || 'No repeat yet',
-            meta: records.most_frequent_route?.count ? `${records.most_frequent_route.count} flights` : 'Every journey is still unique',
-            flights: () => filterFlightsForInsight('route', records.most_frequent_route?.route)
+            label: 'Total flight time',
+            value: formatHours(totals.duration),
+            recordLabel: 'Longest flight',
+            meta: records.longest_duration?.duration
+                ? `${formatHours(records.longest_duration.duration)} · ${routeLabel(records.longest_duration)}`
+                : 'No duration record yet',
+            flights: () => records.longest_duration
+                ? filterFlightsForInsight('route', `${records.longest_duration.origin}-${records.longest_duration.dest}`)
+                : filterFlightsForInsight('all')
         },
         {
             icon: 'fa-plane-arrival',
             label: 'On-time performance',
             value: otp.total_tracked ? `${otp.on_time_rate}% on-time` : 'No actual arrival data',
+            recordLabel: 'Tracked flights',
             meta: `${otp.total_tracked} tracked · Dep ${otp.avg_departure_delay}m / Arr ${otp.avg_arrival_delay}m delay`,
             flights: () => filterFlightsForInsight('delayed')
         },
@@ -3582,11 +3587,12 @@ function renderJourneyHighlights(stats) {
     container.innerHTML = '';
     cards.forEach(card => {
         const el = document.createElement('button');
+        el.type = 'button';
         el.className = 'journey-highlight-card';
         el.onclick = () => openFlightListModal(card.label, card.flights());
         el.innerHTML = `
-            <span class="journey-highlight-icon"><i class="fa-solid ${card.icon}"></i></span>
-            <div><span>${escapeHtml(card.label)}</span><strong>${escapeHtml(card.value)}</strong><small>${escapeHtml(card.meta)}</small></div>
+            <span class="journey-highlight-icon"><i class="fa-solid ${card.icon}" aria-hidden="true"></i></span>
+            <div><span>${escapeHtml(card.label)}</span><strong>${escapeHtml(card.value)}</strong><small class="journey-highlight-record"><b>${escapeHtml(card.recordLabel)}</b>${escapeHtml(card.meta)}</small></div>
         `;
         container.appendChild(el);
     });
@@ -4191,30 +4197,12 @@ const showStatsModal = (title, data) => {
 };
 
 function renderJourneyHero(flights) {
-    const totalDist = flights.reduce((sum, f) => sum + (parseFloat(f.distance) || 0), 0);
-    const totalMin = flights.reduce((sum, f) => sum + Number(f.duration_actual ?? f.duration_scheduled ?? 0), 0);
     const count = document.getElementById('journey-flight-count');
     const summary = document.getElementById('journey-summary');
-    const metrics = document.getElementById('journey-metrics');
     
     if (count) count.textContent = `${flights.length.toLocaleString()} flights`;
     if (summary) summary.textContent = State.journeyStatus === 'completed' ? 'Completed flights · Scheduled duration used when actual duration is missing' : 'Includes unfinished flights · Distance and duration may be planned values';
 
-    const earthRoundsVal = totalDist / 40075;
-    const earthRounds = earthRoundsVal >= 10 ? earthRoundsVal.toFixed(1) : earthRoundsVal.toFixed(2);
-    const flightDays = (totalMin / (60 * 24)).toFixed(1);
-
-    if (metrics) metrics.innerHTML = `
-        <div class="journey-metric">
-            <span>Distance</span>
-            <strong>${Math.round(totalDist).toLocaleString()} km</strong>
-            <small class="journey-metric-sub">${earthRounds} times around Earth</small>
-        </div>
-        <div class="journey-metric">
-            <span>Flight time</span>
-            <strong>${Math.floor(totalMin / 60).toLocaleString()}h</strong>
-            <small class="journey-metric-sub">${flightDays} days in the air</small>
-        </div>`;
 }
 
 // Calculate & Render Header Stats

@@ -16,7 +16,8 @@ class CompleteCloudPremiumUiTest(unittest.TestCase):
     def test_journey_has_complete_cloud_premium_structure(self):
         self.assertIn('class="journey-shell"', self.template)
         self.assertIn('id="journey-hero"', self.template)
-        self.assertIn('id="journey-metrics"', self.template)
+        self.assertIn('id="journey-highlights"', self.template)
+        self.assertNotIn('id="journey-metrics"', self.template)
         self.assertIn('class="journey-map-panel"', self.template)
         self.assertIn('function renderJourneyHero', self.js)
 
@@ -34,8 +35,8 @@ class CompleteCloudPremiumUiTest(unittest.TestCase):
         self.assertIn('border-radius: 18px', self.css)
 
     def test_static_assets_use_ui_stage_version(self):
-        self.assertIn('/static/css/style.css?v=ui-stage7-1', self.template)
-        self.assertIn('/static/js/app.js?v=ui-stage7-1', self.template)
+        self.assertIn('/static/css/style.css?v=ui-overview-1', self.template)
+        self.assertIn('/static/js/app.js?v=ui-overview-1', self.template)
         self.assertIn('/static/js/journey-stats.js?v=ui-stage2-3', self.template)
 
 if __name__ == "__main__":

@@ -48,6 +48,15 @@ class JourneyLibraryInsightsTest(unittest.TestCase):
         self.assertIn("monthlyChart", self.js)
         self.assertIn("distanceBucketChart", self.js)
 
+    def test_overview_combines_totals_and_records_in_three_cards(self):
+        section = self.js.split("function renderJourneyHighlights(stats)", 1)[1].split("function destroyJourneyChart", 1)[0]
+        self.assertIn("label: 'Total distance'", section)
+        self.assertIn("label: 'Total flight time'", section)
+        self.assertIn("label: 'On-time performance'", section)
+        self.assertIn("recordLabel: 'Longest flight'", section)
+        self.assertNotIn("label: 'Most repeated route'", section)
+        self.assertIn("repeat(3, minmax(0, 1fr))", self.css)
+
     def test_journey_charts_are_labeled_and_deduplicated(self):
         self.assertIn("text: metric.label", self.js)
         self.assertIn("label: 'Distance (km)'", self.js)
