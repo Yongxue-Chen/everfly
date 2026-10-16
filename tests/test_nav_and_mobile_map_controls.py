@@ -43,7 +43,7 @@ class NavAndMobileMapControlsTest(unittest.TestCase):
         self.assertIn("left: auto;", source)
         self.assertIn("right: 8px;", source)
         self.assertIn("max-width: calc(100% - 72px);", source)
-        self.assertIn("grid-template-columns: auto auto;", source)
+        self.assertIn("grid-template-columns: repeat(3, auto);", source)
         self.assertIn("background: transparent;", source)
         self.assertIn(".leaflet-control-zoom", source)
         self.assertIn(".leaflet-control-zoom a", source)

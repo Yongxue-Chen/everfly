@@ -226,9 +226,35 @@ body {
     overflow: hidden;
 }
 
-#flight-map {
+#flight-map,
+#flight-globe {
     width: 100%;
     height: 100%;
+}
+
+#flight-globe {
+    background: radial-gradient(circle at 50% 42%, #dbeaf2 0, #91b3c5 34%, #1d3345 69%, #101b27 100%);
+}
+
+#flight-map[hidden],
+#flight-globe[hidden] {
+    display: none;
+}
+
+#flight-globe .maplibregl-canvas {
+    outline: none;
+}
+
+#flight-globe .maplibregl-ctrl-group {
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.2);
+}
+
+#flight-globe .maplibregl-popup-content {
+    border-radius: 8px;
+    color: #263746;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.2);
 }
 
 .map-controls {
@@ -869,7 +895,7 @@ body.modal-open { overflow: hidden; }
         top: 8px;
         max-width: calc(100% - 72px);
         display: grid;
-        grid-template-columns: auto auto;
+        grid-template-columns: repeat(3, auto);
         justify-content: flex-end;
         align-items: center;
         gap: 4px;

@@ -13,6 +13,8 @@
     <!-- Map -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.css" />
+    <script src="https://unpkg.com/maplibre-gl@5.6.0/dist/maplibre-gl.js"></script>
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
@@ -20,7 +22,7 @@
         const CURRENT_USER = {{ user| tojson | safe }};
         const CSRF_TOKEN = "{{ csrf_token() }}";
     </script>
-    <link rel="stylesheet" href="/static/css/style.css?v=ui-codeshare-1">
+    <link rel="stylesheet" href="/static/css/style.css?v=ui-globe-1">
 </head>
 
 <body>
@@ -109,9 +111,11 @@
                     </div>
                     <div class="map-container">
                         <div id="flight-map"></div>
+                        <div id="flight-globe" hidden></div>
                         <div class="map-controls">
                             <button type="button" data-map-layer="map" aria-pressed="true" onclick="setMapLayer('map')">Map</button>
                             <button type="button" data-map-layer="satellite" aria-pressed="false" onclick="setMapLayer('satellite')">Satellite</button>
+                            <button type="button" data-map-layer="globe" aria-pressed="false" onclick="setMapLayer('globe')">Globe</button>
                         </div>
                     </div>
                 </section>
@@ -256,7 +260,7 @@
     </aside>
 
     <script src="/static/js/journey-stats.js?v=ui-stage2-3"></script>
-    <script src="/static/js/app.js?v=ui-codeshare-1"></script>
+    <script src="/static/js/app.js?v=ui-globe-1"></script>
 </body>
 
 </html>

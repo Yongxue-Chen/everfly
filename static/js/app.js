@@ -116,6 +116,8 @@ const State = {
     currentView: 'profile',
     currentDataset: 'cities',
     map: null,
+    globeMap: null,
+    globeMapLoaded: false,
     cache: {
         cities: [],
         airports: [],
@@ -308,8 +310,11 @@ async function manageAirlineLogo(id) {
 }
 
 function invalidateProfileMapSize() {
-    if (!State.map) return;
-    const invalidate = () => State.map.invalidateSize({ pan: false });
+    if (!State.map && !State.globeMap) return;
+    const invalidate = () => {
+        if (State.profileMapType === 'globe') State.globeMap?.resize();
+        else State.map?.invalidateSize({ pan: false });
+    };
     invalidate();
     requestAnimationFrame(invalidate);
     setTimeout(invalidate, 100);
@@ -324,8 +329,12 @@ function bindProfileMapResizeObserver() {
 
     const observer = new ResizeObserver(() => {
         if (!container.clientWidth || !container.clientHeight) return;
-        State.map.invalidateSize({ pan: false });
-        if (State.profileMapFlights) refreshProfileMapLayers({ fitBounds: true });
+        if (State.profileMapType === 'globe') {
+            State.globeMap?.resize();
+        } else {
+            State.map.invalidateSize({ pan: false });
+            if (State.profileMapFlights) refreshProfileMapLayers({ fitBounds: true });
+        }
     });
     observer.observe(container);
     State.profileMapResizeObserverBound = true;
@@ -1295,6 +1304,7 @@ async function renderFocusedFlightTrackOnMap(flightId, options = {}) {
 }
 
 async function focusFlightTrackOnMainMap(flightId) {
+    if (State.profileMapType === 'globe') setMapLayer('map');
     State.focusedFlightId = flightId;
     State.currentFocusedFlightId = null;
     navigateTo('profile');
@@ -1537,16 +1547,172 @@ function getProfileMapPalette(type = State.profileMapType) {
         : { completed: '#8792a2', pending: '#e07a5f', airport: '#345d80', border: '#ffffff', completedOpacity: 0.55, pendingOpacity: 0.9 };
 }
 
+function showProfileMapRenderer(type) {
+    const flatMap = document.getElementById('flight-map');
+    const globe = document.getElementById('flight-globe');
+    if (flatMap) flatMap.hidden = type === 'globe';
+    if (globe) globe.hidden = type !== 'globe';
+}
+
+function updateProfileMapLegend() {
+    const palette = getProfileMapPalette();
+    const legend = document.querySelector('.route-status-legend');
+    if (!legend) return;
+    legend.querySelector('.route-status-completed').style.borderColor = palette.completed;
+    legend.querySelector('.route-status-pending').style.borderColor = palette.pending;
+    const airport = legend.querySelector('.route-status-airport');
+    airport.style.backgroundColor = palette.airport;
+    airport.style.boxShadow = `0 0 0 1px ${palette.border}`;
+}
+
+function emptyFeatureCollection() {
+    return { type: 'FeatureCollection', features: [] };
+}
+
+function ensureProfileGlobeLayers() {
+    const globe = State.globeMap;
+    if (!globe || !globe.isStyleLoaded()) return;
+    if (!globe.getSource('profile-globe-routes')) {
+        globe.addSource('profile-globe-routes', { type: 'geojson', data: emptyFeatureCollection() });
+        globe.addLayer({
+            id: 'profile-globe-routes-completed', type: 'line', source: 'profile-globe-routes',
+            filter: ['==', ['get', 'completed'], true],
+            paint: {
+                'line-color': getProfileMapPalette('globe').completed,
+                'line-width': 2.6,
+                'line-opacity': getProfileMapPalette('globe').completedOpacity
+            }
+        });
+        globe.addLayer({
+            id: 'profile-globe-routes-pending', type: 'line', source: 'profile-globe-routes',
+            filter: ['==', ['get', 'completed'], false],
+            paint: {
+                'line-color': getProfileMapPalette('globe').pending,
+                'line-width': 2.8,
+                'line-opacity': getProfileMapPalette('globe').pendingOpacity,
+                'line-dasharray': [2.8, 2.1]
+            }
+        });
+    }
+    if (!globe.getSource('profile-globe-airports')) {
+        globe.addSource('profile-globe-airports', { type: 'geojson', data: emptyFeatureCollection() });
+        globe.addLayer({
+            id: 'profile-globe-airports', type: 'circle', source: 'profile-globe-airports',
+            paint: {
+                'circle-radius': 4.5,
+                'circle-color': getProfileMapPalette('globe').airport,
+                'circle-stroke-color': getProfileMapPalette('globe').border,
+                'circle-stroke-width': 1.4
+            }
+        });
+    }
+}
+
+function bindProfileGlobeInteractions() {
+    const globe = State.globeMap;
+    if (!globe || globe.__profileInteractionsBound) return;
+    const routeLayers = ['profile-globe-routes-completed', 'profile-globe-routes-pending'];
+    routeLayers.forEach(layerId => {
+        globe.on('click', layerId, event => {
+            const feature = event.features?.[0];
+            if (!feature) return;
+            const p = feature.properties || {};
+            new maplibregl.Popup()
+                .setLngLat(event.lngLat)
+                .setHTML(`${escapeHtml(p.flight_number)}<br>${escapeHtml(p.date)}<br>${escapeHtml(p.origin)} -&gt; ${escapeHtml(p.destination)}<br>${escapeHtml(p.status)}`)
+                .addTo(globe);
+        });
+        globe.on('mouseenter', layerId, () => { globe.getCanvas().style.cursor = 'pointer'; });
+        globe.on('mouseleave', layerId, () => { globe.getCanvas().style.cursor = ''; });
+    });
+    globe.on('click', 'profile-globe-airports', event => {
+        const feature = event.features?.[0];
+        if (!feature) return;
+        const p = feature.properties || {};
+        new maplibregl.Popup()
+            .setLngLat(feature.geometry.coordinates)
+            .setHTML(`<b>${escapeHtml(p.code)}</b><br>${escapeHtml(p.name)}`)
+            .addTo(globe);
+    });
+    globe.on('mouseenter', 'profile-globe-airports', () => { globe.getCanvas().style.cursor = 'pointer'; });
+    globe.on('mouseleave', 'profile-globe-airports', () => { globe.getCanvas().style.cursor = ''; });
+    globe.__profileInteractionsBound = true;
+}
+
+function initProfileGlobe() {
+    if (State.globeMap) return true;
+    if (typeof maplibregl === 'undefined') return false;
+    if (typeof maplibregl.supported === 'function' && !maplibregl.supported()) return false;
+    try {
+        State.globeMap = new maplibregl.Map({
+            container: 'flight-globe',
+            center: [8, 22],
+            zoom: 1.25,
+            minZoom: 0,
+            maxZoom: 8,
+            attributionControl: true,
+            style: {
+                version: 8,
+                projection: { type: 'globe' },
+                sources: {
+                    'globe-basemap': {
+                        type: 'raster',
+                        tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
+                        tileSize: 256,
+                        attribution: '© OpenStreetMap contributors'
+                    }
+                },
+                layers: [
+                    { id: 'globe-ocean', type: 'background', paint: { 'background-color': '#a9cfde' } },
+                    { id: 'globe-basemap', type: 'raster', source: 'globe-basemap', paint: { 'raster-opacity': 0.94, 'raster-saturation': -0.34, 'raster-brightness-min': 0.14, 'raster-brightness-max': 0.94 } }
+                ],
+                sky: {
+                    'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 5, 1, 7, 0]
+                }
+            }
+        });
+        State.globeMap.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-left');
+        State.globeMap.on('load', () => {
+            State.globeMapLoaded = true;
+            ensureProfileGlobeLayers();
+            bindProfileGlobeInteractions();
+            refreshProfileGlobeLayers({ resetCamera: true });
+        });
+        State.globeMap.on('error', event => console.warn('Globe map error:', event?.error || event));
+        return true;
+    } catch (error) {
+        console.warn('Unable to initialize globe mode:', error);
+        State.globeMap = null;
+        return false;
+    }
+}
+
 function setMapLayer(type) {
     if (!State.map) return;
-    State.profileMapType = type === 'satellite' ? 'satellite' : 'map';
+    let selectedType = ['map', 'satellite', 'globe'].includes(type) ? type : 'map';
+    State.profileMapType = selectedType;
+    showProfileMapRenderer(selectedType);
+    if (selectedType === 'globe' && !initProfileGlobe()) {
+        selectedType = 'map';
+        State.profileMapType = 'map';
+        showProfileMapRenderer('map');
+        if (typeof showToast === 'function') showToast('Globe mode is unavailable on this device.');
+    }
     document.querySelectorAll('[data-map-layer]').forEach(button => {
         const selected = button.dataset.mapLayer === State.profileMapType;
         button.classList.toggle('active', selected);
         button.setAttribute('aria-pressed', String(selected));
     });
+    updateProfileMapLegend();
+    if (State.profileMapType === 'globe') {
+        requestAnimationFrame(() => {
+            State.globeMap?.resize();
+            refreshProfileGlobeLayers({ resetCamera: true });
+        });
+        return;
+    }
     if (State.profileBaseLayer) State.map.removeLayer(State.profileBaseLayer);
-    if (type === 'satellite') {
+    if (selectedType === 'satellite') {
         State.profileBaseLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
             attribution: 'Tiles &copy; Esri'
         }).addTo(State.map);
@@ -1555,15 +1721,7 @@ function setMapLayer(type) {
             attribution: '© OpenStreetMap contributors'
         }).addTo(State.map);
     }
-    const palette = getProfileMapPalette();
-    const legend = document.querySelector('.route-status-legend');
-    if (legend) {
-        legend.querySelector('.route-status-completed').style.borderColor = palette.completed;
-        legend.querySelector('.route-status-pending').style.borderColor = palette.pending;
-        const airport = legend.querySelector('.route-status-airport');
-        airport.style.backgroundColor = palette.airport;
-        airport.style.boxShadow = `0 0 0 1px ${palette.border}`;
-    }
+    requestAnimationFrame(() => State.map.invalidateSize({ pan: false }));
     refreshProfileMapLayers();
 }
 
@@ -4317,11 +4475,13 @@ function renderProfileMap(flights, selectedYear) {
     State.profileMapFlights = flights;
     State.profileMapSelectedYear = selectedYear;
     bindProfileMapMoveHandler();
-    State.map.invalidateSize({ pan: false });
+    if (State.profileMapType === 'globe') State.globeMap?.resize();
+    else State.map.invalidateSize({ pan: false });
     refreshProfileMapLayers({ fitBounds: true });
     requestAnimationFrame(() => {
         if (document.getElementById('flight-map')?.clientWidth) {
-            State.map.invalidateSize({ pan: false });
+            if (State.profileMapType === 'globe') State.globeMap?.resize();
+            else State.map.invalidateSize({ pan: false });
             refreshProfileMapLayers({ fitBounds: true });
         }
     });
@@ -4358,8 +4518,67 @@ function isProfileFlightCompleted(flight, now = new Date()) {
     return /^\d{4}-\d{2}-\d{2}$/.test(flight.date || '') && flight.date < localNow.slice(0, 10);
 }
 
+function refreshProfileGlobeLayers({ resetCamera = false } = {}) {
+    const globe = State.globeMap;
+    if (!globe || !State.globeMapLoaded || !State.profileMapFlights) return;
+    ensureProfileGlobeLayers();
+
+    const selectedYear = State.profileMapSelectedYear;
+    const flights = selectedYear === 'all'
+        ? State.profileMapFlights
+        : State.profileMapFlights.filter(f => f.date && f.date.startsWith(selectedYear));
+    const routeFeatures = [];
+    const airports = new Map();
+    const now = new Date();
+
+    flights.slice().sort((a, b) => Number(isProfileFlightCompleted(b, now)) - Number(isProfileFlightCompleted(a, now))).forEach(flight => {
+        if (!flight.origin || !flight.dest) return;
+        const lat1 = Number(flight.origin.lat), lon1 = Number(flight.origin.lon);
+        const lat2 = Number(flight.dest.lat), lon2 = Number(flight.dest.lon);
+        if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) return;
+
+        const completed = isProfileFlightCompleted(flight, now);
+        const reverseDash = !completed && (lon1 > lon2 || (lon1 === lon2 && lat1 > lat2));
+        const path = reverseDash
+            ? getGeodesicPath(lat2, lon2, lat1, lon1)
+            : getGeodesicPath(lat1, lon1, lat2, lon2);
+        routeFeatures.push({
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: path.map(([lat, lon]) => [lon, lat]) },
+            properties: {
+                flight_id: flight.id,
+                flight_number: flight.flight_number || 'Unknown flight',
+                date: flight.date || 'Unknown date',
+                origin: flight.origin.code || '—',
+                destination: flight.dest.code || '—',
+                completed,
+                status: completed ? 'Completed' : 'Upcoming / ongoing'
+            }
+        });
+        airports.set(flight.origin.code, { code: flight.origin.code, name: flight.origin.name, lon: lon1, lat: lat1 });
+        airports.set(flight.dest.code, { code: flight.dest.code, name: flight.dest.name, lon: lon2, lat: lat2 });
+    });
+
+    const airportFeatures = [...airports.values()].map(airport => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [airport.lon, airport.lat] },
+        properties: { code: airport.code || '—', name: airport.name || 'Unknown airport' }
+    }));
+    globe.getSource('profile-globe-routes')?.setData({ type: 'FeatureCollection', features: routeFeatures });
+    globe.getSource('profile-globe-airports')?.setData({ type: 'FeatureCollection', features: airportFeatures });
+
+    if (resetCamera) {
+        globe.jumpTo({ center: [8, 22], zoom: window.innerWidth < 640 ? 0.9 : 1.25, bearing: 0, pitch: 0 });
+    }
+}
+
 function refreshProfileMapLayers({ fitBounds = false } = {}) {
-    if (!State.map || !State.profileMapFlights) return;
+    if (!State.profileMapFlights) return;
+    if (State.profileMapType === 'globe') {
+        refreshProfileGlobeLayers({ resetCamera: fitBounds });
+        return;
+    }
+    if (!State.map) return;
 
     if (State.focusedFlightId) {
         renderFocusedFlightTrackOnMap(State.focusedFlightId);

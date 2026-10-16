@@ -30,10 +30,19 @@ assert.match(source, /dashArray: completed \? null : '8 6'/);
 console.log('Profile route status: 17 checks passed');
 
 const removed = [];
-const map = { removeLayer: layer => removed.push(layer) };
+const map = { removeLayer: layer => removed.push(layer), invalidateSize: () => {} };
+const mapElements = {
+    'flight-map': { hidden: false },
+    'flight-globe': { hidden: true }
+};
 const layerContext = vm.createContext({
     State: { map },
-    document: { querySelector: () => null },
+    document: {
+        querySelector: () => null,
+        querySelectorAll: () => [],
+        getElementById: id => mapElements[id] || null
+    },
+    requestAnimationFrame: callback => callback(),
     refreshProfileMapLayers: () => {},
     L: { tileLayer: (url, options) => ({ url, options, addTo() { return this; } }) }
 });
@@ -63,6 +72,9 @@ assert.equal(layerContext.getProfileMapPalette().border, '#17212b');
 layerContext.setMapLayer('map');
 assert.equal(layerContext.getProfileMapPalette().airport, '#345d80');
 assert.equal(layerContext.getProfileMapPalette().pending, '#e07a5f');
+assert.ok(source.includes("data-map-layer=\"globe\"") || fs.readFileSync(path.join(__dirname, '../templates/index.html'), 'utf8').includes('data-map-layer="globe"'));
+assert.ok(source.includes("projection: { type: 'globe' }"));
+assert.ok(source.includes('function refreshProfileGlobeLayers('));
 console.log('Adaptive satellite colors: 8 checks passed');
 
 // Exercise the actual redraw path, including removal of satellite outlines.
