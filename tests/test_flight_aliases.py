@@ -7,7 +7,12 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from app import _normalize_flight_aliases, _normalize_internal_flight_payload
+from app import (
+    _aeroapi_operating_identity,
+    _normalize_flight_aliases,
+    _normalize_internal_flight_payload,
+    sync_aeroapi_operating_identity,
+)
 from scripts.migrate_flight_aliases import classify_number_note
 
 
@@ -29,7 +34,7 @@ class FlightAliasesTest(unittest.TestCase):
             }
         ], _normalize_flight_aliases([" vs 4116 ", "VS4116", "DL2272"], "DL2272", "everinbox"))
 
-    def test_internal_payload_prefers_operating_number_and_keeps_marketing_number(self):
+    def test_internal_payload_keeps_only_the_received_number(self):
         payload, error = _normalize_internal_flight_payload({
             "flightNumber": "VS4116",
             "operatingFlightNumber": "DL2272",
@@ -37,9 +42,63 @@ class FlightAliasesTest(unittest.TestCase):
             "date": "2026-06-02",
         })
         self.assertIsNone(error)
-        self.assertEqual("DL2272", payload["flight_number"])
-        self.assertEqual(["AF5810", "VS4116"], [alias["flight_number"] for alias in payload["aliases"]])
-        self.assertTrue(payload["aliases"][1]["is_booked_number"])
+        self.assertEqual("VS4116", payload["flight_number"])
+        self.assertEqual([], payload["aliases"])
+
+    def test_aeroapi_schedule_actual_ident_is_the_operating_number(self):
+        self.assertEqual(
+            ("DL2272", True),
+            _aeroapi_operating_identity({
+                "ident_iata": "VS4116",
+                "actual_ident_icao": "DAL2272",
+            }),
+        )
+
+    def test_aeroapi_flight_operator_is_used_when_received_number_is_linked(self):
+        class Cursor:
+            def fetchone(self):
+                return None
+
+        class Connection:
+            def __init__(self):
+                self.queries = []
+
+            def execute(self, query, args=()):
+                self.queries.append((query, args))
+                return Cursor()
+
+        conn = Connection()
+        api_flight = {
+            "operator_icao": "DAL",
+            "operator_iata": "DL",
+            "flight_number": "2272",
+            "ident_iata": "DL2272",
+            "codeshares_iata": ["VS4116"],
+        }
+        from unittest.mock import patch
+        with patch("app.get_or_create_airline", return_value=31):
+            result = sync_aeroapi_operating_identity(conn, 7, 42, "VS4116", api_flight)
+
+        self.assertEqual("DL2272", result["flight_number"])
+        self.assertTrue(any(
+            query.startswith("UPDATE flights SET flight_number") and args == ("DL2272", 31, 42, 7)
+            for query, args in conn.queries
+        ))
+        self.assertTrue(any(
+            "INSERT INTO flight_aliases" in query and args[2] == "VS4116"
+            for query, args in conn.queries
+        ))
+
+    def test_unlinked_aeroapi_ident_does_not_replace_received_number(self):
+        class Connection:
+            def execute(self, *_args, **_kwargs):
+                raise AssertionError("database must not be changed")
+
+        result = sync_aeroapi_operating_identity(
+            Connection(), 7, 42, "VS4116",
+            {"operator_iata": "DL", "flight_number": "2272", "codeshares_iata": []},
+        )
+        self.assertIsNone(result)
 
     def test_migration_distinguishes_icao_alias_from_codeshare(self):
         self.assertEqual(

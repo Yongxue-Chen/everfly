@@ -540,8 +540,7 @@ def _flight_aliases_for_user(conn, user_id, flight_id=None):
 
 def _normalize_internal_flight_payload(data):
     supplied_flight_number = data.get('flightNumber') or data.get('flight_number')
-    operating_flight_number = data.get('operatingFlightNumber') or data.get('operating_flight_number')
-    flight_number = _normalize_internal_flight_number(operating_flight_number or supplied_flight_number)
+    flight_number = _normalize_internal_flight_number(supplied_flight_number)
     date_value = str(data.get('date') or '').strip()
     if not flight_number:
         return None, 'flightNumber is required'
@@ -553,21 +552,10 @@ def _normalize_internal_flight_payload(data):
         datetime.strptime(date_value, '%Y-%m-%d')
     except ValueError:
         return None, 'date must be a valid YYYY-MM-DD date'
-    alias_input = data.get('codeshares')
-    if alias_input is None:
-        alias_input = data.get('codeshareFlightNumbers') or data.get('codeshare_flight_numbers')
-    if operating_flight_number and supplied_flight_number:
-        supplied_normalized = _normalize_internal_flight_number(supplied_flight_number)
-        if supplied_normalized and supplied_normalized != flight_number:
-            existing_aliases = _normalize_flight_aliases(alias_input, flight_number, default_source='everinbox')
-            alias_input = existing_aliases + [{
-                'flightNumber': supplied_normalized,
-                'type': 'codeshare',
-                'isBookedNumber': True,
-                'source': 'everinbox',
-            }]
-    aliases = _normalize_flight_aliases(alias_input, flight_number, default_source='everinbox')
-    return {'flight_number': flight_number, 'date': date_value, 'aliases': aliases}, None
+    # everInbox is deliberately a transport boundary: it sends only what appeared
+    # in the message.  Operating-carrier and codeshare decisions belong to everfly
+    # and are made from AeroAPI data after the minimal record has been created.
+    return {'flight_number': flight_number, 'date': date_value, 'aliases': []}, None
 
 def _configured_internal_username():
     return os.environ.get('EVERFLY_INTERNAL_USERNAME', '').strip()
@@ -2444,6 +2432,74 @@ def _preferred_airline_codes(flight_number, remote_operator=None):
     operator = re.sub(r'\s+', '', str(remote_operator or '')).upper() or None
     return operator, AIRLINES_ICAO_TO_IATA.get(operator) if operator else None
 
+
+def _aeroapi_operating_identity(api_flight):
+    """Return AeroAPI's operating flight number and whether it is explicit.
+
+    Schedule responses use ``actual_ident*`` for a codeshare's operating flight.
+    Flight responses expose the operating carrier/number directly and list the
+    marketing numbers in ``codeshares*``.
+    """
+    for key in ('actual_ident_iata', 'actual_ident', 'actual_ident_icao'):
+        number = _normalize_internal_flight_number(api_flight.get(key))
+        if number:
+            return number, True
+
+    flight_number = re.sub(r'\s+', '', str(api_flight.get('flight_number') or '')).upper()
+    if flight_number:
+        for key in ('operator_iata', 'operator_icao', 'operator'):
+            operator = re.sub(r'\s+', '', str(api_flight.get(key) or '')).upper()
+            number = _normalize_internal_flight_number(f'{operator}{flight_number}') if operator else ''
+            if number:
+                return number, False
+
+    for key in ('ident_iata', 'ident_icao', 'ident'):
+        number = _normalize_internal_flight_number(api_flight.get(key))
+        if number:
+            return number, False
+    return None, False
+
+
+def sync_aeroapi_operating_identity(conn, uid, flight_id, current_flight_number, api_flight):
+    """Promote a confirmed operating number and retain the received number as an alias."""
+    current = _normalize_internal_flight_number(current_flight_number)
+    operating, explicit_actual = _aeroapi_operating_identity(api_flight)
+    if not current or not operating or current == operating:
+        return None
+
+    raw_codeshares = []
+    for key in ('codeshares_iata', 'codeshares'):
+        value = api_flight.get(key)
+        raw_codeshares.extend(value if isinstance(value, list) else ([value] if value else []))
+    codeshares = _normalize_flight_aliases(raw_codeshares, operating, default_source='aeroapi')
+    codeshare_numbers = {alias['flight_number'] for alias in codeshares}
+    # A /flights result represents the operator, but only rewrite the user's
+    # received number when AeroAPI explicitly links it as a codeshare.  The
+    # schedules endpoint's actual_ident is already explicit evidence.
+    if not explicit_actual and current not in codeshare_numbers:
+        return None
+
+    airline_icao, airline_iata = _airline_codes_from_flight_number(operating)
+    airline_id = get_or_create_airline(airline_icao, airline_iata, conn)
+    conn.execute(
+        "UPDATE flights SET flight_number = ?, airline_id = ? WHERE id = ? AND user_id = ?",
+        (operating, airline_id, flight_id, uid),
+    )
+    alias_airline_id = _resolve_alias_airline_id(conn, uid, current)
+    conn.execute(
+        """INSERT INTO flight_aliases
+           (user_id, flight_id, flight_number, alias_type, airline_id, is_booked_number, source)
+           VALUES (?, ?, ?, 'codeshare', ?, 1, 'aeroapi')
+           ON DUPLICATE KEY UPDATE alias_type = 'codeshare', airline_id = VALUES(airline_id),
+               is_booked_number = 1, source = 'aeroapi'""",
+        (uid, flight_id, current, alias_airline_id),
+    )
+    conn.execute(
+        "DELETE FROM flight_aliases WHERE flight_id = ? AND user_id = ? AND flight_number = ?",
+        (flight_id, uid, operating),
+    )
+    return {'flight_number': operating, 'booked_flight_number': current, 'airline_id': airline_id}
+
 # --- Calculation API ---
 @app.route('/api/calculate_duration', methods=['POST'])
 @login_required
@@ -3448,16 +3504,25 @@ def _run_ident_update(flight, f_num_clean, f_date, origin_tz_name, conn, uid, fl
     update_fields.extend(related_fields)
     update_values.extend(related_values)
 
-    if not update_fields:
+    if update_fields:
+        update_values.append(flight_id)
+        sql = f"UPDATE flights SET {', '.join(update_fields)} WHERE id = ? AND user_id = ?"
+        update_values.append(uid)
+        conn.execute(sql, update_values)
+    identity_update = sync_aeroapi_operating_identity(
+        conn, uid, flight_id, flight[0], best_match
+    )
+    if not update_fields and not identity_update:
         return {'message': 'No new data or data already exists'}
-
-    update_values.append(flight_id)
-    sql = f"UPDATE flights SET {', '.join(update_fields)} WHERE id = ? AND user_id = ?"
-    update_values.append(uid)
-    conn.execute(sql, update_values)
     conn.commit()
 
-    return {'success': True, 'fields_updated': len(update_fields), 'source': 'ident', 'debug_match': best_match.get('ident')}
+    return {
+        'success': True,
+        'fields_updated': len(update_fields) + (2 if identity_update else 0),
+        'source': 'ident',
+        'debug_match': best_match.get('ident'),
+        'identity_update': identity_update,
+    }
 
 def _lookup_airport_readonly(icao, iata, conn, uid):
     """
@@ -3676,20 +3741,24 @@ def _run_schedule_update(flight, f_num_clean, f_date, conn, uid, flight_id, forc
         update_fields.append("sta = ?")
         update_values.append(api_sta)
 
-    if not update_fields:
+    if update_fields:
+        update_values.append(flight_id)
+        sql = f"UPDATE flights SET {', '.join(update_fields)} WHERE id = ? AND user_id = ?"
+        update_values.append(uid)
+        conn.execute(sql, update_values)
+    identity_update = sync_aeroapi_operating_identity(
+        conn, uid, flight_id, flight[0], sched
+    )
+    if not update_fields and not identity_update:
         return {'message': 'No new data or data already exists'}, sched
-
-    update_values.append(flight_id)
-    sql = f"UPDATE flights SET {', '.join(update_fields)} WHERE id = ? AND user_id = ?"
-    update_values.append(uid)
-    conn.execute(sql, update_values)
     conn.commit()
 
     return {
         'success': True,
-        'fields_updated': len(update_fields),
+        'fields_updated': len(update_fields) + (2 if identity_update else 0),
         'source': 'schedules',
         'debug_match': sched.get('ident'),
+        'identity_update': identity_update,
     }, sched
 
 def update_single_flight_from_aeroapi(flight_id, force=False):
