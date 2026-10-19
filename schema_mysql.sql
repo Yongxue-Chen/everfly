@@ -166,3 +166,12 @@ CREATE TABLE IF NOT EXISTS flight_aeroapi_jobs (
     CONSTRAINT fk_aeroapi_jobs_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE RESTRICT,
     CONSTRAINT fk_aeroapi_jobs_flight_tenant FOREIGN KEY (flight_id, user_id) REFERENCES flights (id, user_id) ON DELETE RESTRICT
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS internal_flight_requests (
+ request_key VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+ username VARCHAR(191) NOT NULL,
+ payload_hash CHAR(64) NOT NULL,
+ flight_id BIGINT NOT NULL,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+ PRIMARY KEY (request_key, username)
+) ENGINE=InnoDB;
