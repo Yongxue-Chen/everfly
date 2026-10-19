@@ -15,6 +15,7 @@ import socket
 import ipaddress
 import uuid
 import hmac
+import hashlib
 from urllib.parse import urlparse
 import werkzeug.security
 from flask_limiter import Limiter
@@ -614,6 +615,11 @@ def create_internal_flight_record(conn, payload, username):
         schedule_flight_aeroapi_jobs(conn, user_id, flight_id)
     except Exception as e:
         print(f"schedule_flight_aeroapi_jobs error for internal flight {flight_id}: {e}")
+    if payload.get('_request_key'):
+        conn.execute(
+            "INSERT INTO internal_flight_requests (request_key, username, payload_hash, flight_id) VALUES (?, ?, ?, ?)",
+            (payload['_request_key'], username, payload['_payload_hash'], flight_id),
+        )
     conn.commit()
 
     # This request isn't a logged-in session, so g.user isn't populated the normal way --
@@ -652,8 +658,30 @@ def create_internal_flight():
     username = _configured_internal_username()
     if not username:
         return jsonify({'ok': False, 'error': 'EVERFLY_INTERNAL_USERNAME is required'}), 500
+    request_key = request.headers.get('Idempotency-Key', '').strip()
+    if request_key and not re.fullmatch(r'[A-Za-z0-9:_-]{1,128}', request_key):
+        return jsonify({'ok': False, 'error': 'invalid Idempotency-Key'}), 400
     conn = database.get_db()
+    lock_name = None
     try:
+        if request_key:
+            lock_name = hashlib.sha256((username + ':' + request_key).encode()).hexdigest()
+            acquired = conn.execute("SELECT GET_LOCK(?, 10)", (lock_name,)).fetchone()
+            if not acquired or acquired[0] != 1:
+                lock_name = None
+                return jsonify({'ok': False, 'error': 'request is still processing'}), 409
+            payload_hash = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+            # Locking read sees a concurrent request's committed record under REPEATABLE READ.
+            existing = conn.execute(
+                "SELECT payload_hash, flight_id FROM internal_flight_requests WHERE request_key = ? AND username = ? FOR UPDATE",
+                (request_key, username),
+            ).fetchone()
+            if existing:
+                if existing[0] != payload_hash:
+                    return jsonify({'ok': False, 'error': 'idempotency key reused with different payload'}), 409
+                return jsonify({'ok': True, 'flight': {'id': existing[1]}, 'replayed': True}), 200
+            payload['_request_key'] = request_key
+            payload['_payload_hash'] = payload_hash
         flight = create_internal_flight_record(conn, payload, username)
         return jsonify({'ok': True, 'flight': flight}), 201
     except LookupError as e:
@@ -662,6 +690,11 @@ def create_internal_flight():
     except Exception as e:
         conn.rollback()
         return safe_jsonify_error(e)
+    finally:
+        # Roll back read-only/error transactions before releasing the advisory lock.
+        conn.rollback()
+        if lock_name:
+            conn.execute("SELECT RELEASE_LOCK(?)", (lock_name,))
 
 # --- Helper Functions ---
 def query_db(query, args=(), one=False):

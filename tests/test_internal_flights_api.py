@@ -41,9 +41,17 @@ class FakeConnection:
         self.queries = []
         self.committed = False
         self.rolled_back = False
+        self.events = {}
 
     def execute(self, query, args=()):
         self.queries.append((query, args))
+        if 'GET_LOCK' in query:
+            return FakeCursor((1,))
+        if 'FROM internal_flight_requests' in query:
+            return FakeCursor(self.events.get(tuple(args)))
+        if query.startswith('INSERT INTO internal_flight_requests'):
+            self.events[(args[0],args[1])] = (args[2],args[3])
+            return FakeCursor()
         if "FROM users" in query:
             return FakeCursor((7,))
         if query.startswith("INSERT INTO flights"):
@@ -163,6 +171,20 @@ class InternalFlightsApiTest(unittest.TestCase):
             ("INSERT INTO flights (user_id, date, flight_number) VALUES (?, ?, ?)", (7, "2099-07-05", "U22106")),
             self.fake_conn.queries[1],
         )
+
+    def test_retries_return_original_flight_without_repeating_side_effects(self):
+        headers = {'Authorization':'Bearer shared-secret', 'Idempotency-Key':'event-1'}
+        payload = {'flightNumber':'CX251','date':'2099-07-05'}
+        first = self.client.post('/api/internal/flights',json=payload,headers=headers)
+        second = self.client.post('/api/internal/flights',json=payload,headers=headers)
+        self.assertEqual(201,first.status_code)
+        self.assertEqual(200,second.status_code)
+        self.assertEqual(42,second.get_json()['flight']['id'])
+        self.assertEqual(1,sum(q.startswith('INSERT INTO flights') for q,_ in self.fake_conn.queries))
+        self.assertEqual(1,len(self.auto_update_calls))
+        changed = self.client.post('/api/internal/flights',json={**payload,'date':'2099-07-06'},headers=headers)
+        self.assertEqual(409,changed.status_code)
+        self.assertEqual(3,sum('RELEASE_LOCK' in q for q,_ in self.fake_conn.queries))
 
     def test_rejects_missing_required_fields(self):
         response = self.client.post(
