@@ -18,7 +18,7 @@ from app import app, limiter  # noqa: E402
 
 SQLITE_SCHEMA = """
 CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT, api_key_encrypted TEXT);
-CREATE TABLE airports (id INTEGER PRIMARY KEY, user_id INT, name TEXT, iata_code TEXT, timezone TEXT);
+CREATE TABLE airports (id INTEGER PRIMARY KEY, user_id INT, name TEXT, iata_code TEXT, timezone TEXT, terminals TEXT);
 CREATE TABLE airlines (id INTEGER PRIMARY KEY, user_id INT, name TEXT, iata_code TEXT);
 CREATE TABLE aircraft_models (id INTEGER PRIMARY KEY, user_id INT, manufacturer TEXT, model TEXT);
 CREATE TABLE flights (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INT, date TEXT, flight_number TEXT,
@@ -37,7 +37,7 @@ CREATE TABLE flight_events (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INT, f
 CREATE TABLE cancelled_flights (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INT, flight_id INT, snapshot_json TEXT,
   reason TEXT DEFAULT '', source TEXT DEFAULT '', cancelled_at TEXT DEFAULT CURRENT_TIMESTAMP);
 INSERT INTO users (id, username) VALUES (7, 'traveller'), (8, 'someone-else');
-INSERT INTO airports VALUES (1, 7, 'Milan Malpensa', 'MXP', 'Europe/Rome'), (2, 7, 'Frankfurt', 'FRA', 'Europe/Berlin');
+INSERT INTO airports VALUES (1, 7, 'Milan Malpensa', 'MXP', 'Europe/Rome', 'T1'), (2, 7, 'Frankfurt', 'FRA', 'Europe/Berlin', NULL);
 INSERT INTO airlines VALUES (1, 7, 'Lufthansa', 'LH');
 INSERT INTO aircraft_models VALUES (1, 7, 'Airbus', 'A320neo');
 """
@@ -123,6 +123,22 @@ class FlightIntegrationModuleTest(unittest.TestCase):
         self.assertEqual((cancelled['status'], cancelled['flight_number'], cancelled['cancel_reason']), ('cancelled', 'LH247', 'airline cancelled'))
         self.assertEqual(fi.list_events(self.conn, 7)[-1]['type'], 'cancelled')
         self.assertIsNone(fi.archive_flight(self.conn, 7, fid), 'archiving twice is a no-op')
+
+    def test_normalize_terminal_accepts_booking_wording(self):
+        cases = {'Terminal 1': 'T1', 'T1': 'T1', '1': 'T1', 'Terminal T2B': 'T2B', 't 3': 'T3',
+                 'North Terminal': 'N', 'south': 'S', 'Main': 'Main', 'HIA': 'HIA', 'D': 'D',
+                 '': None, None: None, 'International Departures Hall': None}
+        for raw, expected in cases.items():
+            self.assertEqual(fi.normalize_terminal(raw), expected, raw)
+
+    def test_source_terminals_fill_only_empty_fields_and_extend_airports(self):
+        fid = add_flight(self.conn, dest_terminal='T2')
+        self.assertTrue(fi.apply_source_terminals(self.conn, 7, fid, 'T1', 'T1'))
+        self.assertEqual(self.conn.execute("SELECT origin_terminal, dest_terminal FROM flights WHERE id = ?", (fid,)).fetchone(), ('T1', 'T2'))
+        self.assertEqual(self.conn.execute("SELECT terminals FROM airports WHERE id = 1").fetchone()[0], 'T1')
+        self.assertEqual(self.conn.execute("SELECT terminals FROM airports WHERE id = 2").fetchone()[0], 'T1')
+        self.assertFalse(fi.apply_source_terminals(self.conn, 7, fid, 'T1', 'T1'), 'nothing left to fill')
+        self.assertFalse(fi.apply_source_terminals(self.conn, 8, fid, 'T9', None), 'other users cannot write')
 
     def test_migration_is_additive_and_matches_fresh_schema(self):
         with open(os.path.join(ROOT, 'migrations', '20261026_flight_integration.sql'), encoding='utf-8') as fh:
@@ -227,6 +243,18 @@ class InternalIntegrationApiTest(unittest.TestCase):
         changed = [e for e in self.client.get('/api/internal/flight-events', headers=self.auth).get_json()['events'] if e['type'] == 'changed']
         self.assertEqual(changed[0]['changes']['date'], ['2099-12-20', '2099-12-21'])
         self.assertEqual(self.client.patch('/api/internal/flights/999', json={'date': '2099-12-21'}, headers=self.auth).status_code, 404)
+
+    def test_create_and_patch_carry_booking_terminals(self):
+        fid = self.create(originTerminal='Terminal 1', destinationTerminal='North Terminal').get_json()['flight']['id']
+        row = lambda: self.db.execute("SELECT origin_terminal, dest_terminal FROM flights WHERE id = ?", (fid,)).fetchone()
+        self.assertEqual(row(), ('T1', 'N'))
+        self.db.execute("UPDATE flights SET dest_terminal = NULL WHERE id = ?", (fid,))
+        filled = self.client.patch(f'/api/internal/flights/{fid}', json={'destinationTerminal': 'T2'}, headers=self.auth).get_json()
+        self.assertTrue(filled['changed'])
+        self.assertEqual(row(), ('T1', 'T2'))
+        moved = self.client.patch(f'/api/internal/flights/{fid}', json={'date': '2099-12-22', 'originTerminal': 'T3'}, headers=self.auth).get_json()
+        self.assertTrue(moved['changed'])
+        self.assertEqual(row(), ('T3', None), 'terminals of the old flight are cleared')
 
     def test_cancel_archives_and_is_idempotent(self):
         fid = self.create().get_json()['flight']['id']

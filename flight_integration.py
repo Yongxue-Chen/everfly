@@ -15,6 +15,7 @@ caller. SQL is kept portable (no MySQL-only syntax) so the logic can be tested
 against SQLite.
 """
 import json
+import re
 
 # Fields compared between snapshots; a difference in any of them is an event.
 TRACKED_FIELDS = (
@@ -196,3 +197,72 @@ def list_events(conn, user_id, after=0, limit=100):
         events.append({'id': r[0], 'flight_id': r[1], 'type': r[2], 'changes': load(r[3]),
                        'flight': load(r[4]), 'created_at': _text(r[5])})
     return events
+
+
+# ---- terminals ----------------------------------------------------------------
+
+def normalize_terminal(value):
+    """Terminal as everfly stores it: 'T1', 'T2B', 'N'/'S' (north/south), 'Main', short codes.
+
+    Accepts what bookings say: 'Terminal 1', 'T1', '1', 'Terminal T2B', 'North Terminal'.
+    Anything else is dropped rather than guessed.
+    """
+    text = re.sub(r'\s+', ' ', str(value or '')).strip().upper()
+    text = re.sub(r'^TERMINAL\s*', '', text)
+    text = re.sub(r'\s*TERMINAL$', '', text).strip()
+    if not text:
+        return None
+    if text in ('N', 'NORTH'):
+        return 'N'
+    if text in ('S', 'SOUTH'):
+        return 'S'
+    if text == 'MAIN':
+        return 'Main'
+    match = re.fullmatch(r'T ?(\d{1,2}[A-Z]?)|(\d{1,2}[A-Z]?)', text)
+    if match:
+        return 'T' + (match.group(1) or match.group(2))
+    if re.fullmatch(r'[A-Z]{1,4}', text):
+        return text
+    return None
+
+
+def add_airport_terminal(conn, user_id, airport_id, terminal):
+    """Add a terminal to the airport's comma-separated list if it is not there yet."""
+    if not airport_id or not terminal:
+        return
+    row = conn.execute("SELECT terminals FROM airports WHERE id = ? AND user_id = ?", (airport_id, user_id)).fetchone()
+    if not row:
+        return
+    terminals = [t.strip() for t in (row[0] or '').split(',') if t.strip()]
+    if terminal not in terminals:
+        terminals.append(terminal)
+        terminals.sort()
+        conn.execute("UPDATE airports SET terminals = ? WHERE id = ? AND user_id = ?", (", ".join(terminals), airport_id, user_id))
+
+
+def apply_source_terminals(conn, user_id, flight_id, origin_terminal=None, dest_terminal=None):
+    """Fill empty flight terminals from a booking (AeroAPI fills the rest) and record them on the airports.
+
+    Returns True when the flight changed.
+    """
+    if not origin_terminal and not dest_terminal:
+        return False
+    row = conn.execute(
+        "SELECT origin_terminal, dest_terminal, origin_airport_id, dest_airport_id FROM flights WHERE id = ? AND user_id = ?",
+        (flight_id, user_id),
+    ).fetchone()
+    if not row:
+        return False
+    sets, values = [], []
+    if origin_terminal and not row[0]:
+        sets.append('origin_terminal = ?')
+        values.append(origin_terminal)
+    if dest_terminal and not row[1]:
+        sets.append('dest_terminal = ?')
+        values.append(dest_terminal)
+    if sets:
+        conn.execute(f"UPDATE flights SET {', '.join(sets)} WHERE id = ? AND user_id = ?", (*values, flight_id, user_id))
+    add_airport_terminal(conn, user_id, row[2], origin_terminal or row[0])
+    add_airport_terminal(conn, user_id, row[3], dest_terminal or row[1])
+    return bool(sets)
+

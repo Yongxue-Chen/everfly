@@ -651,6 +651,11 @@ def _normalize_internal_flight_payload(data):
     # in the message.  Operating-carrier and codeshare decisions belong to everfly
     # and are made from AeroAPI data after the minimal record has been created.
     payload = {'flight_number': flight_number, 'date': date_value, 'aliases': []}
+    # Terminals printed on the booking; anything unrecognisable is dropped.
+    for key, field in (('originTerminal', 'origin_terminal'), ('destinationTerminal', 'dest_terminal')):
+        terminal = flight_integration.normalize_terminal(data.get(key))
+        if terminal:
+            payload[field] = terminal
     source, error = _normalize_external_source(data.get('source'))
     if error:
         return None, error
@@ -735,6 +740,7 @@ def create_internal_flight_record(conn, payload, username):
 
     _run_as_user(user_id, lambda: _safely_auto_update_new_flight(flight_id))
     try:
+        flight_integration.apply_source_terminals(conn, user_id, flight_id, payload.get('origin_terminal'), payload.get('dest_terminal'))
         if flight_integration.record_change(conn, user_id, flight_id, created, 'updated'):
             conn.commit()
     except Exception as e:
@@ -875,18 +881,28 @@ def update_internal_flight(flight_id):
         payload, error = _normalize_internal_flight_payload({
             'flightNumber': data.get('flightNumber') or before['flight_number'],
             'date': data.get('date') or before['date'],
+            'originTerminal': data.get('originTerminal'),
+            'destinationTerminal': data.get('destinationTerminal'),
         })
         if error:
             return jsonify({'ok': False, 'error': error}), 400
         if payload['flight_number'] == before['flight_number'] and payload['date'] == before['date']:
+            # Same flight: only fill terminals the booking states and the flight lacks.
+            if flight_integration.apply_source_terminals(conn, user_id, flight_id, payload.get('origin_terminal'), payload.get('dest_terminal')):
+                flight_integration.record_change(conn, user_id, flight_id, before, 'updated')
+                conn.commit()
+                return jsonify({'ok': True, 'changed': True, 'flight': _internal_flight_view(conn, user_id, flight_id)})
+            conn.commit()
             return jsonify({'ok': True, 'changed': False, 'flight': _internal_flight_view(conn, user_id, flight_id)})
+        # Times and terminals belonged to the old flight.
         conn.execute(
             """UPDATE flights SET date = ?, flight_number = ?, std = NULL, sta = NULL, atd = NULL, ata = NULL,
                    dep_time_scheduled = NULL, arr_time_scheduled = NULL, dep_time_actual = NULL, arr_time_actual = NULL,
-                   duration_scheduled = NULL, duration_actual = NULL
+                   duration_scheduled = NULL, duration_actual = NULL, origin_terminal = NULL, dest_terminal = NULL
                WHERE id = ? AND user_id = ?""",
             (payload['date'], payload['flight_number'], flight_id, user_id),
         )
+        flight_integration.apply_source_terminals(conn, user_id, flight_id, payload.get('origin_terminal'), payload.get('dest_terminal'))
         conn.execute("DELETE FROM flight_aeroapi_jobs WHERE flight_id = ? AND user_id = ?", (flight_id, user_id))
         schedule_flight_aeroapi_jobs(conn, user_id, flight_id)
         flight_integration.record_change(conn, user_id, flight_id, before, 'changed')
@@ -4268,18 +4284,7 @@ def _aeroapi_remote_values(best_match):
         'dest_terminal': _format_aeroapi_terminal(best_match.get('terminal_destination')),
     }
 
-def _ensure_terminal_in_db(conn, uid, airport_id, term):
-    if not airport_id or not term:
-        return
-    cur = conn.execute("SELECT terminals FROM airports WHERE id = ? AND user_id = ?", (airport_id, uid))
-    row = cur.fetchone()
-    if not row:
-        return
-    terms_list = [t.strip() for t in (row[0] or '').split(',') if t.strip()]
-    if term not in terms_list:
-        terms_list.append(term)
-        terms_list.sort()
-        conn.execute("UPDATE airports SET terminals = ? WHERE id = ? AND user_id = ?", (", ".join(terms_list), airport_id, uid))
+_ensure_terminal_in_db = flight_integration.add_airport_terminal
 
 def collect_aeroapi_related_updates(best_match, flight, conn, uid):
     update_fields = []
@@ -4297,6 +4302,10 @@ def collect_aeroapi_related_updates(best_match, flight, conn, uid):
                 update_fields.append("origin_airport_id = ?")
                 update_values.append(aid)
             _ensure_terminal_in_db(conn, uid, flight[2] if flight[2] else aid, api_origin_term)
+            # A terminal already on the flight (e.g. from the booking) belongs to this airport too.
+            stored = flight[14] if len(flight) > 14 else None
+            if stored and stored != api_origin_term:
+                _ensure_terminal_in_db(conn, uid, flight[2] if flight[2] else aid, stored)
 
     if api_dest_code:
         aid = get_or_create_airport(api_dest_code, None, conn)
@@ -4305,6 +4314,10 @@ def collect_aeroapi_related_updates(best_match, flight, conn, uid):
                 update_fields.append("dest_airport_id = ?")
                 update_values.append(aid)
             _ensure_terminal_in_db(conn, uid, flight[3] if flight[3] else aid, api_dest_term)
+            # A terminal already on the flight (e.g. from the booking) belongs to this airport too.
+            stored = flight[15] if len(flight) > 15 else None
+            if stored and stored != api_dest_term:
+                _ensure_terminal_in_db(conn, uid, flight[3] if flight[3] else aid, stored)
 
     api_airline = best_match.get('operator')
     if not flight[9]:
