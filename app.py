@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 from cryptography.fernet import Fernet
 import database
+import flight_integration
 import requests
 import dateutil.parser
 import airportsdata
@@ -242,6 +243,26 @@ def migrate_flight_aeroapi_jobs():
     except Exception as e:
         print(f"migrate_flight_aeroapi_jobs error: {e}")
 
+def migrate_flight_integration_tables():
+    """Create the integration tables (refs, events, cancelled archive) if missing.
+
+    The DDL lives in one place, migrations/20261026_flight_integration.sql, which is
+    also what an operator applies by hand; every statement is CREATE TABLE IF NOT EXISTS.
+    """
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'migrations', '20261026_flight_integration.sql')
+    try:
+        with open(path, encoding='utf-8') as fh:
+            sql = '\n'.join(line for line in fh.read().splitlines() if not line.strip().startswith('--'))
+        raw_conn = database._raw_connect()
+        cur = raw_conn.cursor()
+        for statement in (part.strip() for part in sql.split(';')):
+            if statement:
+                cur.execute(statement)
+        raw_conn.commit()
+        raw_conn.close()
+    except Exception as e:
+        print(f"migrate_flight_integration_tables error: {e}")
+
 # --- Migrate users DB at startup ---
 def migrate_flights_track_data():
     try:
@@ -266,6 +287,7 @@ with app.app_context():
     migrate_airline_logo_metadata()
     migrate_flight_aeroapi_jobs()
     migrate_flights_track_data()
+    migrate_flight_integration_tables()
 
 # --- Auth Middleware ---
 @app.before_request
@@ -594,10 +616,61 @@ def _normalize_internal_flight_payload(data):
     # everInbox is deliberately a transport boundary: it sends only what appeared
     # in the message.  Operating-carrier and codeshare decisions belong to everfly
     # and are made from AeroAPI data after the minimal record has been created.
-    return {'flight_number': flight_number, 'date': date_value, 'aliases': []}, None
+    payload = {'flight_number': flight_number, 'date': date_value, 'aliases': []}
+    source, error = _normalize_external_source(data.get('source'))
+    if error:
+        return None, error
+    if source:
+        payload['source'] = source
+    return payload, None
+
+def _normalize_external_source(value):
+    """Optional {service, id} naming the record in another service a flight came from."""
+    if value in (None, '', {}):
+        return None, None
+    if not isinstance(value, dict):
+        return None, 'source must be an object with service and id'
+    service = str(value.get('service') or '').strip().lower()
+    external_id = str(value.get('id') or '').strip()
+    if not re.fullmatch(r'[a-z0-9_-]{1,40}', service):
+        return None, 'source.service must be 1-40 characters of a-z, 0-9, _ or -'
+    if not external_id or len(external_id) > 160:
+        return None, 'source.id must be 1-160 characters'
+    return {'service': service, 'id': external_id}, None
 
 def _configured_internal_username():
     return os.environ.get('EVERFLY_INTERNAL_USERNAME', '').strip()
+
+def _run_as_user(user_id, fn):
+    """Run fn with g.user set to user_id.
+
+    Internal requests aren't logged-in sessions, so g.user isn't populated the normal
+    way -- update_single_flight_from_aeroapi() needs it for the API key. Best effort:
+    errors are logged, never raised.
+    """
+    previous_user = getattr(g, 'user', None)
+    try:
+        users_conn = database.get_users_db()
+        try:
+            g.user = users_conn.execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
+        finally:
+            users_conn.close()
+        if g.user:
+            return fn()
+    except Exception as e:
+        print(f"internal aeroapi update error for user {user_id}: {e}")
+    finally:
+        g.user = previous_user
+    return None
+
+def _internal_user_id(conn):
+    username = _configured_internal_username()
+    if not username:
+        return None
+    row = conn.execute("SELECT id FROM users WHERE username = ? LIMIT 1", (username,)).fetchone()
+    if not row:
+        return None
+    return row['id'] if isinstance(row, dict) else row[0]
 
 def create_internal_flight_record(conn, payload, username):
     cur = conn.execute("SELECT id FROM users WHERE username = ? LIMIT 1", (username,))
@@ -620,23 +693,19 @@ def create_internal_flight_record(conn, payload, username):
             "INSERT INTO internal_flight_requests (request_key, username, payload_hash, flight_id) VALUES (?, ?, ?, ?)",
             (payload['_request_key'], username, payload['_payload_hash'], flight_id),
         )
+    if payload.get('source'):
+        flight_integration.add_external_ref(conn, user_id, flight_id, payload['source']['service'], payload['source']['id'])
+    created = flight_integration.flight_snapshot(conn, user_id, flight_id)
+    flight_integration.record_event(conn, user_id, flight_id, 'created', {}, created)
     conn.commit()
 
-    # This request isn't a logged-in session, so g.user isn't populated the normal way --
-    # update_single_flight_from_aeroapi() needs it for the API key. Borrow it briefly.
-    previous_user = getattr(g, 'user', None)
+    _run_as_user(user_id, lambda: _safely_auto_update_new_flight(flight_id))
     try:
-        users_conn = database.get_users_db()
-        try:
-            g.user = users_conn.execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
-        finally:
-            users_conn.close()
-        if g.user:
-            _safely_auto_update_new_flight(flight_id)
+        if flight_integration.record_change(conn, user_id, flight_id, created, 'updated'):
+            conn.commit()
     except Exception as e:
-        print(f"auto aeroapi update error for internal flight {flight_id}: {e}")
-    finally:
-        g.user = previous_user
+        print(f"flight event error for internal flight {flight_id}: {e}")
+        conn.rollback()
 
     return {
         'id': flight_id,
@@ -682,6 +751,13 @@ def create_internal_flight():
                 return jsonify({'ok': True, 'flight': {'id': existing[1]}, 'replayed': True}), 200
             payload['_request_key'] = request_key
             payload['_payload_hash'] = payload_hash
+        if payload.get('source'):
+            # One flight per source record: a retry without an idempotency key, or a
+            # resend after a restart, returns the flight created the first time.
+            user_id = _internal_user_id(conn)
+            existing_id = user_id and flight_integration.find_ref(conn, user_id, payload['source']['service'], payload['source']['id'])
+            if existing_id:
+                return jsonify({'ok': True, 'flight': {'id': existing_id}, 'existing': True}), 200
         flight = create_internal_flight_record(conn, payload, username)
         return jsonify({'ok': True, 'flight': flight}), 201
     except LookupError as e:
@@ -695,6 +771,149 @@ def create_internal_flight():
         conn.rollback()
         if lock_name:
             conn.execute("SELECT RELEASE_LOCK(?)", (lock_name,))
+
+def _internal_flight_view(conn, user_id, flight_id):
+    flight = flight_integration.flight_snapshot(conn, user_id, flight_id)
+    if flight is None:
+        flight = flight_integration.cancelled_snapshot(conn, user_id, flight_id)
+    if flight is not None:
+        flight['refs'] = flight_integration.refs_for_flight(conn, user_id, flight_id)
+    return flight
+
+def _internal_request_user(conn):
+    """(user_id, error_response) for internal endpoints acting on the configured user."""
+    if not _internal_bearer_token_matches():
+        return None, (jsonify({'ok': False, 'error': 'unauthorized'}), 401)
+    if not _configured_internal_username():
+        return None, (jsonify({'ok': False, 'error': 'EVERFLY_INTERNAL_USERNAME is required'}), 500)
+    user_id = _internal_user_id(conn)
+    if not user_id:
+        return None, (jsonify({'ok': False, 'error': 'configured everfly user not found'}), 404)
+    return user_id, None
+
+@app.route('/api/internal/flights/lookup', methods=['GET'])
+@limiter.exempt
+def lookup_internal_flight():
+    """Find a flight by its source record, or by flight number and date."""
+    conn = database.get_db()
+    try:
+        user_id, error = _internal_request_user(conn)
+        if error:
+            return error
+        service = request.args.get('service', '').strip().lower()
+        external_id = request.args.get('id', '').strip()
+        flight_id = None
+        if service and external_id:
+            flight_id = flight_integration.find_ref(conn, user_id, service, external_id)
+        elif request.args.get('flightNumber') and request.args.get('date'):
+            number = _normalize_internal_flight_number(request.args.get('flightNumber'))
+            flight_id = flight_integration.find_by_number_and_date(conn, user_id, number, request.args.get('date').strip())
+        else:
+            return jsonify({'ok': False, 'error': 'service+id or flightNumber+date is required'}), 400
+        flight = _internal_flight_view(conn, user_id, flight_id) if flight_id else None
+        return jsonify({'ok': True, 'flight': flight})
+    except Exception as e:
+        return safe_jsonify_error(e)
+    finally:
+        conn.rollback()
+
+@app.route('/api/internal/flights/<int:flight_id>', methods=['PATCH'])
+@csrf.exempt
+@limiter.exempt
+def update_internal_flight(flight_id):
+    """Apply a confirmed change (new date and/or flight number) from another service.
+
+    Schedule and actual times belonged to the old flight, so they are cleared and the
+    AeroAPI jobs are rebuilt; a best-effort refill runs right away.
+    """
+    conn = database.get_db()
+    try:
+        user_id, error = _internal_request_user(conn)
+        if error:
+            return error
+        before = flight_integration.flight_snapshot(conn, user_id, flight_id)
+        if before is None:
+            cancelled = flight_integration.cancelled_snapshot(conn, user_id, flight_id)
+            if cancelled:
+                return jsonify({'ok': False, 'error': 'flight is cancelled', 'flight': cancelled}), 409
+            return jsonify({'ok': False, 'error': 'flight not found'}), 404
+        data = request.get_json(silent=True) or {}
+        payload, error = _normalize_internal_flight_payload({
+            'flightNumber': data.get('flightNumber') or before['flight_number'],
+            'date': data.get('date') or before['date'],
+        })
+        if error:
+            return jsonify({'ok': False, 'error': error}), 400
+        if payload['flight_number'] == before['flight_number'] and payload['date'] == before['date']:
+            return jsonify({'ok': True, 'changed': False, 'flight': _internal_flight_view(conn, user_id, flight_id)})
+        conn.execute(
+            """UPDATE flights SET date = ?, flight_number = ?, std = NULL, sta = NULL, atd = NULL, ata = NULL,
+                   dep_time_scheduled = NULL, arr_time_scheduled = NULL, dep_time_actual = NULL, arr_time_actual = NULL,
+                   duration_scheduled = NULL, duration_actual = NULL
+               WHERE id = ? AND user_id = ?""",
+            (payload['date'], payload['flight_number'], flight_id, user_id),
+        )
+        conn.execute("DELETE FROM flight_aeroapi_jobs WHERE flight_id = ? AND user_id = ?", (flight_id, user_id))
+        schedule_flight_aeroapi_jobs(conn, user_id, flight_id)
+        flight_integration.record_change(conn, user_id, flight_id, before, 'changed')
+        conn.commit()
+        refilled_from = flight_integration.flight_snapshot(conn, user_id, flight_id)
+        _run_as_user(user_id, lambda: _safely_auto_update_new_flight(flight_id))
+        if flight_integration.record_change(conn, user_id, flight_id, refilled_from, 'updated'):
+            conn.commit()
+        return jsonify({'ok': True, 'changed': True, 'flight': _internal_flight_view(conn, user_id, flight_id)})
+    except Exception as e:
+        conn.rollback()
+        return safe_jsonify_error(e)
+    finally:
+        conn.rollback()
+
+@app.route('/api/internal/flights/<int:flight_id>/cancel', methods=['POST'])
+@csrf.exempt
+@limiter.exempt
+def cancel_internal_flight(flight_id):
+    """Archive a cancelled flight: it leaves statistics and maps but stays recoverable."""
+    conn = database.get_db()
+    try:
+        user_id, error = _internal_request_user(conn)
+        if error:
+            return error
+        data = request.get_json(silent=True) or {}
+        existing = flight_integration.cancelled_snapshot(conn, user_id, flight_id)
+        if existing and flight_integration.flight_snapshot(conn, user_id, flight_id) is None:
+            return jsonify({'ok': True, 'alreadyCancelled': True, 'flight': existing})
+        summary = flight_integration.archive_flight(conn, user_id, flight_id,
+                                                    reason=str(data.get('reason') or ''), source=str(data.get('service') or ''))
+        if summary is None:
+            return jsonify({'ok': False, 'error': 'flight not found'}), 404
+        conn.commit()
+        return jsonify({'ok': True, 'flight': _internal_flight_view(conn, user_id, flight_id)})
+    except Exception as e:
+        conn.rollback()
+        return safe_jsonify_error(e)
+    finally:
+        conn.rollback()
+
+@app.route('/api/internal/flight-events', methods=['GET'])
+@limiter.exempt
+def list_internal_flight_events():
+    """Change feed for the configured user, read by cursor: ?after=<last id>&limit=<n>."""
+    conn = database.get_db()
+    try:
+        user_id, error = _internal_request_user(conn)
+        if error:
+            return error
+        try:
+            after = max(0, int(request.args.get('after') or 0))
+            limit = max(1, min(int(request.args.get('limit') or 100), 500))
+        except ValueError:
+            return jsonify({'ok': False, 'error': 'after and limit must be integers'}), 400
+        events = flight_integration.list_events(conn, user_id, after, limit)
+        return jsonify({'ok': True, 'events': events, 'nextCursor': events[-1]['id'] if events else after})
+    except Exception as e:
+        return safe_jsonify_error(e)
+    finally:
+        conn.rollback()
 
 # --- Helper Functions ---
 def query_db(query, args=(), one=False):
@@ -4390,8 +4609,14 @@ def run_due_aeroapi_jobs(limit=10, now_utc=None):
                 continue
 
             g.user = user
+            before = flight_integration.flight_snapshot(conn, uid, flight_id)
             result = update_single_flight_from_aeroapi(flight_id, force=False)
             summary = json.dumps(result, ensure_ascii=False)[:2000]
+            if result.get('success') and before is not None:
+                try:
+                    flight_integration.record_change(conn, uid, flight_id, before, 'aeroapi_filled')
+                except Exception as e:
+                    print(f"flight event error for flight {flight_id}: {e}")
 
             if result.get('ambiguous'):
                 _finish_aeroapi_job(conn, job_id, 'manual_required', attempt_count, summary=summary, error=result.get('message'))

@@ -52,6 +52,9 @@ class FakeConnection:
         if query.startswith('INSERT INTO internal_flight_requests'):
             self.events[(args[0],args[1])] = (args[2],args[3])
             return FakeCursor()
+        if "LEFT JOIN aircraft_models am" in query or "FROM flight_external_refs" in query:
+            # Integration snapshot / source lookups: not exercised by these tests.
+            return FakeCursor(None)
         if "FROM users" in query:
             return FakeCursor((7,))
         if query.startswith("INSERT INTO flights"):
