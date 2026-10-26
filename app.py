@@ -3725,7 +3725,7 @@ def get_detailed_flights():
 
     return jsonify(flights)
 
-def _run_ident_update(flight, f_num_clean, f_date, origin_tz_name, conn, uid, flight_id, force):
+def _run_ident_update(flight, f_num_clean, f_date, origin_tz_name, conn, uid, flight_id, force, refresh=False):
     """Precise update via /flights/{ident}. Only usable within AeroAPI's 2-day future window."""
     try:
         if origin_tz_name:
@@ -3820,7 +3820,7 @@ def _run_ident_update(flight, f_num_clean, f_date, origin_tz_name, conn, uid, fl
     update_values = []
 
     def add_update(col, val, current_val):
-        if val is not None and (force or not current_val):
+        if _should_write_aeroapi(col, val, current_val, force, refresh):
              update_fields.append(f"{col} = ?")
              update_values.append(val)
 
@@ -4021,7 +4021,7 @@ def _decide_aeroapi_strategy(flight, conn, uid, now_utc=None):
 
     return 'schedules_then_ident'
 
-def _run_schedule_update(flight, f_num_clean, f_date, conn, uid, flight_id, force):
+def _run_schedule_update(flight, f_num_clean, f_date, conn, uid, flight_id, force, refresh=False):
     """
     Coarse early update via /schedules, not limited to the 2-day future window
     (covers 3 months back / 1 year ahead). Only fills origin/dest airport, airline,
@@ -4074,10 +4074,10 @@ def _run_schedule_update(flight, f_num_clean, f_date, conn, uid, flight_id, forc
     api_std = to_local_str(sched.get('scheduled_out'), origin_tz)
     api_sta = to_local_str(sched.get('scheduled_in'), dest_tz)
 
-    if api_std and (force or not flight[4]):
+    if api_std and _should_write_aeroapi('std', api_std, flight[4], force, refresh):
         update_fields.append("std = ?")
         update_values.append(api_std)
-    if api_sta and (force or not flight[6]):
+    if api_sta and _should_write_aeroapi('sta', api_sta, flight[6], force, refresh):
         update_fields.append("sta = ?")
         update_values.append(api_sta)
 
@@ -4101,7 +4101,9 @@ def _run_schedule_update(flight, f_num_clean, f_date, conn, uid, flight_id, forc
         'identity_update': identity_update,
     }, sched
 
-def update_single_flight_from_aeroapi(flight_id, force=False):
+def update_single_flight_from_aeroapi(flight_id, force=False, refresh=False):
+    """force: overwrite everything AeroAPI returns (manual button).
+    refresh: scheduled jobs -- also replace AEROAPI_REFRESH_FIELDS that changed."""
     conn = database.get_db()
     uid = g.user['id']
     flight = _load_flight_for_aeroapi(conn, uid, flight_id)
@@ -4117,7 +4119,7 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
 
     # Strategy: Always fetch if forced, OR if missing critical data
     is_missing_data = not (flight[4] and flight[5] and flight[8])
-    if not force and not is_missing_data:
+    if not force and not refresh and not is_missing_data:
         return {'message': 'Skipped, data exists'}
 
     f_num_clean = f_num.replace(' ', '')
@@ -4125,17 +4127,17 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
 
     if strategy == 'ident':
         origin_tz_name = _get_airport_timezone(conn, flight[2], uid)
-        return _run_ident_update(flight, f_num_clean, f_date, origin_tz_name, conn, uid, flight_id, force)
+        return _run_ident_update(flight, f_num_clean, f_date, origin_tz_name, conn, uid, flight_id, force, refresh)
 
     if strategy == 'schedules':
-        result, _sched = _run_schedule_update(flight, f_num_clean, f_date, conn, uid, flight_id, force)
+        result, _sched = _run_schedule_update(flight, f_num_clean, f_date, conn, uid, flight_id, force, refresh)
         return result
 
     # 'schedules_then_ident': timezone genuinely unknown (no origin airport on file yet) --
     # resolve origin/dest/airline/times via /schedules first, then use that real
     # scheduled_out to decide whether it's now worth also running the precise
     # /flights/{ident} pass.
-    sched_result, sched = _run_schedule_update(flight, f_num_clean, f_date, conn, uid, flight_id, force)
+    sched_result, sched = _run_schedule_update(flight, f_num_clean, f_date, conn, uid, flight_id, force, refresh)
     if not sched:
         return sched_result
 
@@ -4154,7 +4156,7 @@ def update_single_flight_from_aeroapi(flight_id, force=False):
     # Now confirmed within 2 days -- layer the precise ident-based pass on top.
     flight = _load_flight_for_aeroapi(conn, uid, flight_id)
     new_origin_tz_name = _get_airport_timezone(conn, flight[2], uid)
-    ident_result = _run_ident_update(flight, f_num_clean, f_date, new_origin_tz_name, conn, uid, flight_id, force)
+    ident_result = _run_ident_update(flight, f_num_clean, f_date, new_origin_tz_name, conn, uid, flight_id, force, refresh)
 
     if ident_result.get('success'):
         return {
@@ -4285,6 +4287,26 @@ def _aeroapi_remote_values(best_match):
     }
 
 _ensure_terminal_in_db = flight_integration.add_airport_terminal
+
+# Fields the scheduled jobs take from AeroAPI even when already set: the airline can
+# retime a flight or change its terminal/aircraft after the booking. Airports and the
+# airline are never replaced this way -- a mismatch there means a wrong match.
+AEROAPI_REFRESH_FIELDS = ('std', 'sta', 'duration_scheduled', 'origin_terminal', 'dest_terminal', 'registration')
+
+
+def _aeroapi_value_differs(new, current):
+    def norm(value):
+        return str(value).replace('T', ' ')[:19].strip() if value is not None else ''
+    return norm(new) != norm(current)
+
+
+def _should_write_aeroapi(col, new, current, force, refresh):
+    if new is None:
+        return False
+    if force or not current:
+        return True
+    return refresh and col in AEROAPI_REFRESH_FIELDS and _aeroapi_value_differs(new, current)
+
 
 def collect_aeroapi_related_updates(best_match, flight, conn, uid):
     update_fields = []
@@ -4657,7 +4679,8 @@ def run_due_aeroapi_jobs(limit=10, now_utc=None):
 
             g.user = user
             before = flight_integration.flight_snapshot(conn, uid, flight_id)
-            result = update_single_flight_from_aeroapi(flight_id, force=False)
+            # Jobs refresh schedule/terminal/registration changes too; everTravel reads them as change events.
+            result = update_single_flight_from_aeroapi(flight_id, force=False, refresh=True)
             summary = json.dumps(result, ensure_ascii=False)[:2000]
             if result.get('success') and before is not None:
                 try:
