@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from cryptography.fernet import Fernet
 import database
 import flight_integration
+import sso
 import requests
 import dateutil.parser
 import airportsdata
@@ -289,9 +290,31 @@ with app.app_context():
     migrate_flights_track_data()
     migrate_flight_integration_tables()
 
+# Optional single sign-on through a trusted cookie from a sibling app (see sso.py).
+SSO_CONFIG = sso.config()
+
+
+def _sso_cookie_present():
+    return bool(SSO_CONFIG and request.cookies.get(SSO_CONFIG['cookie_name']))
+
+
+def _load_sso_user():
+    if not SSO_CONFIG or request.endpoint == 'static':
+        return None
+    username = sso.username_for_token(request.cookies.get(SSO_CONFIG['cookie_name'], ''), SSO_CONFIG)
+    if not username:
+        return None
+    conn = database.get_users_db()
+    try:
+        return conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+    finally:
+        conn.close()
+
+
 # --- Auth Middleware ---
 @app.before_request
 def load_logged_in_user():
+    g.via_sso = False
     user_id = session.get('user_id')
     if user_id is None:
         g.user = None
@@ -314,6 +337,9 @@ def load_logged_in_user():
                 # already-logged-in users gain the 30-day cookie without having
                 # to log in again after a deploy.
                 session.permanent = True
+    if g.user is None:
+        g.user = _load_sso_user()
+        g.via_sso = g.user is not None
 
 @app.teardown_appcontext
 def close_connection(exception):
@@ -401,7 +427,10 @@ def login():
 
         flash(error, 'error')
 
-    return render_template('login.html')
+    sso_login = None
+    if SSO_CONFIG:
+        sso_login = {'url': sso.login_url(SSO_CONFIG, url_for('index', _external=True)), 'name': SSO_CONFIG['provider_name']}
+    return render_template('login.html', sso_login=sso_login)
 
 @app.route('/api/profile/update', methods=['POST'])
 @login_required
@@ -474,6 +503,11 @@ def save_api_key():
 @app.route('/logout')
 def logout():
     session.clear()
+    # Signed in through SSO: log out at the provider too, or the cookie logs us straight back in.
+    if _sso_cookie_present():
+        target = sso.logout_url(SSO_CONFIG, url_for('index', _external=True))
+        if target:
+            return redirect(target)
     return redirect(url_for('login'))
 
 @app.route('/')

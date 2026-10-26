@@ -96,6 +96,10 @@
         {% endif %}
         {% endwith %}
 
+        {% if sso_login %}
+        <a href="{{ sso_login.url }}" class="btn btn-primary btn-block" style="display:block;text-align:center;text-decoration:none;box-sizing:border-box;margin-bottom:20px;">Sign in with {{ sso_login.name }}</a>
+        <p style="text-align:center;color:#888;font-size:0.9em;margin:0 0 20px;">or use an everfly account</p>
+        {% endif %}
         <form method="post">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
             <div class="form-group">
