@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone
 
 
@@ -99,6 +100,7 @@ class SessionPersistenceTest(unittest.TestCase):
         response = self._login(client)
 
         self.assertEqual(302, response.status_code)
+        self.assertEqual("/", response.headers["Location"])
         set_cookie = response.headers.get("Set-Cookie", "")
         self.assertIn("Secure", set_cookie)
         self.assertIn("HttpOnly", set_cookie)
@@ -113,6 +115,20 @@ class SessionPersistenceTest(unittest.TestCase):
         lifetime = (expires - datetime.now(timezone.utc)).total_seconds()
         self.assertGreater(lifetime, 29 * 24 * 3600)
         self.assertLessEqual(lifetime, 30 * 24 * 3600 + 60)
+
+    def test_sso_login_returns_to_homepage(self):
+        config = {
+            "login_url": "https://travel.example.com/auth/sso",
+            "provider_name": "Test SSO",
+            "cookie_name": "test_sso",
+        }
+        with patch("app.SSO_CONFIG", config):
+            response = self._get(self._client(), "/login")
+        self.assertEqual(200, response.status_code)
+        self.assertIn(
+            b"https://travel.example.com/auth/sso?next=https%3A%2F%2Flocalhost%2F\"",
+            response.data,
+        )
 
     def test_session_carries_user_and_auth_epoch(self):
         client = self._client()

@@ -510,10 +510,11 @@ def logout():
             return redirect(target)
     return redirect(url_for('login'))
 
-@app.route('/')
 @app.route('/profile')
 @app.route('/flights')
 @app.route('/library')
+# Register the homepage first so url_for('index') uses it for login and SSO.
+@app.route('/')
 @login_required
 def index():
     # Pass user info to template for profile display
