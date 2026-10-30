@@ -54,7 +54,7 @@ jobs:
           MASTER_SECRET_KEY: yQfOtmNHMhk_0T_Bq0ZyJPBC5nTrwT4GrIaeAt1CexM=
         run: python -m unittest discover -s tests -v
 
-      - name: Test airport statistics interactions
+      - name: Test location statistics interactions
         run: node tests/test_airport_stats_modal.js
 
   docker:

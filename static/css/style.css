@@ -2000,14 +2000,14 @@ tr:hover { background: #f5f9ff; }
     font-weight: 900;
 }
 
-.airport-stats-filters {
+.stats-category-filters {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     margin-bottom: 12px;
 }
 
-.airport-stats-summary {
+.stats-category-summary {
     margin: 0 0 16px;
     color: var(--text-muted);
     font-size: .84rem;

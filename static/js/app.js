@@ -4203,7 +4203,8 @@ function renderLibraryOverview() {
 
 window.handleLocationClick = (title, topKey) => {
     if (State.cache.stats && State.cache.stats.top) {
-        showStatsModal(title, State.cache.stats.top[topKey]);
+        const stats = State.cache.stats;
+        showStatsModal(title, stats.top[topKey], topKey === 'countries' ? stats : null, 'countries');
     }
 };
 
@@ -4237,7 +4238,6 @@ const renderStatsDashboard = (stats, container) => {
     locCard.onclick = () => showStatsModal('Top Airports', stats.top.airports, stats);
 
     const locRows = [
-        { label: 'Continents', count: stats.totals.continents, topKey: 'continents', title: 'Top Continents' },
         { label: 'Countries', count: stats.totals.countries, topKey: 'countries', title: 'Top Countries' },
         { label: 'Cities', count: stats.totals.cities, topKey: 'cities', title: 'Top Cities' },
         { label: 'Routes', count: stats.totals.routes, topKey: 'routes', title: 'Top Routes' }
@@ -4345,7 +4345,7 @@ const renderStatsDashboard = (stats, container) => {
     container.appendChild(acCard);
 };
 
-const showStatsModal = (title, data, airportStats = null) => {
+const showStatsModal = (title, data, categoryStats = null, categoryGroup = 'airports') => {
     openModal(title, () => {
         const content = document.createElement('div');
         const d = document.createElement('div');
@@ -4370,15 +4370,18 @@ const showStatsModal = (title, data, airportStats = null) => {
                 d.appendChild(row);
             });
         };
-        if (airportStats) {
+        if (categoryStats) {
             const filters = document.createElement('div');
-            filters.className = 'airport-stats-filters';
+            filters.className = 'stats-category-filters';
             filters.setAttribute('role', 'group');
-            filters.setAttribute('aria-label', 'Airport category');
+            filters.setAttribute('aria-label', categoryGroup === 'countries' ? 'Geographic category' : 'Airport category');
             const summary = document.createElement('p');
-            summary.className = 'airport-stats-summary';
+            summary.className = 'stats-category-summary';
             summary.setAttribute('role', 'status');
-            const categories = [
+            const categories = categoryGroup === 'countries' ? [
+                { key: 'countries', label: 'Countries' },
+                { key: 'continents', label: 'Continents' }
+            ] : [
                 { key: 'airports', label: 'All airports' },
                 { key: 'airports_departure', label: 'Departure airports' },
                 { key: 'airports_arrival', label: 'Arrival airports' }
@@ -4398,8 +4401,8 @@ const showStatsModal = (title, data, airportStats = null) => {
                     button.setAttribute('aria-pressed', String(selected));
                     button.className = selected ? 'btn btn-primary' : 'btn btn-secondary';
                 });
-                summary.textContent = `${category.label} · ${formatCompactNumber(airportStats.totals[category.key] || 0)}`;
-                renderRows(airportStats.top[category.key]);
+                summary.textContent = `${category.label} · ${formatCompactNumber(categoryStats.totals[category.key] || 0)}`;
+                renderRows(categoryStats.top[category.key]);
             };
             content.appendChild(filters);
             content.appendChild(summary);
