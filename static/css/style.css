@@ -2000,6 +2000,19 @@ tr:hover { background: #f5f9ff; }
     font-weight: 900;
 }
 
+.airport-stats-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.airport-stats-summary {
+    margin: 0 0 16px;
+    color: var(--text-muted);
+    font-size: .84rem;
+}
+
 .aviation-world-empty {
     color: #7b8ea5;
     font-size: .84rem;

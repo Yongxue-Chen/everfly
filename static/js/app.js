@@ -4234,14 +4234,12 @@ const renderStatsDashboard = (stats, container) => {
     // --- Card 1: Locations ---
     const locCard = document.createElement('article');
     locCard.className = 'aviation-world-card aviation-world-teal';
-    locCard.onclick = () => showStatsModal('Top Airports', stats.top.airports);
+    locCard.onclick = () => showStatsModal('Top Airports', stats.top.airports, stats);
 
     const locRows = [
         { label: 'Continents', count: stats.totals.continents, topKey: 'continents', title: 'Top Continents' },
         { label: 'Countries', count: stats.totals.countries, topKey: 'countries', title: 'Top Countries' },
         { label: 'Cities', count: stats.totals.cities, topKey: 'cities', title: 'Top Cities' },
-        { label: 'Departure Airports', count: stats.totals.airports_departure || 0, topKey: 'airports_departure', title: 'Top Departure Airports' },
-        { label: 'Arrival Airports', count: stats.totals.airports_arrival || 0, topKey: 'airports_arrival', title: 'Top Arrival Airports' },
         { label: 'Routes', count: stats.totals.routes, topKey: 'routes', title: 'Top Routes' }
     ];
 
@@ -4347,28 +4345,70 @@ const renderStatsDashboard = (stats, container) => {
     container.appendChild(acCard);
 };
 
-const showStatsModal = (title, data) => {
+const showStatsModal = (title, data, airportStats = null) => {
     openModal(title, () => {
+        const content = document.createElement('div');
         const d = document.createElement('div');
         d.style.maxHeight = '60vh'; d.style.overflowY = 'auto'; d.style.paddingRight = '10px';
-        if (!data || data.length === 0) {
-            d.innerHTML = '<p style="padding:10px; color:#666">No data available.</p>';
-            return d;
+        const renderRows = rows => {
+            d.innerHTML = '';
+            if (!rows || rows.length === 0) {
+                d.innerHTML = '<p style="padding:10px; color:#666">No data available.</p>';
+                return;
+            }
+            const max = Math.max(...rows.map(d => d.count), 1);
+            rows.forEach(item => {
+                const row = document.createElement('div');
+                row.className = 'chart-row';
+                const pct = (item.count / max) * 100;
+                const extra = item.extra ? ` <small style='color:#999; margin-left:5px;'>${escapeHtml(item.extra)}</small>` : '';
+                row.innerHTML = `
+                    <div class="chart-label" title="${escapeHtml(item.name)}">${escapeHtml(item.name || 'Unknown')}${extra}</div>
+                    <div class="chart-bar-bg"><div class="chart-bar" style="width:${pct}%"></div></div>
+                    <div class="chart-val">${item.count}</div>
+                `;
+                d.appendChild(row);
+            });
+        };
+        if (airportStats) {
+            const filters = document.createElement('div');
+            filters.className = 'airport-stats-filters';
+            filters.setAttribute('role', 'group');
+            filters.setAttribute('aria-label', 'Airport category');
+            const summary = document.createElement('p');
+            summary.className = 'airport-stats-summary';
+            summary.setAttribute('role', 'status');
+            const categories = [
+                { key: 'airports', label: 'All airports' },
+                { key: 'airports_departure', label: 'Departure airports' },
+                { key: 'airports_arrival', label: 'Arrival airports' }
+            ];
+            const buttons = categories.map(category => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'btn btn-secondary';
+                button.textContent = category.label;
+                button.onclick = () => selectCategory(category);
+                filters.appendChild(button);
+                return button;
+            });
+            const selectCategory = category => {
+                buttons.forEach((button, index) => {
+                    const selected = categories[index].key === category.key;
+                    button.setAttribute('aria-pressed', String(selected));
+                    button.className = selected ? 'btn btn-primary' : 'btn btn-secondary';
+                });
+                summary.textContent = `${category.label} · ${formatCompactNumber(airportStats.totals[category.key] || 0)}`;
+                renderRows(airportStats.top[category.key]);
+            };
+            content.appendChild(filters);
+            content.appendChild(summary);
+            selectCategory(categories[0]);
+        } else {
+            renderRows(data);
         }
-        const max = Math.max(...data.map(d => d.count), 1);
-        data.forEach(item => {
-            const row = document.createElement('div');
-            row.className = 'chart-row';
-            const pct = (item.count / max) * 100;
-            const extra = item.extra ? ` <small style='color:#999; margin-left:5px;'>${escapeHtml(item.extra)}</small>` : '';
-            row.innerHTML = `
-                <div class="chart-label" title="${escapeHtml(item.name)}">${escapeHtml(item.name || 'Unknown')}${extra}</div>
-                <div class="chart-bar-bg"><div class="chart-bar" style="width:${pct}%"></div></div>
-                <div class="chart-val">${item.count}</div>
-            `;
-            d.appendChild(row);
-        });
-        return d;
+        content.appendChild(d);
+        return content;
     });
 };
 
