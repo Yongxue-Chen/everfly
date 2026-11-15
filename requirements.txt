@@ -22,7 +22,7 @@ PyMySQL==1.2.0
 
 # Crypto — encrypts users' stored FlightAware API keys.
 # Read the changelog before bumping across a major version.
-cryptography==49.0.0
+cryptography==50.0.2
 
 # Configuration
 python-dotenv==1.2.1
