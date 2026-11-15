@@ -43,7 +43,7 @@ everfly 是一个自托管的 Flask Web 应用，用于记录、管理和可视�
 
 ## 快速开始
 
-需要 Python 3.9+ 和一个可访问的 MySQL 8.0+ 服务（已在 MySQL 9 上验证）。生产镜像基于 `python:3.9-slim` 构建。
+需要 Python 3.12+ 和一个可访问的 MySQL 8.0+ 服务（已在 MySQL 9 上验证）。生产镜像基于 `python:3.12-slim` 构建，并以非 root 用户运行。
 
 ```bash
 git clone https://github.com/Yongxue-Chen/everfly.git

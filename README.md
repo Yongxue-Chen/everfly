@@ -43,8 +43,8 @@ Key files:
 
 ## Quick start
 
-Requires Python 3.9+ and a reachable MySQL 8.0+ server (tested through MySQL 9).
-The production image is built on `python:3.9-slim`.
+Requires Python 3.12+ and a reachable MySQL 8.0+ server (tested through MySQL 9).
+The production image is built on `python:3.12-slim` and runs as a non-root user.
 
 ```bash
 git clone https://github.com/Yongxue-Chen/everfly.git

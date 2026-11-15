@@ -23,9 +23,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.9 is what the production image runs; 3.12 catches deprecations
+        # 3.12 is what the production image runs; 3.13 catches deprecations
         # early so a base-image bump is not a surprise.
-        python-version: ['3.9', '3.12']
+        python-version: ['3.12', '3.13']
 
     steps:
       - uses: actions/checkout@v4
