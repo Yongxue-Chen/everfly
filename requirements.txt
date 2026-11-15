@@ -34,5 +34,5 @@ requests==2.32.5
 # airportsdata is a dataset release; bumping it changes airport lookups.
 airportsdata==20250909
 pycountry==24.6.1
-python-dateutil==2.9.0.post0
+python-dateutil==4.0.0
 pytz==2026.2
