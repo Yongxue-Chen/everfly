@@ -3,6 +3,10 @@ updates:
   - package-ecosystem: pip
     directory: /
     schedule: { interval: weekly }
+    # Major upgrades need a human; keep the automated PRs to minor and patch.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
     groups:
       python-minor-and-patch:
